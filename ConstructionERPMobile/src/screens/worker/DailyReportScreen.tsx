@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useLocation } from '../../store/context/LocationContext';
+import { useAuth } from '../../store/context/AuthContext';
 import { useOffline } from '../../store/context/OfflineContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
 import { 
@@ -42,15 +43,19 @@ interface DailyReportScreenProps {
 }
 
 const DailyReportScreen: React.FC = () => {
+  const { state: authState } = useAuth();
   const route = useRoute();
   const navigation = useNavigation();
   const { reportId, projectId } = (route.params as any) || {};
   const { isOnline } = useOffline();
 
+  // Get project ID from auth state or route params
+  const currentProjectId = projectId || authState.user?.currentProject?.id || 1;
+
   // Form state matching API specification
   const [formData, setFormData] = useState<CreateDailyReportRequest>({
     date: new Date().toISOString().split('T')[0],
-    projectId: projectId || 1,
+    projectId: currentProjectId,
     workArea: '',
     floor: '',
     summary: '',

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../../store/context/AuthContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
 
@@ -65,6 +66,7 @@ const COMMON_DURATIONS = ['1 day', '3 days', '1 week', '2 weeks', '1 month', 'Un
 
 const ToolRequestScreen: React.FC = () => {
   const navigation = useNavigation();
+  const { state: authState } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   
   // Form state
@@ -138,7 +140,7 @@ const ToolRequestScreen: React.FC = () => {
       }
 
       const response = await workerApiService.submitToolRequest({
-        projectId: 1, // This should come from context/props
+        projectId: authState.user?.currentProject?.id || 1, // Use current project ID
         itemName: firstTool.name,
         itemCategory: 'other' as const, // Default category, could be made selectable
         quantity: firstTool.quantity,

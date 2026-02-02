@@ -178,16 +178,17 @@ export class WorkerApiService {
       // Handle different response structures
       if (response.success && response.data) {
         let rawTasks: any[] = [];
+        const data = response.data as any; // Type assertion for flexibility
         
         // Check if response.data has tasks array (dashboard format)
-        if (response.data.tasks && Array.isArray(response.data.tasks)) {
-          console.log('📋 Found tasks in dashboard format:', response.data.tasks.length);
-          rawTasks = response.data.tasks;
+        if (data.tasks && Array.isArray(data.tasks)) {
+          console.log('📋 Found tasks in dashboard format:', data.tasks.length);
+          rawTasks = data.tasks;
         }
         // Check if response.data is directly an array of tasks
-        else if (Array.isArray(response.data)) {
-          console.log('📋 Found tasks as direct array:', response.data.length);
-          rawTasks = response.data;
+        else if (Array.isArray(data)) {
+          console.log('📋 Found tasks as direct array:', data.length);
+          rawTasks = data;
         }
         
         // Map API response to TaskAssignment interface
@@ -195,7 +196,7 @@ export class WorkerApiService {
           // Map API response fields to TaskAssignment interface
           const mappedTask: TaskAssignment = {
             assignmentId: task.assignmentId || task.id || 0,
-            projectId: response.data.project?.id || 1, // Get from project data
+            projectId: data.project?.id || 1, // Get from project data
             taskName: task.taskName || task.name || 'Unknown Task',
             description: task.description || '',
             dependencies: task.dependencies || [],

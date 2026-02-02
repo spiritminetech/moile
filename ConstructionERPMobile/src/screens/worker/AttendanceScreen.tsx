@@ -89,8 +89,8 @@ const AttendanceScreen: React.FC = () => {
         setAttendanceStatus({
           currentSession,
           todaysAttendance: currentSession ? [currentSession] : [],
-          canClockIn: data.session === 'NOT_LOGGED_IN' && locationState.isGeofenceValid,
-          canClockOut: data.session === 'CHECKED_IN' && locationState.isGeofenceValid,
+          canClockIn: data.session === 'NOT_LOGGED_IN' || data.session === 'CHECKED_OUT',
+          canClockOut: data.session === 'CHECKED_IN',
         });
       }
     } catch (error) {
@@ -101,11 +101,17 @@ const AttendanceScreen: React.FC = () => {
   }, [authState.user, offlineState.isOnline, locationState.isGeofenceValid, clearError, handleApiError]);
 
   const updateAttendanceButtons = useCallback(() => {
-    setAttendanceStatus(prev => ({
-      ...prev,
-      canClockIn: !prev.currentSession && locationState.isGeofenceValid,
-      canClockOut: !!prev.currentSession && locationState.isGeofenceValid,
-    }));
+    // Only update if we have valid location data
+    // Don't override the API-based session state
+    if (!locationState.isGeofenceValid) {
+      setAttendanceStatus(prev => ({
+        ...prev,
+        canClockIn: false,
+        canClockOut: false,
+      }));
+    }
+    // If geofence is valid, keep the current API-based state
+    // The API response should determine canClockIn/canClockOut based on session
   }, [locationState.isGeofenceValid]);
 
   const handleAttendanceAction = async (type: AttendanceType) => {
@@ -119,20 +125,24 @@ const AttendanceScreen: React.FC = () => {
     // Get project ID - try multiple sources
     let projectId: string | null = null;
     
-    // Try to get from user's current project
+    console.log('🔍 DEBUG: Project ID selection:');
+    console.log('  authState.user?.currentProject:', authState.user?.currentProject);
+    console.log('  authState.company?.id:', authState.company?.id);
+    
+    // Try to get from user's current project (CORRECT SOURCE)
     if (authState.user?.currentProject?.id) {
       projectId = authState.user.currentProject.id.toString();
       console.log('📍 Using project ID from user.currentProject:', projectId);
     }
-    // Try to get from company data (fallback)
+    // Fallback: Try to get from company data (NOT RECOMMENDED)
     else if (authState.company?.id) {
       projectId = authState.company.id.toString();
-      console.log('📍 Using project ID from company:', projectId);
+      console.log('📍 Using project ID from company (fallback):', projectId);
     }
-    // Use default project ID (last resort)
+    // Last resort: Use default project ID 1 (FALLBACK ONLY)
     else {
       projectId = '1';
-      console.log('📍 Using default project ID:', projectId);
+      console.log('📍 Using default project ID (last resort):', projectId);
     }
 
     if (!projectId) {
@@ -318,7 +328,7 @@ const AttendanceScreen: React.FC = () => {
           } : null}
         />
         <GeofenceValidator 
-          projectId={authState.user?.id || 1}
+          projectId={authState.user?.currentProject?.id || 1}
           onValidationChange={(isValid) => {
             // Update location state based on validation
           }}
