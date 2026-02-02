@@ -73,6 +73,68 @@ export const validateLoginForm = (email: string, password: string): ValidationRe
   };
 };
 
+export const validatePasswordStrength = (password: string): ValidationResult => {
+  const errors: string[] = [];
+
+  if (!validateRequired(password)) {
+    errors.push('Password is required');
+    return { isValid: false, errors };
+  }
+
+  if (!validateMinLength(password, 8)) {
+    errors.push('Password must be at least 8 characters long');
+  }
+
+  if (!/(?=.*[a-z])/.test(password)) {
+    errors.push('Password must contain at least one lowercase letter');
+  }
+
+  if (!/(?=.*[A-Z])/.test(password)) {
+    errors.push('Password must contain at least one uppercase letter');
+  }
+
+  if (!/(?=.*\d)/.test(password)) {
+    errors.push('Password must contain at least one number');
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+  };
+};
+
+export const validatePasswordChange = (
+  oldPassword: string,
+  newPassword: string,
+  confirmPassword: string
+): ValidationResult => {
+  const errors: string[] = [];
+
+  if (!validateRequired(oldPassword)) {
+    errors.push('Current password is required');
+  }
+
+  const passwordValidation = validatePasswordStrength(newPassword);
+  if (!passwordValidation.isValid) {
+    errors.push(...passwordValidation.errors);
+  }
+
+  if (!validateRequired(confirmPassword)) {
+    errors.push('Please confirm your new password');
+  } else if (newPassword !== confirmPassword) {
+    errors.push('Passwords do not match');
+  }
+
+  if (oldPassword === newPassword) {
+    errors.push('New password must be different from current password');
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+  };
+};
+
 export const validateTaskProgress = (progress: number): ValidationResult => {
   const errors: string[] = [];
 

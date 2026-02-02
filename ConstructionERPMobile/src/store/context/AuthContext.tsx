@@ -1,5 +1,3 @@
-// Authentication Context Provider
-
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { AuthState, User, Company } from '../../types';
 import { authService, LoginCredentials } from '../../services/api/AuthService';
@@ -30,86 +28,25 @@ export type AuthAction =
   | { type: 'UPDATE_USER'; payload: User }
   | { type: 'RESTORE_AUTH'; payload: { user: User; company: Company; token: string; refreshToken: string; tokenExpiry: Date; permissions: string[] } };
 
-// Auth reducer
+// Reducer
 const authReducer = (state: AuthState, action: AuthAction): AuthState => {
   switch (action.type) {
     case 'LOGIN_START':
-      return {
-        ...state,
-        isLoading: true,
-        error: null,
-        requiresCompanySelection: false,
-        availableCompanies: [],
-      };
+      return { ...state, isLoading: true, error: null, requiresCompanySelection: false, availableCompanies: [] };
     case 'LOGIN_SUCCESS':
-      return {
-        ...state,
-        isAuthenticated: true,
-        user: action.payload.user,
-        company: action.payload.company,
-        token: action.payload.token,
-        refreshToken: action.payload.refreshToken,
-        tokenExpiry: action.payload.tokenExpiry,
-        permissions: action.payload.permissions,
-        isLoading: false,
-        error: null,
-        requiresCompanySelection: false,
-        availableCompanies: [],
-      };
+      return { ...state, isAuthenticated: true, ...action.payload, isLoading: false, error: null, requiresCompanySelection: false, availableCompanies: [] };
     case 'LOGIN_FAILURE':
-      return {
-        ...state,
-        isAuthenticated: false,
-        user: null,
-        company: null,
-        token: null,
-        refreshToken: null,
-        tokenExpiry: null,
-        permissions: [],
-        isLoading: false,
-        error: action.payload,
-        requiresCompanySelection: false,
-        availableCompanies: [],
-      };
+      return { ...state, isAuthenticated: false, user: null, company: null, token: null, refreshToken: null, tokenExpiry: null, permissions: [], isLoading: false, error: action.payload, requiresCompanySelection: false, availableCompanies: [] };
     case 'COMPANY_SELECTION_REQUIRED':
-      return {
-        ...state,
-        isLoading: false,
-        error: null,
-        requiresCompanySelection: true,
-        availableCompanies: action.payload.companies,
-      };
+      return { ...state, isLoading: false, error: null, requiresCompanySelection: true, availableCompanies: action.payload.companies };
     case 'LOGOUT':
-      return {
-        ...initialAuthState,
-        isLoading: false,
-      };
+      return { ...initialAuthState, isLoading: false };
     case 'TOKEN_REFRESH':
-      return {
-        ...state,
-        token: action.payload.token,
-        tokenExpiry: action.payload.tokenExpiry,
-      };
+      return { ...state, token: action.payload.token, tokenExpiry: action.payload.tokenExpiry };
     case 'UPDATE_USER':
-      return {
-        ...state,
-        user: action.payload,
-      };
+      return { ...state, user: action.payload };
     case 'RESTORE_AUTH':
-      return {
-        ...state,
-        isAuthenticated: true,
-        user: action.payload.user,
-        company: action.payload.company,
-        token: action.payload.token,
-        refreshToken: action.payload.refreshToken,
-        tokenExpiry: action.payload.tokenExpiry,
-        permissions: action.payload.permissions,
-        isLoading: false,
-        error: null,
-        requiresCompanySelection: false,
-        availableCompanies: [],
-      };
+      return { ...state, isAuthenticated: true, ...action.payload, isLoading: false, error: null, requiresCompanySelection: false, availableCompanies: [] };
     default:
       return state;
   }
@@ -130,52 +67,44 @@ interface AuthContextType {
 // Create context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Provider component
-interface AuthProviderProps {
-  children: ReactNode;
-}
+// Provider props
+interface AuthProviderProps { children: ReactNode; }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
 
-  // Restore authentication state on app start
-  useEffect(() => {
-    restoreAuthState();
-  }, []);
+  // Restore auth on mount
+  useEffect(() => { restoreAuthState(); }, []);
 
-  const login = async (credentials: LoginCredentials): Promise<void> => {
+  const login = async (credentials: LoginCredentials) => {
     try {
       dispatch({ type: 'LOGIN_START' });
       
-      const loginResponse = await authService.login(credentials);
+      const response = await authService.login(credentials);
       
-      // Handle company selection requirement
-      if (!loginResponse.autoSelected && loginResponse.companies) {
-        dispatch({
-          type: 'COMPANY_SELECTION_REQUIRED',
-          payload: {
-            companies: loginResponse.companies,
-            userId: loginResponse.userId!,
-          },
-        });
-        return;
-      }
-      
-      // Handle successful auto-selected login
-      if (loginResponse.autoSelected && loginResponse.token) {
-        const tokenExpiry = new Date(Date.now() + loginResponse.expiresIn! * 1000);
-        
+      if (response.success && response.user && response.company && response.token) {
         dispatch({
           type: 'LOGIN_SUCCESS',
           payload: {
-            user: loginResponse.user!,
-            company: loginResponse.company!,
-            token: loginResponse.token,
-            refreshToken: loginResponse.refreshToken!,
-            tokenExpiry,
-            permissions: loginResponse.permissions || [],
+            user: response.user,
+            company: response.company,
+            token: response.token,
+            refreshToken: response.refreshToken || response.token,
+            tokenExpiry: new Date(Date.now() + (response.expiresIn || 3600) * 1000),
+            permissions: response.permissions || [],
           },
         });
+      } else if (response.companies && response.companies.length > 1) {
+        // Multi-company user needs to select company
+        dispatch({
+          type: 'COMPANY_SELECTION_REQUIRED',
+          payload: {
+            companies: response.companies,
+            userId: response.userId || 0,
+          },
+        });
+      } else {
+        throw new Error('Invalid login response');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Login failed';
@@ -184,30 +113,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const selectCompany = async (companyId: number): Promise<void> => {
+  const selectCompany = async (companyId: number) => {
     try {
-      if (!state.availableCompanies || state.availableCompanies.length === 0) {
-        throw new Error('No companies available for selection');
-      }
-
-      // Find userId from previous login attempt (stored temporarily)
-      // In a real implementation, you might store this differently
+      dispatch({ type: 'LOGIN_START' });
+      
+      // Get userId from available companies context (you might need to store this)
       const userId = 1; // This should come from the previous login response
       
       const response = await authService.selectCompany(userId, companyId);
-      const tokenExpiry = new Date(Date.now() + response.expiresIn! * 1000);
       
-      dispatch({
-        type: 'LOGIN_SUCCESS',
-        payload: {
-          user: response.user!,
-          company: response.company!,
-          token: response.token!,
-          refreshToken: response.refreshToken!,
-          tokenExpiry,
-          permissions: response.permissions || [],
-        },
-      });
+      if (response.success && response.user && response.company && response.token) {
+        dispatch({
+          type: 'LOGIN_SUCCESS',
+          payload: {
+            user: response.user,
+            company: response.company,
+            token: response.token,
+            refreshToken: response.refreshToken || response.token,
+            tokenExpiry: new Date(Date.now() + (response.expiresIn || 3600) * 1000),
+            permissions: response.permissions || [],
+          },
+        });
+      } else {
+        throw new Error('Company selection failed');
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Company selection failed';
       dispatch({ type: 'LOGIN_FAILURE', payload: errorMessage });
@@ -215,46 +144,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const logout = async (): Promise<void> => {
+  const logout = async () => {
     try {
       await authService.logout();
-      dispatch({ type: 'LOGOUT' });
     } catch (error) {
-      // Even if logout fails, clear local state
+      console.warn('Logout error:', error);
+    } finally {
       dispatch({ type: 'LOGOUT' });
-      console.error('Logout error:', error);
     }
   };
 
-  const refreshToken = (token: string, tokenExpiry: Date) => {
-    dispatch({
-      type: 'TOKEN_REFRESH',
-      payload: { token, tokenExpiry },
-    });
-  };
-
-  const updateUser = (user: User) => {
-    dispatch({ type: 'UPDATE_USER', payload: user });
-  };
-
-  const restoreAuthState = async (): Promise<void> => {
+  const restoreAuthState = async () => {
     try {
       const isAuthenticated = await authService.isAuthenticated();
       
       if (isAuthenticated) {
-        const user = await authService.getStoredUser();
-        const company = await authService.getStoredCompany();
-        const permissions = await authService.getStoredPermissions();
-        const tokens = await authService.getStoredTokens();
+        const [user, company, tokens, permissions] = await Promise.all([
+          authService.getStoredUser(),
+          authService.getStoredCompany(),
+          authService.getStoredTokens(),
+          authService.getStoredPermissions(),
+        ]);
         
-        if (user && company && tokens.token && tokens.refreshToken && tokens.tokenExpiry) {
+        if (user && company && tokens.token && tokens.tokenExpiry) {
           dispatch({
             type: 'RESTORE_AUTH',
             payload: {
               user,
               company,
               token: tokens.token,
-              refreshToken: tokens.refreshToken,
+              refreshToken: tokens.refreshToken || tokens.token,
               tokenExpiry: tokens.tokenExpiry,
               permissions,
             },
@@ -262,33 +181,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
       }
     } catch (error) {
-      console.error('Failed to restore auth state:', error);
-      // If restoration fails, ensure we're in logged out state
+      console.warn('Failed to restore auth state:', error);
       dispatch({ type: 'LOGOUT' });
     }
   };
 
-  const value: AuthContextType = {
-    state,
-    dispatch,
-    login,
-    selectCompany,
-    logout,
-    refreshToken,
-    updateUser,
-    restoreAuthState,
+  const refreshToken = (token: string, tokenExpiry: Date) => { 
+    dispatch({ type: 'TOKEN_REFRESH', payload: { token, tokenExpiry } }); 
+  };
+  
+  const updateUser = (user: User) => { 
+    dispatch({ type: 'UPDATE_USER', payload: user }); 
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ state, dispatch, login, selectCompany, logout, refreshToken, updateUser, restoreAuthState }}>{children}</AuthContext.Provider>;
 };
 
-// Custom hook to use auth context
+// Hook
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
-
-export default AuthContext;

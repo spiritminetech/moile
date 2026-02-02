@@ -153,7 +153,7 @@ class AuthService {
         loginData = response.data;
         console.log('🔍 Using API format: success + data');
       }
-      else if (response.token || response.user) {
+      else if ((response as any).token || (response as any).user) {
         isSuccess = true;
         loginData = response as any;
         console.log('🔍 Using API format: direct response');
@@ -164,7 +164,7 @@ class AuthService {
       }
 
       if (!isSuccess) {
-        throw new Error(response.message || loginData.message || 'Login failed');
+        throw new Error((response as any).message || (loginData as any).message || 'Login failed');
       }
 
       // 🔍 DEBUG: Log processed login data
@@ -217,10 +217,10 @@ class AuthService {
         };
 
         // Create company object
-        const finalCompany = {
+        const finalCompany = company ? {
           ...company,
           role: companyRole,
-        } || {
+        } : {
           id: 1,
           name: 'Default Company',
           role: userRole

@@ -13,8 +13,8 @@ describe('Constants', () => {
   });
 
   it('should have correct user roles', () => {
-    expect(USER_ROLES.WORKER).toBe('worker');
-    expect(USER_ROLES.SUPERVISOR).toBe('supervisor');
-    expect(USER_ROLES.DRIVER).toBe('driver');
+    expect(USER_ROLES.WORKER).toBe('Worker');
+    expect(USER_ROLES.SUPERVISOR).toBe('Supervisor');
+    expect(USER_ROLES.DRIVER).toBe('Driver');
   });
 });

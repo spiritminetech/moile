@@ -15,30 +15,56 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/datetimepicker": "^8.6.0",
+    "@react-native-community/netinfo": "^11.5.0",
+    "@react-native-community/slider": "^5.1.2",
     "@react-navigation/bottom-tabs": "^7.10.1",
     "@react-navigation/native": "^7.1.28",
     "@react-navigation/stack": "^7.6.16",
     "axios": "^1.13.4",
-    "expo": "~54.0.32",
+    "expo": "~54.0.33",
+    "expo-constants": "^18.0.13",
+    "expo-device": "^8.0.10",
+    "expo-document-picker": "^14.0.8",
+    "expo-image-picker": "^17.0.10",
+    "expo-location": "^19.0.8",
     "expo-status-bar": "~3.0.9",
-    "react": "^19.1.0",
+    "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-safe-area-context": "^5.6.2",
     "react-native-screens": "~4.16.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@react-native-community/eslint-config": "^3.2.0",
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.5.14",
-    "@types/react": "~19.1.0",
-    "@types/react-native": "^0.72.8",
+    "@types/react": "~19.1.10",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^9.39.2",
     "fast-check": "^4.5.3",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^30.2.0",
-    "react-test-renderer": "^19.1.0",
+    "jest-expo": "^54.0.16",
+    "react-test-renderer": "19.1.0",
     "ts-jest": "^29.4.6",
     "typescript": "~5.9.2"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react",
+        "@types/react",
+        "@react-native-community/datetimepicker",
+        "@react-native-community/netinfo",
+        "@react-native-community/slider",
+        "expo",
+        "jest-expo"
+      ]
+    }
   },
   "private": true
 }

@@ -11,6 +11,11 @@ export interface User {
   profileImage?: string;
   certifications?: Certification[];
   workPass?: WorkPass;
+  currentProject?: {
+    id: number;
+    name: string;
+    location: string;
+  };
 }
 
 export interface Company {
@@ -81,8 +86,9 @@ export interface GeofenceArea {
 export interface GeofenceValidation {
   isValid: boolean;
   distanceFromSite: number;
-  accuracy: number;
+  accuracy: number | null;
   message?: string;
+  canProceed?: boolean;
 }
 
 // Project and Task Types
@@ -96,6 +102,139 @@ export interface Project {
   endDate: Date;
   status: 'active' | 'completed' | 'on_hold';
   supervisor: Supervisor;
+}
+
+// New types to match API documentation
+export interface DashboardApiResponse {
+  project: {
+    id: number;
+    name: string;
+    code: string;
+    location: string;
+    geofence: {
+      latitude: number;
+      longitude: number;
+      radius: number;
+    };
+  };
+  supervisor: {
+    id: number;
+    name: string;
+    phone: string;
+    email: string;
+  };
+  worker: {
+    id: number;
+    name: string;
+    role: string;
+    checkInStatus: string;
+    currentLocation: {
+      latitude: number;
+      longitude: number;
+      insideGeofence: boolean;
+      lastUpdated: string;
+    };
+  };
+  tasks: Array<{
+    assignmentId: number;
+    taskId: number;
+    taskName: string;
+    taskType: string;
+    description: string;
+    workArea: string;
+    floor: string;
+    zone: string;
+    status: string;
+    priority: string;
+    sequence: number;
+    dailyTarget: {
+      description: string;
+      quantity: number;
+      unit: string;
+      targetCompletion: number;
+    };
+    progress: {
+      percentage: number;
+      completed: number;
+      remaining: number;
+      lastUpdated: string;
+    };
+    timeEstimate: {
+      estimated: number;
+      elapsed: number;
+      remaining: number;
+    };
+    supervisorInstructions: string;
+    startTime: string;
+    estimatedEndTime: string;
+    canStart: boolean;
+    canStartMessage: string | null;
+    dependencies: number[];
+  }>;
+  toolsAndMaterials: {
+    tools: Array<{
+      id: number;
+      name: string;
+      quantity: number;
+      unit: string;
+      allocated: boolean;
+      location: string;
+    }>;
+    materials: Array<{
+      id: number;
+      name: string;
+      quantity: number;
+      unit: string;
+      allocated: number;
+      used: number;
+      remaining: number;
+      location: string;
+    }>;
+  };
+  dailySummary: {
+    totalTasks: number;
+    completedTasks: number;
+    inProgressTasks: number;
+    queuedTasks: number;
+    errorTasks: number;
+    totalHoursWorked: number;
+    remainingHours: number;
+    overallProgress: number;
+  };
+}
+
+export interface ProjectApiResponse {
+  id: number;
+  projectName: string;
+  projectCode: string;
+  description: string;
+  address: string;
+  companyId: number;
+  status: string;
+  startDate: string;
+  endDate: string;
+  budget: number;
+  currency: string;
+  geofence: {
+    center: {
+      latitude: number;
+      longitude: number;
+    };
+    radius: number;
+    strictMode: boolean;
+    allowedVariance: number;
+  };
+  latitude: number;
+  longitude: number;
+  geofenceRadius: number;
+  projectManager: {
+    id: number;
+    name: string;
+    email: string;
+    phone: string;
+  };
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProjectLocation {
@@ -119,10 +258,14 @@ export interface TaskAssignment {
   description: string;
   dependencies: number[];
   sequence: number;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   location: GeoLocation;
   estimatedHours: number;
   actualHours?: number;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 // Attendance Types
@@ -144,30 +287,181 @@ export interface AttendanceState {
   canClockOut: boolean;
 }
 
-// Report Types
+// Report Types - Updated to match API specification
 export interface DailyJobReport {
-  id: number;
-  workerId: number;
-  assignmentId: number;
-  date: Date;
-  workDescription: string;
-  startTime: Date;
-  endTime: Date;
-  progressPercent: number;
-  photos: ReportPhoto[];
-  issues: string[];
-  notes: string;
-  location: GeoLocation;
+  reportId: string;
+  date: string;
+  projectId: number;
+  projectName?: string;
+  workArea: string;
+  floor: string;
+  summary: string;
+  tasksCompleted: Array<{
+    taskId: number;
+    description: string;
+    quantityCompleted: number;
+    unit: string;
+    progressPercent: number;
+    notes: string;
+  }>;
+  issues: Array<{
+    type: string;
+    description: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+    reportedAt: string;
+  }>;
+  materialUsed: Array<{
+    materialId: number;
+    name: string;
+    quantityUsed: number;
+    unit: string;
+  }>;
+  workingHours: {
+    startTime: string;
+    endTime: string;
+    breakDuration: number;
+    overtimeHours: number;
+  };
+  photos?: Array<{
+    photoId: string;
+    filename: string;
+    url: string;
+    category: 'progress' | 'issue' | 'completion' | 'material';
+    uploadedAt: string;
+  }>;
   status: 'draft' | 'submitted' | 'approved';
+  createdAt: string;
+  submittedAt?: string;
 }
 
 export interface ReportPhoto {
-  id: number;
-  uri: string;
+  id?: number;
+  photoId: string;
   filename: string;
-  size: number;
-  mimeType: string;
-  timestamp: Date;
+  url: string;
+  uri: string; // Local URI for the photo
+  size: number; // File size in bytes
+  mimeType: string; // MIME type of the photo
+  timestamp: Date; // When the photo was taken
+  category: 'progress' | 'issue' | 'completion' | 'material';
+  uploadedAt: string;
+}
+
+// Daily Report API Request/Response Types
+export interface CreateDailyReportRequest {
+  date: string;
+  projectId: number;
+  workArea: string;
+  floor: string;
+  summary: string;
+  tasksCompleted: Array<{
+    taskId: number;
+    description: string;
+    quantityCompleted: number;
+    unit: string;
+    progressPercent: number;
+    notes: string;
+  }>;
+  issues: Array<{
+    type: string;
+    description: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+    reportedAt: string;
+  }>;
+  materialUsed: Array<{
+    materialId: number;
+    name: string;
+    quantityUsed: number;
+    unit: string;
+  }>;
+  workingHours: {
+    startTime: string;
+    endTime: string;
+    breakDuration: number;
+    overtimeHours: number;
+  };
+}
+
+export interface CreateDailyReportResponse {
+  success: boolean;
+  message: string;
+  data: {
+    reportId: string;
+    date: string;
+    status: 'draft';
+    createdAt: string;
+    summary: {
+      totalTasks: number;
+      completedTasks: number;
+      inProgressTasks: number;
+      overallProgress: number;
+    };
+  };
+}
+
+export interface UploadReportPhotosRequest {
+  photos: File[];
+  category: 'progress' | 'issue' | 'completion' | 'material';
+  taskId?: number;
+  description: string;
+}
+
+export interface UploadReportPhotosResponse {
+  success: boolean;
+  message: string;
+  data: {
+    uploadedPhotos: Array<{
+      photoId: string;
+      filename: string;
+      url: string;
+      category: 'progress' | 'issue' | 'completion' | 'material';
+      uploadedAt: string;
+    }>;
+    totalPhotos: number;
+  };
+}
+
+export interface SubmitDailyReportRequest {
+  finalNotes: string;
+  supervisorNotification: boolean;
+}
+
+export interface SubmitDailyReportResponse {
+  success: boolean;
+  message: string;
+  data: {
+    reportId: string;
+    status: 'submitted';
+    submittedAt: string;
+    supervisorNotified: boolean;
+    nextSteps: string;
+  };
+}
+
+export interface GetDailyReportsResponse {
+  success: boolean;
+  data: {
+    reports: Array<{
+      reportId: string;
+      date: string;
+      status: 'draft' | 'submitted' | 'approved';
+      projectName: string;
+      workArea: string;
+      summary: {
+        totalTasks: number;
+        completedTasks: number;
+        overallProgress: number;
+      };
+      createdAt: string;
+      submittedAt?: string;
+    }>;
+    pagination: {
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    };
+  };
 }
 
 // Request Types
@@ -197,28 +491,7 @@ export interface RequestAttachment {
   mimeType: string;
 }
 
-// Notification Types
-export type NotificationType = 'task_update' | 'site_change' | 'attendance_alert' | 'request_status' | 'safety_incident';
-
-export interface Notification {
-  id: number;
-  userId: number;
-  title: string;
-  message: string;
-  type: NotificationType;
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  createdAt: Date;
-  readAt?: Date;
-  actionRequired: boolean;
-  relatedEntityId?: number;
-  relatedEntityType?: string;
-}
-
-export interface NotificationState {
-  notifications: Notification[];
-  unreadCount: number;
-  isLoading: boolean;
-}
+// Notification types removed - notification features not needed
 
 // API Response Types
 export interface ApiResponse<T> {
@@ -261,7 +534,6 @@ export interface QueuedAction {
 export interface CachedData {
   tasks: TaskAssignment[];
   attendance: AttendanceRecord[];
-  notifications: Notification[];
   lastUpdated: Date;
 }
 
@@ -269,7 +541,6 @@ export interface AppState {
   auth: AuthState;
   location: LocationState;
   offline: OfflineState;
-  notifications: NotificationState;
   tasks: TaskState;
   attendance: AttendanceState;
 }
@@ -288,7 +559,6 @@ export interface DashboardProps {
   userRole: UserRole;
   todaysTasks: TaskAssignment[];
   attendanceStatus: AttendanceState;
-  notifications: Notification[];
 }
 
 export interface AttendanceButtonProps {

@@ -1,14 +1,84 @@
 // Jest test setup file
 
-import 'react-native-gesture-handler/jestSetup';
+// Mock global variables
+(global as any).__DEV__ = true;
+
+// Jest test setup file
+
+// Mock global variables
+(global as any).__DEV__ = true;
+
+// Mock React Native Platform - don't require actual RN
+jest.mock('react-native', () => ({
+  Platform: {
+    OS: 'ios',
+    select: jest.fn((options) => options.ios || options.default),
+  },
+  Dimensions: {
+    get: jest.fn(() => ({ width: 375, height: 667 })),
+  },
+  Alert: {
+    alert: jest.fn(),
+  },
+  Linking: {
+    openURL: jest.fn(),
+    canOpenURL: jest.fn(() => Promise.resolve(true)),
+  },
+  StyleSheet: {
+    create: jest.fn((styles) => styles),
+  },
+  View: 'View',
+  Text: 'Text',
+  TouchableOpacity: 'TouchableOpacity',
+  ScrollView: 'ScrollView',
+  TextInput: 'TextInput',
+  Image: 'Image',
+  NativeModules: {},
+  NativeEventEmitter: jest.fn(),
+}));
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
-// Mock React Native modules
-jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+// Mock NetInfo
+jest.mock('@react-native-community/netinfo', () => ({
+  fetch: jest.fn(() => Promise.resolve({ isConnected: true })),
+  addEventListener: jest.fn(() => jest.fn()),
+  useNetInfo: jest.fn(() => ({ isConnected: true })),
+}));
+
+// Mock Expo modules
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(),
+  launchCameraAsync: jest.fn(),
+  MediaTypeOptions: {
+    Images: 'Images',
+  },
+  ImagePickerResult: {},
+}));
+
+jest.mock('expo-location', () => ({
+  requestForegroundPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),
+  hasServicesEnabledAsync: jest.fn(() => Promise.resolve(true)),
+  getCurrentPositionAsync: jest.fn(() => Promise.resolve({
+    coords: {
+      latitude: 1.3521,
+      longitude: 103.8198,
+      accuracy: 5,
+    },
+    timestamp: Date.now(),
+  })),
+  watchPositionAsync: jest.fn(),
+  Accuracy: {
+    High: 4,
+  },
+}));
+
+jest.mock('expo-document-picker', () => ({
+  getDocumentAsync: jest.fn(),
+}));
 
 // Mock navigation
 jest.mock('@react-navigation/native', () => {
@@ -23,26 +93,22 @@ jest.mock('@react-navigation/native', () => {
     useRoute: () => ({
       params: {},
     }),
+    NavigationContainer: ({ children }: any) => children,
   };
 });
 
-// Mock location services (will be implemented in location task)
-jest.mock('../services/location', () => ({
-  getCurrentLocation: jest.fn(),
-  requestLocationPermission: jest.fn(),
-  validateGeofence: jest.fn(),
+jest.mock('@react-navigation/stack', () => ({
+  createStackNavigator: () => ({
+    Navigator: ({ children }: any) => children,
+    Screen: ({ children }: any) => children,
+  }),
 }));
 
-// Mock camera services (will be implemented in camera task)
-jest.mock('../services/camera', () => ({
-  openCamera: jest.fn(),
-  openGallery: jest.fn(),
-}));
-
-// Mock push notifications (will be implemented in notifications task)
-jest.mock('../services/notifications', () => ({
-  requestPermission: jest.fn(),
-  registerForPushNotifications: jest.fn(),
+jest.mock('@react-navigation/bottom-tabs', () => ({
+  createBottomTabNavigator: () => ({
+    Navigator: ({ children }: any) => children,
+    Screen: ({ children }: any) => children,
+  }),
 }));
 
 // Global test utilities

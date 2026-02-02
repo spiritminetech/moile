@@ -31,7 +31,7 @@ const getApiBaseUrl = (): string => {
 
 export const API_CONFIG = {
   BASE_URL: getApiBaseUrl(),
-  TIMEOUT: 30000,
+  TIMEOUT: 15000, // Reduced from 30000 to 15000 (15 seconds)
   RETRY_ATTEMPTS: 3,
   // Mock mode for development when backend is not available
   MOCK_MODE: false, // Set to true when you don't have a backend
@@ -56,13 +56,7 @@ export const STORAGE_KEYS = {
   LAST_SYNC: '@construction_erp:last_sync',
 } as const;
 
-export const NOTIFICATION_TYPES = {
-  TASK_UPDATE: 'task_update',
-  SITE_CHANGE: 'site_change',
-  ATTENDANCE_ALERT: 'attendance_alert',
-  REQUEST_STATUS: 'request_status',
-  SAFETY_INCIDENT: 'safety_incident',
-} as const;
+// Notification types removed - notification features not needed
 
 export const USER_ROLES = {
   WORKER: 'Worker',

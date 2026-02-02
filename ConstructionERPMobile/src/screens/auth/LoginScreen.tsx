@@ -1,4 +1,4 @@
-// Login Screen Component
+// Construction-optimized login screen with enhanced UI/UX
 
 import React, { useState } from 'react';
 import {
@@ -9,52 +9,45 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
-import { COLORS, UI_CONSTANTS, API_CONFIG } from '../../utils/constants';
 import { TEST_CREDENTIALS } from '../../services/api/mockApi';
+import { API_CONFIG } from '../../utils/constants';
+import NetworkDiagnostic from '../../components/debug/NetworkDiagnostic';
 
-/**
- * Login Screen Component
- * 
- * Features:
- * - Username/password input with validation
- * - Integration with AuthService through AuthContext
- * - Loading states and error handling
- * - Construction-optimized UI with large touch targets
- * - Keyboard handling for better UX
- */
 const LoginScreen: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showNetworkDiagnostic, setShowNetworkDiagnostic] = useState(false);
   const { login, state } = useAuth();
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter both email and password');
+      Alert.alert('Missing Information', 'Please enter both email and password');
       return;
     }
 
-    // 🔍 DEBUG: Log login form data
-    console.log('📝 Login form submission:', {
-      email: email.trim(),
-      passwordLength: password.length,
-      hasEmail: !!email.trim(),
-      hasPassword: !!password.trim(),
-    });
+    console.log('📝 Login attempt:', { email: email.trim(), passwordLength: password.length });
 
     try {
       await login({ email: email.trim(), password });
-      // Navigation will be handled automatically by AppNavigator
-      console.log('✅ Login form - success callback reached');
+      console.log('✅ Login successful');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Login failed';
-      console.error('❌ Login form error:', errorMessage);
+      console.error('❌ Login error:', errorMessage);
       Alert.alert('Login Failed', errorMessage);
     }
   };
 
-  const isLoading = Boolean(state.isLoading);
+  const fillTestCredentials = (role: 'worker' | 'supervisor' | 'driver') => {
+    const credentials = TEST_CREDENTIALS[role];
+    setEmail(credentials.email);
+    setPassword(credentials.password);
+  };
 
   const handleNetworkUrlSelected = (url: string) => {
     setShowNetworkDiagnostic(false);
@@ -65,102 +58,137 @@ const LoginScreen: React.FC = () => {
     );
   };
 
-  const fillTestCredentials = (role: 'worker' | 'supervisor' | 'driver') => {
-    const credentials = TEST_CREDENTIALS[role];
-    setEmail(credentials.email);
-    setPassword(credentials.password);
-  };
+  const isLoading = Boolean(state.isLoading);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Construction ERP</Text>
-        <Text style={styles.subtitle}>Sign in to continue</Text>
-
-        {/* Mock Mode Indicator */}
-        {API_CONFIG.MOCK_MODE && (
-          <View style={styles.mockModeIndicator}>
-            <Text style={styles.mockModeText}>🎭 MOCK MODE - No Backend Required</Text>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.content}>
+          {/* Header Section */}
+          <View style={styles.header}>
+            <Text style={styles.appIcon}>🏗️</Text>
+            <Text style={styles.title}>Construction ERP</Text>
+            <Text style={styles.subtitle}>Mobile Workforce Management</Text>
           </View>
-        )}
 
-        {/* Network Diagnostic Button (Development Only) */}
-        {__DEV__ && !API_CONFIG.MOCK_MODE && (
-          <TouchableOpacity
-            style={styles.networkButton}
-            onPress={() => setShowNetworkDiagnostic(true)}
-          >
-            <Text style={styles.networkButtonText}>🔍 Network Diagnostic</Text>
-          </TouchableOpacity>
-        )}
+          {/* API Status Indicator */}
+          <View style={styles.apiStatusCard}>
+            <Text style={styles.apiStatusTitle}>🌐 System Status</Text>
+            <Text style={styles.apiStatusText}>
+              Connected to: {API_CONFIG.BASE_URL}
+            </Text>
+            <TouchableOpacity
+              style={styles.networkButton}
+              onPress={() => setShowNetworkDiagnostic(true)}
+            >
+              <Text style={styles.networkButtonText}>🔍 Test Connection</Text>
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={COLORS.TEXT_SECONDARY}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            editable={!isLoading}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={COLORS.TEXT_SECONDARY}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={true}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!isLoading}
-          />
-
-          <TouchableOpacity
-            style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color={COLORS.SURFACE} />
-            ) : (
-              <Text style={styles.loginButtonText}>Sign In</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Test Credentials Buttons (Mock Mode Only) */}
-          {API_CONFIG.MOCK_MODE && (
-            <View style={styles.testCredentials}>
-              <Text style={styles.testCredentialsTitle}>Test Credentials:</Text>
-              <View style={styles.testButtonsRow}>
-                <TouchableOpacity
-                  style={styles.testButton}
-                  onPress={() => fillTestCredentials('worker')}
-                >
-                  <Text style={styles.testButtonText}>Worker</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.testButton}
-                  onPress={() => fillTestCredentials('supervisor')}
-                >
-                  <Text style={styles.testButtonText}>Supervisor</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.testButton}
-                  onPress={() => fillTestCredentials('driver')}
-                >
-                  <Text style={styles.testButtonText}>Driver</Text>
-                </TouchableOpacity>
-              </View>
+          {/* Login Form */}
+          <View style={styles.form}>
+            <Text style={styles.formTitle}>Sign In</Text>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <TextInput
+                style={[styles.input, isLoading && styles.inputDisabled]}
+                placeholder="Enter your email"
+                placeholderTextColor="#9E9E9E"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                editable={!isLoading}
+                returnKeyType="next"
+              />
             </View>
-          )}
 
-          {state.error && (
-            <Text style={styles.errorText}>{state.error}</Text>
-          )}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={[styles.input, isLoading && styles.inputDisabled]}
+                placeholder="Enter your password"
+                placeholderTextColor="#9E9E9E"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={true}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isLoading}
+                returnKeyType="go"
+                onSubmitEditing={handleLogin}
+              />
+            </View>
+
+            {/* Construction-optimized large login button */}
+            <TouchableOpacity
+              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
+              onPress={handleLogin}
+              disabled={isLoading}
+              activeOpacity={0.8}
+            >
+              {isLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator color="#FFFFFF" size="large" />
+                  <Text style={styles.loadingText}>Signing In...</Text>
+                </View>
+              ) : (
+                <Text style={styles.loginButtonText}>SIGN IN</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Error Display */}
+            {state.error && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorIcon}>⚠️</Text>
+                <Text style={styles.errorText}>{state.error}</Text>
+              </View>
+            )}
+
+            {/* Test Credentials - Development Only */}
+            {__DEV__ && (
+              <View style={styles.testCredentials}>
+                <Text style={styles.testCredentialsTitle}>Development Test Accounts</Text>
+                <Text style={styles.testCredentialsSubtitle}>
+                  Quick login for testing different roles
+                </Text>
+                <View style={styles.testButtonsContainer}>
+                  <TouchableOpacity
+                    style={[styles.testButton, styles.workerButton]}
+                    onPress={() => fillTestCredentials('worker')}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.testButtonIcon}>👷</Text>
+                    <Text style={styles.testButtonText}>Worker</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.testButton, styles.supervisorButton]}
+                    onPress={() => fillTestCredentials('supervisor')}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.testButtonIcon}>👨‍💼</Text>
+                    <Text style={styles.testButtonText}>Supervisor</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.testButton, styles.driverButton]}
+                    onPress={() => fillTestCredentials('driver')}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.testButtonIcon}>🚛</Text>
+                    <Text style={styles.testButtonText}>Driver</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* Network Diagnostic Modal */}
@@ -169,9 +197,7 @@ const LoginScreen: React.FC = () => {
           animationType="slide"
           presentationStyle="pageSheet"
         >
-          <NetworkDiagnostic
-            onUrlSelected={handleNetworkUrlSelected}
-          />
+          <NetworkDiagnostic onUrlSelected={handleNetworkUrlSelected} />
           <TouchableOpacity
             style={styles.closeModalButton}
             onPress={() => setShowNetworkDiagnostic(false)}
@@ -179,135 +205,230 @@ const LoginScreen: React.FC = () => {
             <Text style={styles.closeModalButtonText}>Close</Text>
           </TouchableOpacity>
         </Modal>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.BACKGROUND,
+    backgroundColor: '#F5F5F5',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    minHeight: '100%',
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    padding: UI_CONSTANTS.SPACING.LG,
+    padding: 24,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  appIcon: {
+    fontSize: 64,
+    marginBottom: 16,
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: COLORS.PRIMARY,
+    color: '#2196F3',
     textAlign: 'center',
-    marginBottom: UI_CONSTANTS.SPACING.SM,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: COLORS.TEXT_SECONDARY,
+    color: '#757575',
     textAlign: 'center',
-    marginBottom: UI_CONSTANTS.SPACING.XL,
+    fontWeight: '500',
   },
-  mockModeIndicator: {
-    backgroundColor: COLORS.WARNING,
-    padding: UI_CONSTANTS.SPACING.SM,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
-    marginBottom: UI_CONSTANTS.SPACING.MD,
+  apiStatusCard: {
+    backgroundColor: '#E3F2FD',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
   },
-  mockModeText: {
-    color: '#000',
-    textAlign: 'center',
+  apiStatusTitle: {
+    fontSize: 14,
     fontWeight: 'bold',
+    color: '#1976D2',
+    marginBottom: 4,
+  },
+  apiStatusText: {
     fontSize: 12,
+    color: '#1565C0',
+    marginBottom: 8,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   networkButton: {
-    backgroundColor: COLORS.SECONDARY,
-    padding: UI_CONSTANTS.SPACING.SM,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
-    marginBottom: UI_CONSTANTS.SPACING.MD,
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
   },
   networkButtonText: {
-    color: COLORS.SURFACE,
-    textAlign: 'center',
-    fontWeight: 'bold',
+    color: '#FFFFFF',
     fontSize: 12,
+    fontWeight: 'bold',
   },
   form: {
     width: '100%',
   },
-  input: {
-    height: UI_CONSTANTS.LARGE_BUTTON_HEIGHT,
-    borderWidth: 1,
-    borderColor: COLORS.BORDER,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
-    paddingHorizontal: UI_CONSTANTS.SPACING.MD,
+  formTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#212121',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  inputLabel: {
     fontSize: 16,
-    backgroundColor: COLORS.SURFACE,
-    marginBottom: UI_CONSTANTS.SPACING.MD,
-    color: COLORS.TEXT_PRIMARY,
+    fontWeight: '600',
+    color: '#424242',
+    marginBottom: 8,
+  },
+  input: {
+    height: 64, // Large touch target for construction site use
+    borderWidth: 2,
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    fontSize: 18, // Large text for outdoor visibility
+    backgroundColor: '#FFFFFF',
+    color: '#212121',
+    fontWeight: '500',
+  },
+  inputDisabled: {
+    backgroundColor: '#F5F5F5',
+    color: '#9E9E9E',
   },
   loginButton: {
-    height: UI_CONSTANTS.LARGE_BUTTON_HEIGHT,
-    backgroundColor: COLORS.PRIMARY,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
+    height: 72, // Extra large button for gloved hands
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: UI_CONSTANTS.SPACING.MD,
+    marginTop: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   loginButtonDisabled: {
-    backgroundColor: COLORS.TEXT_SECONDARY,
+    backgroundColor: '#9E9E9E',
+    shadowOpacity: 0.1,
+    elevation: 2,
   },
   loginButtonText: {
-    color: COLORS.SURFACE,
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
+    marginLeft: 12,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFEBEE',
+    padding: 16,
+    borderRadius: 8,
+    marginTop: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F44336',
+  },
+  errorIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  errorText: {
+    color: '#C62828',
+    fontSize: 16,
+    fontWeight: '500',
+    flex: 1,
   },
   testCredentials: {
-    marginTop: UI_CONSTANTS.SPACING.LG,
-    padding: UI_CONSTANTS.SPACING.MD,
-    backgroundColor: COLORS.SURFACE,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
-    borderWidth: 1,
-    borderColor: COLORS.BORDER,
+    marginTop: 32,
+    padding: 20,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#FFB74D',
   },
   testCredentialsTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: COLORS.TEXT_PRIMARY,
+    color: '#E65100',
     textAlign: 'center',
-    marginBottom: UI_CONSTANTS.SPACING.SM,
+    marginBottom: 4,
   },
-  testButtonsRow: {
+  testCredentialsSubtitle: {
+    fontSize: 12,
+    color: '#F57C00',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  testButtonsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   testButton: {
-    backgroundColor: COLORS.SECONDARY,
-    paddingHorizontal: UI_CONSTANTS.SPACING.MD,
-    paddingVertical: UI_CONSTANTS.SPACING.SM,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
-    minWidth: 80,
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    minHeight: 64,
+    justifyContent: 'center',
+  },
+  workerButton: {
+    backgroundColor: '#2196F3',
+  },
+  supervisorButton: {
+    backgroundColor: '#FF9800',
+  },
+  driverButton: {
+    backgroundColor: '#4CAF50',
+  },
+  testButtonIcon: {
+    fontSize: 20,
+    marginBottom: 4,
   },
   testButtonText: {
-    color: COLORS.SURFACE,
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
     textAlign: 'center',
   },
-  errorText: {
-    color: COLORS.ERROR,
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: UI_CONSTANTS.SPACING.MD,
-  },
   closeModalButton: {
-    backgroundColor: COLORS.ERROR,
-    margin: UI_CONSTANTS.SPACING.MD,
-    padding: UI_CONSTANTS.SPACING.MD,
-    borderRadius: UI_CONSTANTS.BORDER_RADIUS,
+    backgroundColor: '#F44336',
+    margin: 16,
+    padding: 16,
+    borderRadius: 8,
     alignItems: 'center',
   },
   closeModalButtonText: {
-    color: COLORS.SURFACE,
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
   },

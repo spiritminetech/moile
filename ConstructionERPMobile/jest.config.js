@@ -1,5 +1,4 @@
 module.exports = {
-  preset: 'react-native',
   setupFilesAfterEnv: ['<rootDir>/src/utils/test-setup.ts'],
   testMatch: [
     '**/__tests__/**/*.(ts|tsx|js)',
@@ -15,7 +14,17 @@ module.exports = {
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+  transform: {
+    '^.+\\.(ts|tsx)$': ['ts-jest', {
+      tsconfig: 'tsconfig.test.json'
+    }],
+    '^.+\\.(js|jsx)$': 'babel-jest',
+  },
+  testEnvironment: 'jsdom',
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+  },
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|@react-navigation)/)',
+    'node_modules/(?!(react-native|@react-native|@react-navigation|expo)/)',
   ],
 };

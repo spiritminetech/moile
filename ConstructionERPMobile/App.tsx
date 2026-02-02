@@ -1,35 +1,44 @@
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// Context Providers
 import { AuthProvider, useAuth } from './src/store/context/AuthContext';
+import { LocationProvider } from './src/store/context/LocationContext';
+import { OfflineProvider } from './src/store/context/OfflineContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
-// Main App component wrapped with providers
+// Main App with all context providers
 const App: React.FC = () => {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <AppContent />
-        <StatusBar style="auto" />
+        <LocationProvider>
+          <OfflineProvider>
+            <AppContent />
+            <StatusBar style="auto" />
+          </OfflineProvider>
+        </LocationProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );
 };
 
-// App content that uses auth context
+// App content that consumes auth state
 const AppContent: React.FC = () => {
   const { state } = useAuth();
-  
+
+  // Debug: see auth state in console
   console.log('Auth State:', {
     isAuthenticated: state.isAuthenticated,
     userRole: state.user?.role || state.company?.role,
-    isLoading: state.isLoading
+    isLoading: state.isLoading,
   });
 
   return (
-    <AppNavigator 
-      isAuthenticated={state.isAuthenticated} 
-      userRole={state.user?.role || state.company?.role} 
+    <AppNavigator
+      isAuthenticated={state.isAuthenticated}
+      userRole={state.user?.role || state.company?.role}
     />
   );
 };

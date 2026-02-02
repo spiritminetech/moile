@@ -1,10 +1,20 @@
 // API Client configuration with Axios
 
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG, STORAGE_KEYS } from '../../utils/constants';
 import { ApiResponse, ApiError } from '../../types';
 import { networkLogger } from '../../utils/networkLogger';
+import { handleApiError } from '../../utils/errorHandling/ErrorHandler';
+
+// Extend Axios config to include metadata
+declare module 'axios' {
+  interface InternalAxiosRequestConfig {
+    metadata?: {
+      startTime: number;
+    };
+  }
+}
 
 class ApiClient {
   private instance: AxiosInstance;
@@ -150,39 +160,32 @@ class ApiClient {
   }
 
   private formatError(error: any): ApiError {
-    if (error.response) {
-      // Server responded with error status
-      return {
-        message: error.response.data?.message || `Server error: ${error.response.status} ${error.response.statusText}`,
-        code: error.response.status.toString(),
-        details: error.response.data,
-      };
-    } else if (error.request) {
-      // Network error - no response received
-      return {
-        message: `Cannot connect to server. Please check:\n• Backend server is running\n• Network connection\n• Firewall settings\n• API URL: ${error.config?.baseURL || 'Unknown'}`,
-        code: 'NETWORK_ERROR',
-        details: {
-          url: error.config?.url,
-          method: error.config?.method,
-          baseURL: error.config?.baseURL,
-        },
-      };
-    } else {
-      // Other error
-      return {
-        message: error.message || 'An unexpected error occurred',
-        code: 'UNKNOWN_ERROR',
-        details: error,
-      };
-    }
+    // Use the comprehensive error handler
+    const errorInfo = handleApiError(error, 'API Client');
+    
+    return {
+      message: errorInfo.message,
+      code: errorInfo.code?.toString() || 'UNKNOWN_ERROR',
+      details: errorInfo.details,
+    };
   }
 
   // Generic request methods
   async get<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
-      const response = await this.instance.get<ApiResponse<T>>(url, config);
-      return response.data;
+      const response = await this.instance.get(url, config);
+      
+      // Handle both wrapped and unwrapped responses
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        // Already wrapped in ApiResponse format
+        return response.data as ApiResponse<T>;
+      } else {
+        // Direct data response - wrap it
+        return {
+          success: true,
+          data: response.data as T,
+        };
+      }
     } catch (error) {
       throw error;
     }
@@ -190,8 +193,19 @@ class ApiClient {
 
   async post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
-      const response = await this.instance.post<ApiResponse<T>>(url, data, config);
-      return response.data;
+      const response = await this.instance.post(url, data, config);
+      
+      // Handle both wrapped and unwrapped responses
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        // Already wrapped in ApiResponse format
+        return response.data as ApiResponse<T>;
+      } else {
+        // Direct data response - wrap it
+        return {
+          success: true,
+          data: response.data as T,
+        };
+      }
     } catch (error) {
       throw error;
     }
@@ -199,8 +213,19 @@ class ApiClient {
 
   async put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
-      const response = await this.instance.put<ApiResponse<T>>(url, data, config);
-      return response.data;
+      const response = await this.instance.put(url, data, config);
+      
+      // Handle both wrapped and unwrapped responses
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        // Already wrapped in ApiResponse format
+        return response.data as ApiResponse<T>;
+      } else {
+        // Direct data response - wrap it
+        return {
+          success: true,
+          data: response.data as T,
+        };
+      }
     } catch (error) {
       throw error;
     }
@@ -208,8 +233,19 @@ class ApiClient {
 
   async delete<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
-      const response = await this.instance.delete<ApiResponse<T>>(url, config);
-      return response.data;
+      const response = await this.instance.delete(url, config);
+      
+      // Handle both wrapped and unwrapped responses
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        // Already wrapped in ApiResponse format
+        return response.data as ApiResponse<T>;
+      } else {
+        // Direct data response - wrap it
+        return {
+          success: true,
+          data: response.data as T,
+        };
+      }
     } catch (error) {
       throw error;
     }
@@ -218,14 +254,25 @@ class ApiClient {
   // File upload method
   async uploadFile<T>(url: string, file: FormData, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
-      const response = await this.instance.post<ApiResponse<T>>(url, file, {
+      const response = await this.instance.post(url, file, {
         ...config,
         headers: {
           ...config?.headers,
           'Content-Type': 'multipart/form-data',
         },
       });
-      return response.data;
+      
+      // Handle both wrapped and unwrapped responses
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        // Already wrapped in ApiResponse format
+        return response.data as ApiResponse<T>;
+      } else {
+        // Direct data response - wrap it
+        return {
+          success: true,
+          data: response.data as T,
+        };
+      }
     } catch (error) {
       throw error;
     }
