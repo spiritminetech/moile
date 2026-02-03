@@ -303,15 +303,81 @@ export const getAttendanceHistory = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const records = await Attendance.find({
+    // Build query filter
+    const filter = {
       employeeId: employee.id,
-      projectId,
-      //companyId
-    }).sort({ date: -1 });
+    };
+    
+    // Add projectId filter if provided
+    if (projectId) {
+      filter.projectId = parseInt(projectId);
+    }
 
-    res.json({ records });
+    // Get attendance records with project information
+    const attendanceRecords = await Attendance.find(filter).sort({ date: -1 });
+    
+    // Get unique project IDs to fetch project details
+    const projectIds = [...new Set(attendanceRecords.map(record => record.projectId))];
+    
+    // Fetch project details
+    const projects = await Project.find({ 
+      id: { $in: projectIds },
+      companyId 
+    }).select('id projectName projectCode address latitude longitude');
+    
+    // Create a map for quick project lookup
+    const projectMap = {};
+    projects.forEach(project => {
+      projectMap[project.id] = project;
+    });
+
+    // Transform records to include project information and proper field mapping
+    const transformedRecords = attendanceRecords.map(record => {
+      const project = projectMap[record.projectId];
+      
+      return {
+        employeeId: record.employeeId.toString(),
+        projectId: record.projectId.toString(),
+        projectName: project ? project.projectName : `Project #${record.projectId}`,
+        date: record.date,
+        checkInTime: record.checkIn,
+        checkOutTime: record.checkOut,
+        lunchStartTime: record.lunchStartTime,
+        lunchEndTime: record.lunchEndTime,
+        overtimeStartTime: record.overtimeStartTime,
+        insideGeofenceAtCheckin: record.insideGeofenceAtCheckin,
+        insideGeofenceAtCheckout: record.insideGeofenceAtCheckout,
+        pendingCheckout: record.pendingCheckout,
+        // Include location data if available
+        latitude: record.lastLatitude || (project ? project.latitude : null),
+        longitude: record.lastLongitude || (project ? project.longitude : null),
+        // Calculate work duration
+        workDuration: record.checkIn && record.checkOut 
+          ? Math.round((new Date(record.checkOut) - new Date(record.checkIn)) / (1000 * 60)) // minutes
+          : 0,
+        // Calculate lunch duration
+        lunchDuration: record.lunchStartTime && record.lunchEndTime
+          ? Math.round((new Date(record.lunchEndTime) - new Date(record.lunchStartTime)) / (1000 * 60)) // minutes
+          : 0
+      };
+    });
+
+    // Return paginated response format
+    const response = {
+      pagination: {
+        currentPage: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+        limit: 30,
+        totalPages: 1,
+        totalRecords: transformedRecords.length
+      },
+      records: transformedRecords
+    };
+
+    res.json(response);
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching attendance history:', err);
     res.status(500).json({ message: "Failed to fetch attendance history" });
   }
 };

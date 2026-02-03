@@ -43,16 +43,16 @@ router.get("/tasks/today",
   getWorkerTasksToday
 );
 
+// Get task history with filtering and pagination (MUST come before /tasks/:taskId)
+router.get("/tasks/history",
+  verifyToken,
+  getWorkerTaskHistory
+);
+
 // Get individual task details
 router.get("/tasks/:taskId",
   verifyToken,
   getWorkerTaskDetails
-);
-
-// Get task history with filtering and pagination
-router.get("/tasks/history",
-  verifyToken,
-  getWorkerTaskHistory
 );
 
 // Legacy endpoint - keeping for backward compatibility

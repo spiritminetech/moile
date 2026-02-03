@@ -254,6 +254,7 @@ export interface Supervisor {
 export interface TaskAssignment {
   assignmentId: number;
   projectId: number;
+  projectName?: string; // Added project name field
   taskName: string;
   description: string;
   dependencies: number[];
@@ -266,6 +267,19 @@ export interface TaskAssignment {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  // Progress information
+  progress?: {
+    percentage: number;
+    completed: number;
+    remaining: number;
+    lastUpdated: string | null;
+  };
+  // Time estimates
+  timeEstimate?: {
+    estimated: number;
+    elapsed: number;
+    remaining: number;
+  };
 }
 
 // Attendance Types
@@ -273,10 +287,14 @@ export interface AttendanceRecord {
   id: number;
   workerId: number;
   projectId: number;
+  projectName?: string; // Added project name field
   loginTime: string;
   logoutTime?: string;
   location: GeoLocation;
   sessionType: 'regular' | 'overtime' | 'lunch';
+  // Duration fields from API (in minutes)
+  workDuration?: number;
+  lunchDuration?: number;
 }
 
 export interface AttendanceState {

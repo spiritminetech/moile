@@ -31,7 +31,7 @@ export const submitLeaveRequest = async (req, res) => {
             reason
         } = req.body;
 
-        const leaveRequest = await LeaveRequest.create({
+        const leaveRequestData = {
             id: Date.now(),
             companyId: employee.companyId,
             employeeId: employee.id,
@@ -41,7 +41,9 @@ export const submitLeaveRequest = async (req, res) => {
             reason,
             createdBy: userId,
             status: 'PENDING'
-        });
+        };
+
+        const leaveRequest = await LeaveRequest.create(leaveRequestData);
 
         // Handle file attachments if present
         if (req.files && req.files.length > 0) {

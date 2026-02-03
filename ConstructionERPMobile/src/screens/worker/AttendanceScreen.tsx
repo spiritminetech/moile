@@ -7,15 +7,14 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   Alert,
   RefreshControl,
-  ActivityIndicator,
 } from 'react-native';
 import { useLocation } from '../../store/context/LocationContext';
 import { useAuth } from '../../store/context/AuthContext';
 import { useOffline } from '../../store/context/OfflineContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
+import { TodaysAttendanceResponse } from '../../services/api/AttendanceApiService';
 import { GeofenceValidator } from '../../components/common/GeofenceValidator';
 import { GPSAccuracyIndicator } from '../../components/common/GPSAccuracyIndicator';
 import { DistanceDisplay } from '../../components/common/DistanceDisplay';
@@ -27,7 +26,7 @@ import {
   ErrorDisplay
 } from '../../components/common';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
-import { AttendanceRecord, GeoLocation } from '../../types';
+import { AttendanceRecord } from '../../types';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
 
 interface AttendanceStatus {
@@ -35,12 +34,15 @@ interface AttendanceStatus {
   todaysAttendance: AttendanceRecord[];
   canClockIn: boolean;
   canClockOut: boolean;
+  isOnLunchBreak: boolean;
+  totalTodayMinutes?: number;
+  lunchMinutes?: number;
 }
 
 type AttendanceType = 'login' | 'logout' | 'lunch_start' | 'lunch_end' | 'overtime_start' | 'overtime_end';
 
 const AttendanceScreen: React.FC = () => {
-  const { state: locationState, getCurrentLocation, validateGeofence } = useLocation();
+  const { state: locationState, validateGeofence } = useLocation();
   const { state: authState } = useAuth();
   const { state: offlineState } = useOffline();
   const { handleApiError, clearError, error: errorHandlerError } = useErrorHandler();
@@ -50,6 +52,9 @@ const AttendanceScreen: React.FC = () => {
     todaysAttendance: [],
     canClockIn: false,
     canClockOut: false,
+    isOnLunchBreak: false,
+    totalTodayMinutes: 0,
+    lunchMinutes: 0,
   });
   
   const [isLoading, setIsLoading] = useState(false);
@@ -69,50 +74,102 @@ const AttendanceScreen: React.FC = () => {
   const loadAttendanceStatus = useCallback(async () => {
     if (!authState.user || offlineState.isOnline === false) return;
     
+    console.log('🔄 Loading attendance status...');
     setIsLoading(true);
     try {
       clearError();
       const response = await workerApiService.getTodaysAttendance();
+      console.log('📥 getTodaysAttendance response:', response);
+      
       if (response.success) {
-        const data = response.data;
-        // Convert the new API response to the expected format
-        const currentSession = data.session === 'CHECKED_IN' ? {
+        const data = response.data as TodaysAttendanceResponse & {
+          workDuration?: number;
+          lunchDuration?: number;
+        };
+        console.log('📊 Processing attendance data:', data);
+        
+        // Create currentSession only if actively checked in
+        const currentSession = data.session === 'CHECKED_IN' || data.session === 'ON_LUNCH' ? {
           id: 1,
           workerId: authState.user.id,
-          projectId: parseInt(data.projectId || '0'),
+          projectId: parseInt(data.projectId?.toString() || '1003'),
           loginTime: data.checkInTime || '',
           logoutTime: data.checkOutTime || undefined,
           location: { latitude: 0, longitude: 0, accuracy: 0, timestamp: new Date() },
           sessionType: 'regular' as const,
         } : null;
         
-        setAttendanceStatus({
+        // Create todaysAttendance record if there's any attendance data for today
+        let todaysAttendance: AttendanceRecord[] = [];
+        if (data.checkInTime) {
+          // There's attendance data for today, create a record
+          todaysAttendance = [{
+            id: 1,
+            workerId: authState.user.id,
+            projectId: parseInt(data.projectId?.toString() || '1003'),
+            loginTime: data.checkInTime,
+            logoutTime: data.checkOutTime || undefined,
+            location: { latitude: 0, longitude: 0, accuracy: 0, timestamp: new Date() },
+            sessionType: 'regular' as const,
+          }];
+        }
+        
+        console.log('🎯 Created currentSession:', currentSession);
+        console.log('📋 Created todaysAttendance:', todaysAttendance);
+        
+        // Determine button states based on session and lunch status
+        let canClockIn = false;
+        let canClockOut = false;
+        
+        if (data.session === 'NOT_LOGGED_IN' || data.session === 'CHECKED_OUT') {
+          canClockIn = true;
+          canClockOut = false;
+        } else if (data.session === 'CHECKED_IN') {
+          canClockIn = false;
+          canClockOut = !data.isOnLunchBreak; // Can't clock out while on lunch
+        } else if (data.session === 'ON_LUNCH') {
+          canClockIn = false;
+          canClockOut = false; // Can't clock out while on lunch
+        }
+        
+        const newAttendanceStatus = {
           currentSession,
-          todaysAttendance: currentSession ? [currentSession] : [],
-          canClockIn: data.session === 'NOT_LOGGED_IN' || data.session === 'CHECKED_OUT',
-          canClockOut: data.session === 'CHECKED_IN',
+          todaysAttendance,
+          canClockIn,
+          canClockOut,
+          isOnLunchBreak: data.isOnLunchBreak || false,
+          // Add additional data for display
+          totalTodayMinutes: data.workDuration || 0,
+          lunchMinutes: data.lunchDuration || 0,
+        };
+        
+        console.log('✅ Setting attendance status:', {
+          hasCurrentSession: !!newAttendanceStatus.currentSession,
+          todaysAttendanceLength: newAttendanceStatus.todaysAttendance.length,
+          canClockIn: newAttendanceStatus.canClockIn,
+          canClockOut: newAttendanceStatus.canClockOut,
+          isOnLunchBreak: newAttendanceStatus.isOnLunchBreak,
+          session: data.session,
+          totalTodayMinutes: newAttendanceStatus.totalTodayMinutes,
+          lunchMinutes: newAttendanceStatus.lunchMinutes,
         });
+        
+        setAttendanceStatus(newAttendanceStatus);
       }
     } catch (error) {
+      console.error('❌ Error loading attendance status:', error);
       handleApiError(error, 'Load Attendance Status');
     } finally {
       setIsLoading(false);
     }
-  }, [authState.user, offlineState.isOnline, locationState.isGeofenceValid, clearError, handleApiError]);
+  }, [authState.user, offlineState.isOnline, clearError, handleApiError]);
 
   const updateAttendanceButtons = useCallback(() => {
-    // Only update if we have valid location data
-    // Don't override the API-based session state
-    if (!locationState.isGeofenceValid) {
-      setAttendanceStatus(prev => ({
-        ...prev,
-        canClockIn: false,
-        canClockOut: false,
-      }));
-    }
-    // If geofence is valid, keep the current API-based state
+    // Don't override API-based session state
     // The API response should determine canClockIn/canClockOut based on session
-  }, [locationState.isGeofenceValid]);
+    // This function now only handles location-based restrictions in the button rendering
+    console.log('🔄 Location state changed, buttons will be updated in render');
+  }, []);
 
   const handleAttendanceAction = async (type: AttendanceType) => {
     console.log('🎯 Starting attendance action:', type);
@@ -134,15 +191,10 @@ const AttendanceScreen: React.FC = () => {
       projectId = authState.user.currentProject.id.toString();
       console.log('📍 Using project ID from user.currentProject:', projectId);
     }
-    // Fallback: Try to get from company data (NOT RECOMMENDED)
-    else if (authState.company?.id) {
-      projectId = authState.company.id.toString();
-      console.log('📍 Using project ID from company (fallback):', projectId);
-    }
-    // Last resort: Use default project ID 1 (FALLBACK ONLY)
+    // Fallback: Use project ID 1003 (from task assignment we just created)
     else {
-      projectId = '1';
-      console.log('📍 Using default project ID (last resort):', projectId);
+      projectId = '1003';
+      console.log('📍 Using default project ID (task assignment):', projectId);
     }
 
     if (!projectId) {
@@ -150,22 +202,27 @@ const AttendanceScreen: React.FC = () => {
       return;
     }
 
-    // Validate geofence before action
-    console.log('🔍 Validating geofence for project:', projectId);
-    try {
-      const geofenceValid = await validateGeofence(parseInt(projectId));
-      console.log('🔍 Geofence validation result:', geofenceValid);
-      
-      if (!geofenceValid.isValid) {
-        Alert.alert(
-          'Location Required',
-          `You must be within ${geofenceValid.distanceFromSite}m of the work site to perform attendance actions.`
-        );
-        return;
+    // For lunch break actions, skip geofence validation if already checked in
+    const skipGeofenceForLunch = (type === 'lunch_start' || type === 'lunch_end') && attendanceStatus.currentSession;
+    
+    if (!skipGeofenceForLunch) {
+      // Validate geofence before action
+      console.log('🔍 Validating geofence for project:', projectId);
+      try {
+        const geofenceValid = await validateGeofence(parseInt(projectId));
+        console.log('🔍 Geofence validation result:', geofenceValid);
+        
+        if (!geofenceValid.isValid) {
+          Alert.alert(
+            'Location Required',
+            `You must be within ${geofenceValid.distanceFromSite}m of the work site to perform attendance actions.`
+          );
+          return;
+        }
+      } catch (geofenceError) {
+        console.warn('⚠️ Geofence validation failed, proceeding anyway:', geofenceError);
+        // Continue with attendance action even if geofence validation fails
       }
-    } catch (geofenceError) {
-      console.warn('⚠️ Geofence validation failed, proceeding anyway:', geofenceError);
-      // Continue with attendance action even if geofence validation fails
     }
 
     setActionLoading(type);
@@ -175,6 +232,15 @@ const AttendanceScreen: React.FC = () => {
       let response;
 
       console.log('🚀 Making API call for:', type, 'with projectId:', projectId);
+      console.log('📊 Request details:', {
+        type,
+        projectId,
+        location: {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy
+        }
+      });
 
       switch (type) {
         case 'login':
@@ -224,20 +290,125 @@ const AttendanceScreen: React.FC = () => {
       }
 
       console.log('📊 API Response:', response);
+      console.log('📊 Response structure:', {
+        hasSuccess: 'success' in (response || {}),
+        hasDataSuccess: response?.data && 'success' in response.data,
+        responseSuccess: response?.success,
+        dataSuccess: response?.data?.success,
+        responseData: response?.data,
+        responseMessage: response?.message,
+        dataMessage: response?.data?.message
+      });
 
-      if (response?.success) {
-        const message = response.data?.message || response.message || `${type.replace('_', ' ')} recorded successfully`;
+      // Check for success in the response data (backend returns success in data)
+      const isSuccess = response?.success || response?.data?.success;
+      const responseData = response?.data || response;
+      
+      console.log('📊 Processed response:', {
+        isSuccess,
+        responseData,
+        message: responseData?.message || response?.message
+      });
+      
+      if (isSuccess) {
+        const message = responseData?.message || response.message || `${type.replace('_', ' ')} recorded successfully`;
         Alert.alert('Success', message);
-        await loadAttendanceStatus(); // Refresh status
+        
+        // Immediately update local state for better UX
+        if (type === 'login') {
+          setAttendanceStatus(prev => ({
+            ...prev,
+            currentSession: {
+              id: 1,
+              workerId: authState.user!.id,
+              projectId: parseInt(projectId!),
+              loginTime: new Date().toISOString(),
+              location: { latitude: location.latitude, longitude: location.longitude, accuracy: location.accuracy || 0, timestamp: new Date() },
+              sessionType: 'regular' as const,
+            },
+            todaysAttendance: [{
+              id: 1,
+              workerId: authState.user!.id,
+              projectId: parseInt(projectId!),
+              loginTime: new Date().toISOString(),
+              location: { latitude: location.latitude, longitude: location.longitude, accuracy: location.accuracy || 0, timestamp: new Date() },
+              sessionType: 'regular' as const,
+            }],
+            canClockIn: false,
+            canClockOut: true,
+            isOnLunchBreak: false,
+            totalTodayMinutes: 0, // Reset for new session
+          }));
+        } else if (type === 'logout') {
+          setAttendanceStatus(prev => ({
+            ...prev,
+            currentSession: null,
+            canClockIn: true,
+            canClockOut: false,
+            isOnLunchBreak: false,
+            // Keep totalTodayMinutes as it represents the completed session
+          }));
+        } else if (type === 'lunch_start') {
+          setAttendanceStatus(prev => ({
+            ...prev,
+            isOnLunchBreak: true,
+            canClockOut: false, // Can't clock out while on lunch
+          }));
+        } else if (type === 'lunch_end') {
+          setAttendanceStatus(prev => ({
+            ...prev,
+            isOnLunchBreak: false,
+            canClockOut: true, // Can clock out after lunch
+          }));
+        }
       } else {
-        const errorMessage = response?.message || response?.data?.message || 'Failed to record attendance';
+        const errorMessage = responseData?.message || response?.message || 'Failed to record attendance';
         console.error('❌ API Error:', errorMessage);
-        Alert.alert('Error', errorMessage);
+        
+        // Handle specific lunch break errors with better state management
+        if (type === 'lunch_start') {
+          if (errorMessage.toLowerCase().includes('already')) {
+            // If lunch already started, sync local state with server
+            setAttendanceStatus(prev => ({
+              ...prev,
+              isOnLunchBreak: true,
+              canClockOut: false,
+            }));
+            Alert.alert('Info', 'Lunch break is already active');
+          } else {
+            Alert.alert('Error', errorMessage);
+          }
+        } else if (type === 'lunch_end') {
+          if (errorMessage.toLowerCase().includes('not on lunch')) {
+            // If not on lunch, sync local state with server
+            setAttendanceStatus(prev => ({
+              ...prev,
+              isOnLunchBreak: false,
+              canClockOut: prev.currentSession ? true : false,
+            }));
+            Alert.alert('Info', 'You are not currently on lunch break');
+          } else {
+            Alert.alert('Error', errorMessage);
+          }
+        } else {
+          Alert.alert('Error', errorMessage);
+        }
       }
+      
+      // Always refresh attendance status after any attendance action to ensure consistency
+      setTimeout(() => {
+        loadAttendanceStatus();
+      }, 1000); // Small delay to allow server to process
+      
     } catch (error: any) {
       console.error('❌ Attendance Action Error:', error);
       const errorInfo = handleApiError(error, 'Attendance Action');
       Alert.alert('Error', errorInfo.message);
+      
+      // Also refresh status after errors, in case the action partially succeeded
+      setTimeout(() => {
+        loadAttendanceStatus();
+      }, 1000);
     } finally {
       setActionLoading(null);
     }
@@ -250,7 +421,16 @@ const AttendanceScreen: React.FC = () => {
   }, [loadAttendanceStatus]);
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
+    const date = new Date(dateString);
+    console.log('🕐 Formatting time:', {
+      input: dateString,
+      parsed: date,
+      formatted: date.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    });
+    return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -265,22 +445,40 @@ const AttendanceScreen: React.FC = () => {
     return `${hours}h ${minutes}m`;
   };
 
+  const formatMinutesToDuration = (totalMinutes: number) => {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${minutes}m`;
+  };
+
   const renderAttendanceButton = (
     type: AttendanceType,
     title: string,
     enabled: boolean,
     variant: 'primary' | 'secondary' | 'success' | 'warning' | 'error' = 'primary'
-  ) => (
-    <ConstructionButton
-      title={title}
-      onPress={() => handleAttendanceAction(type)}
-      variant={variant}
-      size="large"
-      disabled={!enabled || actionLoading !== null || offlineState.isOnline === false}
-      loading={actionLoading === type}
-      style={styles.attendanceButton}
-    />
-  );
+  ) => {
+    // Check if location and geofence are valid for attendance actions
+    // For lunch break actions, allow if already checked in (skip geofence check)
+    const isLunchAction = type === 'lunch_start' || type === 'lunch_end';
+    const locationValid = locationState.currentLocation && (
+      locationState.isGeofenceValid || 
+      (isLunchAction && attendanceStatus.currentSession)
+    );
+    
+    const finalEnabled = enabled && locationValid && actionLoading === null && offlineState.isOnline !== false;
+    
+    return (
+      <ConstructionButton
+        title={title}
+        onPress={() => handleAttendanceAction(type)}
+        variant={variant}
+        size="large"
+        disabled={!finalEnabled}
+        loading={actionLoading === type}
+        style={styles.attendanceButton}
+      />
+    );
+  };
 
   if (isLoading) {
     return (
@@ -328,8 +526,9 @@ const AttendanceScreen: React.FC = () => {
           } : null}
         />
         <GeofenceValidator 
-          projectId={authState.user?.currentProject?.id || 1}
+          projectId={1003}
           onValidationChange={(isValid) => {
+            console.log('🎯 AttendanceScreen: Geofence validation changed:', isValid);
             // Update location state based on validation
           }}
         />
@@ -339,37 +538,81 @@ const AttendanceScreen: React.FC = () => {
             isValid={locationState.isGeofenceValid}
           />
         )}
+        
+        {/* Debug location info */}
+        <View style={{ padding: 10, backgroundColor: '#f0f0f0', marginTop: 10, borderRadius: 5 }}>
+          <Text style={{ fontSize: 12, color: '#666' }}>
+            Debug: Current Location: {locationState.currentLocation ? 
+              `${locationState.currentLocation.latitude.toFixed(4)}, ${locationState.currentLocation.longitude.toFixed(4)}` : 
+              'None'}
+          </Text>
+          <Text style={{ fontSize: 12, color: '#666' }}>
+            Permission: {locationState.hasLocationPermission ? 'Yes' : 'No'} | 
+            Services: {locationState.isLocationEnabled ? 'Yes' : 'No'} | 
+            Geofence: {locationState.isGeofenceValid ? 'Valid' : 'Invalid'}
+          </Text>
+          <Text style={{ fontSize: 12, color: '#666' }}>
+            Attendance: ClockIn={attendanceStatus.canClockIn ? 'Yes' : 'No'} | 
+            ClockOut={attendanceStatus.canClockOut ? 'Yes' : 'No'} | 
+            OnLunch={attendanceStatus.isOnLunchBreak ? 'Yes' : 'No'}
+          </Text>
+        </View>
       </ConstructionCard>
 
-      {/* Current Session Info */}
+      {/* Attendance Status */}
       <ConstructionCard
-        title="Current Session"
+        title="Attendance Status"
         variant="default"
         style={styles.sessionSection}
       >
-        {attendanceStatus.currentSession ? (
-          <View style={styles.sessionInfo}>
+        <View style={styles.sessionInfo}>
+          {/* Current Session */}
+          <View style={styles.statusRow}>
+            <Text style={styles.statusLabel}>Current Session:</Text>
+            {attendanceStatus.currentSession ? (
+              <Text style={styles.activeStatus}>
+                Active {attendanceStatus.isOnLunchBreak && '(On Lunch)'}
+              </Text>
+            ) : (
+              <Text style={styles.inactiveStatus}>Not Active</Text>
+            )}
+          </View>
+
+          {/* Total Today */}
+          <View style={styles.statusRow}>
+            <Text style={styles.statusLabel}>Total Today:</Text>
             <Text style={styles.sessionText}>
-              Status: <Text style={styles.activeStatus}>Active</Text>
-            </Text>
-            <Text style={styles.sessionText}>
-              Started: {formatTime(attendanceStatus.currentSession.loginTime)}
-            </Text>
-            <Text style={styles.sessionText}>
-              Duration: {formatDuration(attendanceStatus.currentSession.loginTime)}
-            </Text>
-            <Text style={styles.sessionText}>
-              Type: {attendanceStatus.currentSession.sessionType}
+              {attendanceStatus.totalTodayMinutes !== undefined 
+                ? formatMinutesToDuration(attendanceStatus.totalTodayMinutes)
+                : (attendanceStatus.todaysAttendance.length > 0 
+                    ? formatDuration(
+                        attendanceStatus.todaysAttendance[0].loginTime, 
+                        attendanceStatus.todaysAttendance[0].logoutTime
+                      )
+                    : '0h 0m'
+                  )
+              }
             </Text>
           </View>
-        ) : (
-          <View style={styles.sessionInfo}>
-            <Text style={styles.sessionText}>
-              Status: <Text style={styles.inactiveStatus}>Not Active</Text>
-            </Text>
-            <Text style={styles.sessionText}>No active session</Text>
-          </View>
-        )}
+
+          {/* Session Details */}
+          {attendanceStatus.currentSession && (
+            <>
+              <View style={styles.statusRow}>
+                <Text style={styles.statusLabel}>Started:</Text>
+                <Text style={styles.sessionText}>
+                  {formatTime(attendanceStatus.currentSession.loginTime)}
+                </Text>
+              </View>
+              <View style={styles.statusRow}>
+                <Text style={styles.statusLabel}>Duration:</Text>
+                <Text style={styles.sessionText}>
+                  {formatDuration(attendanceStatus.currentSession.loginTime)}
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
       </ConstructionCard>
 
       {/* Attendance Actions */}
@@ -395,20 +638,20 @@ const AttendanceScreen: React.FC = () => {
         </View>
 
         {/* Secondary Actions */}
-        {attendanceStatus.currentSession && (
+        {(attendanceStatus.currentSession || (attendanceStatus.todaysAttendance.length > 0 && !attendanceStatus.todaysAttendance[0].logoutTime)) && (
           <View style={styles.secondaryActions}>
             <Text style={styles.subsectionTitle}>Break & Overtime</Text>
             <View style={styles.actionRow}>
               {renderAttendanceButton(
                 'lunch_start',
                 'START LUNCH',
-                attendanceStatus.canClockOut,
+                attendanceStatus.currentSession && !attendanceStatus.isOnLunchBreak && attendanceStatus.canClockOut,
                 'warning'
               )}
               {renderAttendanceButton(
                 'lunch_end',
                 'END LUNCH',
-                !attendanceStatus.currentSession,
+                attendanceStatus.currentSession && attendanceStatus.isOnLunchBreak,
                 'warning'
               )}
             </View>
@@ -472,6 +715,17 @@ const styles = StyleSheet.create({
     backgroundColor: ConstructionTheme.colors.surfaceVariant,
     borderRadius: ConstructionTheme.borderRadius.sm,
   },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statusLabel: {
+    ...ConstructionTheme.typography.bodyLarge,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: '600',
+  },
   sessionText: {
     ...ConstructionTheme.typography.bodyLarge,
     color: ConstructionTheme.colors.onSurface,
@@ -479,6 +733,10 @@ const styles = StyleSheet.create({
   },
   activeStatus: {
     color: ConstructionTheme.colors.success,
+    fontWeight: 'bold',
+  },
+  lunchStatus: {
+    color: ConstructionTheme.colors.warning,
     fontWeight: 'bold',
   },
   inactiveStatus: {

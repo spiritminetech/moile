@@ -42,7 +42,7 @@ const locationLogSchema = new mongoose.Schema(
     // Log type to categorize different location events
     logType: {
       type: String,
-      enum: ['CHECK_IN', 'CHECK_OUT', 'TASK_START', 'TASK_PROGRESS', 'TASK_COMPLETE', 'PERIODIC', 'MANUAL', 'GEOFENCE_VALIDATION'],
+      enum: ['CHECK_IN', 'CHECK_OUT', 'LUNCH_START', 'LUNCH_END', 'TASK_START', 'TASK_PROGRESS', 'TASK_COMPLETE', 'PERIODIC', 'MANUAL', 'GEOFENCE_VALIDATION'],
       default: 'PERIODIC',
     },
     // Link to task assignment for task-related location logs

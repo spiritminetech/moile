@@ -23,18 +23,29 @@ import TaskCard from '../../components/cards/TaskCard';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
 import OfflineIndicator from '../../components/common/OfflineIndicator';
 
-const TodaysTasksScreen = ({ navigation }: any) => {
+const TodaysTasksScreen = ({ navigation, route }: any) => {
   const [tasks, setTasks] = useState<TaskAssignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isApiCallInProgress, setIsApiCallInProgress] = useState(false); // Prevent multiple calls
-  const [loadingTimeout, setLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [loadingTimeout, setLoadingTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
   const hasInitiallyLoaded = useRef(false); // Track if we've loaded once
 
-  const { state: locationState, checkGPSAccuracy } = useLocation();
+  const { state: locationState, checkGPSAccuracy, requestLocationPermissions, getCurrentLocation } = useLocation();
   const { currentLocation, isLocationEnabled, hasLocationPermission } = locationState;
   const { isOffline, getCachedData, cacheData } = useOffline();
+
+  // Handle refresh parameter from navigation
+  useEffect(() => {
+    if (route.params?.refresh) {
+      console.log('🔄 Refresh requested from navigation params');
+      hasInitiallyLoaded.current = false; // Reset to allow reload
+      loadTasks();
+      // Clear the refresh parameter to prevent repeated refreshes
+      navigation.setParams({ refresh: undefined });
+    }
+  }, [route.params?.refresh, navigation]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -212,7 +223,14 @@ const TodaysTasksScreen = ({ navigation }: any) => {
 
   // Handle task start
   const handleStartTask = useCallback(async (taskId: number) => {
+    console.log('🎯 Starting task - Location state debug:');
+    console.log('  currentLocation:', !!currentLocation);
+    console.log('  hasLocationPermission:', hasLocationPermission);
+    console.log('  isLocationEnabled:', isLocationEnabled);
+    console.log('  locationState:', locationState);
+    
     if (!currentLocation) {
+      console.log('❌ No current location available');
       Alert.alert(
         'Location Required',
         'Please enable location services to start a task.',
@@ -221,13 +239,48 @@ const TodaysTasksScreen = ({ navigation }: any) => {
       return;
     }
 
-    if (!hasLocationPermission || !isLocationEnabled) {
-      Alert.alert(
-        'Location Permission Required',
-        'Location access is required to start tasks. Please enable location services.',
-        [{ text: 'OK' }]
-      );
-      return;
+    if (!hasLocationPermission || (!isLocationEnabled && !__DEV__)) {
+      console.log('❌ Location permission or services check failed');
+      console.log('  hasLocationPermission:', hasLocationPermission);
+      console.log('  isLocationEnabled:', isLocationEnabled);
+      console.log('  __DEV__:', __DEV__);
+      
+      // In development mode, allow if we have any location (including fallback)
+      if (__DEV__ && currentLocation) {
+        console.log('🔧 Development mode: proceeding with available location (fallback allowed)');
+        // Continue with task start using available location
+      } else {
+        Alert.alert(
+          'Location Permission Required',
+          isLocationEnabled 
+            ? 'Location access is required to start tasks. Please grant location permission.'
+            : 'Location services are disabled. Please enable location services in your device settings.',
+          [
+            { text: 'Cancel' },
+            { 
+              text: 'Retry', 
+              onPress: async () => {
+                console.log('🔄 Retrying location permission...');
+                try {
+                  const hasPermission = await requestLocationPermissions();
+                  if (hasPermission) {
+                    const location = await getCurrentLocation();
+                    console.log('✅ Location permission refreshed, retrying task start');
+                    // Retry the task start
+                    handleStartTask(taskId);
+                  } else {
+                    Alert.alert('Permission Denied', 'Location permission is required to start tasks.');
+                  }
+                } catch (error) {
+                  console.error('❌ Failed to refresh location:', error);
+                  Alert.alert('Error', 'Failed to get location permission. Please check your device settings.');
+                }
+              }
+            }
+          ]
+        );
+        return;
+      }
     }
 
     try {

@@ -886,13 +886,9 @@ export const getWorkerTasksToday = async (req, res) => {
       return sum + remaining;
     }, 0);
     
-    // Calculate overall progress with validation
-    const validProgressTasks = taskDetails.filter(t => 
-      Number.isFinite(t.progress.percentage) && t.status !== 'error'
-    );
-    
-    const overallProgress = validProgressTasks.length > 0 
-      ? Math.round(validProgressTasks.reduce((sum, t) => sum + t.progress.percentage, 0) / validProgressTasks.length)
+    // Calculate overall progress based on task completion status (not individual progress percentages)
+    const overallProgress = totalTasks > 0 
+      ? Math.round((completedTasks / totalTasks) * 100)
       : 0;
 
     // Get tools and materials for the project with error handling

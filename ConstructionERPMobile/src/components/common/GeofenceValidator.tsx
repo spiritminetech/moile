@@ -39,27 +39,38 @@ export const GeofenceValidator: React.FC<GeofenceValidatorProps> = ({
       return;
     }
 
+    console.log('🔍 GeofenceValidator: Starting validation for project', projectId);
     setIsValidating(true);
     try {
       // Get current location if not available
       let currentLocation = state.currentLocation;
       if (!currentLocation) {
+        console.log('📍 GeofenceValidator: No cached location, getting current location...');
         currentLocation = await getCurrentLocation();
       }
+
+      console.log('📍 GeofenceValidator: Using location:', {
+        latitude: currentLocation?.latitude,
+        longitude: currentLocation?.longitude,
+        accuracy: currentLocation?.accuracy
+      });
 
       // Check GPS accuracy
       const accuracy = checkGPSAccuracy();
       setAccuracyWarning(accuracy);
 
       // Validate geofence
+      console.log('🔍 GeofenceValidator: Validating geofence...');
       const validationResult = await validateGeofence(projectId);
+      console.log('✅ GeofenceValidator: Validation result:', validationResult);
+      
       setValidation(validationResult);
       setLastValidationTime(new Date());
 
       // Notify parent component
       onValidationChange(validationResult.isValid, validationResult);
     } catch (error) {
-      console.error('Geofence validation error:', error);
+      console.error('❌ GeofenceValidator: Validation error:', error);
       const errorValidation: GeofenceValidation = {
         isValid: false,
         distanceFromSite: 999,

@@ -45,13 +45,13 @@ export const useOfflineActions = () => {
   }, [isOnline, queueAction]);
 
   const startLunchBreak = useCallback(async (
-    workerId: string,
-    projectId: string
+    projectId: string,
+    location: GeoLocation
   ) => {
     if (isOnline) {
-      return await workerApiService.startLunchBreak({ workerId, projectId });
+      return await workerApiService.startLunchBreak({ projectId, location });
     } else {
-      await queueAction('START_LUNCH_BREAK', { workerId, projectId });
+      await queueAction('START_LUNCH_BREAK', { projectId, location });
       return {
         success: true,
         data: {
@@ -64,14 +64,13 @@ export const useOfflineActions = () => {
   }, [isOnline, queueAction]);
 
   const endLunchBreak = useCallback(async (
-    workerId: string,
-    overtimeInfo: any,
-    overtimeType: 'START' | 'END' = 'END'
+    projectId: string,
+    location: GeoLocation
   ) => {
     if (isOnline) {
-      return await workerApiService.sendOvertimeAlert({ workerId, overtimeInfo, overtimeType });
+      return await workerApiService.endLunchBreak({ projectId, location });
     } else {
-      await queueAction('END_LUNCH_BREAK', { workerId, overtimeInfo, overtimeType });
+      await queueAction('END_LUNCH_BREAK', { projectId, location });
       return {
         success: true,
         data: {

@@ -152,7 +152,7 @@ const issueToken = async (user, mapping, autoSelected, deviceInfo = {}) => {
     user: {
       id: user.id,
       email: user.email,
-      name: user.name,
+      name: employee?.fullName || user.email, // Use employee fullName instead of user.name
       currentProject: employee?.currentProject || null
     },
     company: {
@@ -216,7 +216,7 @@ const buildResponse = async (user, company, role, permissions, autoSelected, dev
     user: {
       id: user.id,
       email: user.email,
-      name: user.name,
+      name: employee?.fullName || user.email, // Use employee fullName instead of user.name
       currentProject: employee?.currentProject || null
     },
     company: {

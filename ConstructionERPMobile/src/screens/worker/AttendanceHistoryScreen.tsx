@@ -18,6 +18,7 @@ import { useOffline } from '../../store/context/OfflineContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
 import { OfflineIndicator } from '../../components/common/OfflineIndicator';
 import { AttendanceRecord } from '../../types';
+import { WORK_HOURS_CONFIG } from '../../utils/constants';
 
 interface AttendanceHistoryFilter {
   startDate: Date;
@@ -63,23 +64,34 @@ const AttendanceHistoryScreen: React.FC = () => {
       
       if (response.success) {
         // Convert the new API response format to the expected format
-        const convertedRecords = response.data.records.map((record: any, index: number) => ({
-          id: index + 1, // Use index as numeric ID since API doesn't provide numeric ID
-          workerId: parseInt(record.employeeId),
-          employeeId: parseInt(record.employeeId),
-          projectId: parseInt(record.projectId),
-          loginTime: record.checkIn || '',
-          logoutTime: record.checkOut || '',
-          lunchStartTime: record.lunchStartTime || '',
-          lunchEndTime: record.lunchEndTime || '',
-          overtimeStartTime: record.overtimeStartTime || '',
-          sessionType: 'regular' as const,
-          location: { latitude: 0, longitude: 0, accuracy: 0, timestamp: new Date() },
-          geofenceValidated: record.insideGeofenceAtCheckin,
-          notes: '',
-          date: record.date,
-          pendingCheckout: record.pendingCheckout,
-        }));
+        const convertedRecords = response.data.records.map((record: any, index: number) => {
+          const converted = {
+            id: index + 1, // Use index as numeric ID since API doesn't provide numeric ID
+            workerId: authState.user?.id || 0,
+            employeeId: authState.user?.id || 0,
+            projectId: parseInt(record.projectId),
+            projectName: record.projectName, // Now available from backend
+            loginTime: record.checkInTime || '', // Fixed: use checkInTime from API
+            logoutTime: record.checkOutTime || '', // Fixed: use checkOutTime from API
+            lunchStartTime: record.lunchStartTime || '',
+            lunchEndTime: record.lunchEndTime || '',
+            overtimeStartTime: record.overtimeStartTime || '',
+            sessionType: 'regular' as const,
+            location: { 
+              latitude: record.latitude || 0, 
+              longitude: record.longitude || 0, 
+              accuracy: record.accuracy || 10, 
+              timestamp: new Date() 
+            },
+            geofenceValidated: record.insideGeofenceAtCheckin,
+            notes: '',
+            date: record.date,
+            pendingCheckout: record.pendingCheckout || false,
+          };
+          
+          return converted;
+        });
+        
         setAttendanceHistory(convertedRecords);
       } else {
         Alert.alert('Error', response.message || 'Failed to load attendance history');
@@ -102,10 +114,18 @@ const AttendanceHistoryScreen: React.FC = () => {
     // Filter by search text (project name, notes, etc.)
     if (filter.searchText.trim()) {
       const searchLower = filter.searchText.toLowerCase();
-      filtered = filtered.filter(record => 
-        record.projectId?.toString().includes(searchLower) ||
-        record.sessionType.toLowerCase().includes(searchLower)
-      );
+      filtered = filtered.filter(record => {
+        // Search by project ID
+        const projectIdMatch = record.projectId?.toString().includes(searchLower);
+        
+        // Search by project name (now available directly from API response)
+        const projectNameMatch = (record as any).projectName?.toLowerCase().includes(searchLower);
+        
+        // Search by session type
+        const sessionTypeMatch = record.sessionType.toLowerCase().includes(searchLower);
+        
+        return projectIdMatch || projectNameMatch || sessionTypeMatch;
+      });
     }
 
     // Sort by date (newest first)
@@ -121,7 +141,10 @@ const AttendanceHistoryScreen: React.FC = () => {
   }, [loadAttendanceHistory]);
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    if (!dateString) return 'Invalid Date';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString('en-US', {
       weekday: 'short',
       year: 'numeric',
       month: 'short',
@@ -130,19 +153,83 @@ const AttendanceHistoryScreen: React.FC = () => {
   };
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
+    if (!dateString) return 'Invalid Date';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
     });
   };
 
   const formatDuration = (startTime: string, endTime?: string) => {
+    if (!startTime) return 'NaNh NaNm';
     const start = new Date(startTime);
+    if (isNaN(start.getTime())) return 'NaNh NaNm';
+    
     const end = endTime ? new Date(endTime) : new Date();
+    if (endTime && isNaN(end.getTime())) return 'NaNh NaNm';
+    
     const diffMs = end.getTime() - start.getTime();
+    if (diffMs < 0) return '0h 0m'; // Handle negative durations
+    
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
     const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
     return `${hours}h ${minutes}m`;
+  };
+
+  // Calculate work hours breakdown (regular vs overtime)
+  const calculateWorkHours = (checkInTime: string, checkOutTime?: string, lunchStartTime?: string, lunchEndTime?: string) => {
+    if (!checkInTime || !checkOutTime) {
+      return {
+        totalHours: 0,
+        regularHours: 0,
+        overtimeHours: 0,
+        lunchHours: 0,
+      };
+    }
+
+    const checkIn = new Date(checkInTime);
+    const checkOut = new Date(checkOutTime);
+    
+    if (isNaN(checkIn.getTime()) || isNaN(checkOut.getTime())) {
+      return {
+        totalHours: 0,
+        regularHours: 0,
+        overtimeHours: 0,
+        lunchHours: 0,
+      };
+    }
+
+    // Calculate total work duration
+    const totalWorkMs = checkOut.getTime() - checkIn.getTime();
+    let totalWorkHours = totalWorkMs / (1000 * 60 * 60);
+
+    // Calculate lunch break duration if available
+    let lunchHours = 0;
+    if (lunchStartTime && lunchEndTime) {
+      const lunchStart = new Date(lunchStartTime);
+      const lunchEnd = new Date(lunchEndTime);
+      
+      if (!isNaN(lunchStart.getTime()) && !isNaN(lunchEnd.getTime())) {
+        const lunchMs = lunchEnd.getTime() - lunchStart.getTime();
+        lunchHours = lunchMs / (1000 * 60 * 60);
+        // Subtract lunch time from total work hours
+        totalWorkHours -= lunchHours;
+      }
+    }
+
+    // Calculate regular vs overtime hours
+    const standardHours = WORK_HOURS_CONFIG.STANDARD_WORK_HOURS;
+    const regularHours = Math.min(totalWorkHours, standardHours);
+    const overtimeHours = Math.max(0, totalWorkHours - standardHours);
+
+    return {
+      totalHours: Math.max(0, totalWorkHours),
+      regularHours: Math.max(0, regularHours),
+      overtimeHours: Math.max(0, overtimeHours),
+      lunchHours: Math.max(0, lunchHours),
+    };
   };
 
   const getSessionTypeColor = (sessionType: string) => {
@@ -189,7 +276,7 @@ const AttendanceHistoryScreen: React.FC = () => {
             <Text style={styles.filterLabel}>Search:</Text>
             <TextInput
               style={styles.searchInput}
-              placeholder="Search by project or type..."
+              placeholder="Search by project name or type..."
               value={filter.searchText}
               onChangeText={(text) => setFilter(prev => ({ ...prev, searchText: text }))}
             />
@@ -243,86 +330,160 @@ const AttendanceHistoryScreen: React.FC = () => {
     </View>
   );
 
-  const renderAttendanceRecord = (record: AttendanceRecord, index: number) => (
-    <View key={record.id || index} style={styles.recordCard}>
-      <View style={styles.recordHeader}>
-        <Text style={styles.recordDate}>{formatDate(record.loginTime)}</Text>
-        <View
-          style={[
-            styles.sessionTypeBadge,
-            { backgroundColor: getSessionTypeColor(record.sessionType) },
-          ]}
-        >
-          <Text style={styles.sessionTypeBadgeText}>
-            {getSessionTypeLabel(record.sessionType)}
-          </Text>
+  // Create a separate component for attendance record to avoid hooks rule violations
+  const AttendanceRecordItem: React.FC<{ record: AttendanceRecord; index: number }> = ({ record, index }) => {
+    // Display coordinates directly as requested by user
+    const getLocationDisplay = () => {
+      if (record.location && (record.location.latitude !== 0 || record.location.longitude !== 0)) {
+        return `${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}`;
+      }
+      return 'Location not available';
+    };
+
+    // Calculate work hours breakdown
+    const workHours = calculateWorkHours(
+      record.loginTime, 
+      record.logoutTime, 
+      (record as any).lunchStartTime, 
+      (record as any).lunchEndTime
+    );
+
+    // Use project name from API response or fallback to project ID
+    const displayProjectName = record.projectName || `Project #${record.projectId}`;
+
+    return (
+      <View key={record.id || index} style={styles.recordCard}>
+        <View style={styles.recordHeader}>
+          <Text style={styles.recordDate}>{formatDate(record.loginTime)}</Text>
+          <View style={styles.badgeContainer}>
+            <View
+              style={[
+                styles.sessionTypeBadge,
+                { backgroundColor: getSessionTypeColor(record.sessionType) },
+              ]}
+            >
+              <Text style={styles.sessionTypeBadgeText}>
+                {getSessionTypeLabel(record.sessionType)}
+              </Text>
+            </View>
+            {/* Show overtime badge if there are overtime hours */}
+            {workHours.overtimeHours > 0 && (
+              <View style={[styles.overtimeBadge]}>
+                <Text style={styles.overtimeBadgeText}>
+                  OT: {workHours.overtimeHours.toFixed(1)}h
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.recordContent}>
+          <View style={styles.timeRow}>
+            <Text style={styles.timeLabel}>Clock In:</Text>
+            <Text style={styles.timeValue}>{formatTime(record.loginTime)}</Text>
+          </View>
+
+          {record.logoutTime && (
+            <View style={styles.timeRow}>
+              <Text style={styles.timeLabel}>Clock Out:</Text>
+              <Text style={styles.timeValue}>{formatTime(record.logoutTime)}</Text>
+            </View>
+          )}
+
+          {/* Enhanced duration display with breakdown */}
+          <View style={styles.timeRow}>
+            <Text style={styles.timeLabel}>Total Duration:</Text>
+            <Text style={[styles.timeValue, styles.durationValue]}>
+              {formatDuration(record.loginTime, record.logoutTime)}
+            </Text>
+          </View>
+
+          {/* Work hours breakdown */}
+          {record.logoutTime && workHours.totalHours > 0 && (
+            <>
+              <View style={styles.timeRow}>
+                <Text style={styles.timeLabel}>Work Hours:</Text>
+                <Text style={styles.timeValue}>
+                  {workHours.totalHours.toFixed(1)}h
+                </Text>
+              </View>
+              
+              {workHours.regularHours > 0 && (
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeLabel}>Regular:</Text>
+                  <Text style={[styles.timeValue, styles.regularHoursValue]}>
+                    {workHours.regularHours.toFixed(1)}h
+                  </Text>
+                </View>
+              )}
+              
+              {workHours.overtimeHours > 0 && (
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeLabel}>Overtime:</Text>
+                  <Text style={[styles.timeValue, styles.overtimeValue]}>
+                    {workHours.overtimeHours.toFixed(1)}h
+                  </Text>
+                </View>
+              )}
+
+              {workHours.lunchHours > 0 && (
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeLabel}>Lunch Break:</Text>
+                  <Text style={styles.timeValue}>
+                    {workHours.lunchHours.toFixed(1)}h
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+
+          {record.projectId && (
+            <View style={styles.timeRow}>
+              <Text style={styles.timeLabel}>Project:</Text>
+              <Text style={styles.timeValue}>{displayProjectName}</Text>
+            </View>
+          )}
+
+          {record.location && (
+            <View style={styles.locationRow}>
+              <Text style={styles.locationLabel}>Location:</Text>
+              <Text style={styles.locationValue}>
+                {getLocationDisplay()}
+              </Text>
+              {record.location.accuracy && (
+                <Text style={styles.accuracyValue}>
+                  (±{record.location.accuracy.toFixed(0)}m)
+                </Text>
+              )}
+            </View>
+          )}
         </View>
       </View>
-
-      <View style={styles.recordContent}>
-        <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>Clock In:</Text>
-          <Text style={styles.timeValue}>{formatTime(record.loginTime)}</Text>
-        </View>
-
-        {record.logoutTime && (
-          <View style={styles.timeRow}>
-            <Text style={styles.timeLabel}>Clock Out:</Text>
-            <Text style={styles.timeValue}>{formatTime(record.logoutTime)}</Text>
-          </View>
-        )}
-
-        <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>Duration:</Text>
-          <Text style={[styles.timeValue, styles.durationValue]}>
-            {formatDuration(record.loginTime, record.logoutTime)}
-          </Text>
-        </View>
-
-        {record.projectId && (
-          <View style={styles.timeRow}>
-            <Text style={styles.timeLabel}>Project:</Text>
-            <Text style={styles.timeValue}>#{record.projectId}</Text>
-          </View>
-        )}
-
-        {record.location && (
-          <View style={styles.locationRow}>
-            <Text style={styles.locationLabel}>Location:</Text>
-            <Text style={styles.locationValue}>
-              {record.location.latitude.toFixed(6)}, {record.location.longitude.toFixed(6)}
-            </Text>
-            <Text style={styles.accuracyValue}>
-              (±{record.location.accuracy.toFixed(0)}m)
-            </Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
+    );
+  };
 
   const renderSummaryStats = () => {
-    const totalHours = filteredHistory.reduce((total, record) => {
+    let totalWorkHours = 0;
+    let totalRegularHours = 0;
+    let totalOvertimeHours = 0;
+    let totalLunchHours = 0;
+
+    // Calculate totals using the new work hours calculation
+    filteredHistory.forEach(record => {
       if (record.logoutTime) {
-        const duration = new Date(record.logoutTime).getTime() - new Date(record.loginTime).getTime();
-        return total + (duration / (1000 * 60 * 60));
+        const workHours = calculateWorkHours(
+          record.loginTime, 
+          record.logoutTime, 
+          (record as any).lunchStartTime, 
+          (record as any).lunchEndTime
+        );
+        
+        totalWorkHours += workHours.totalHours;
+        totalRegularHours += workHours.regularHours;
+        totalOvertimeHours += workHours.overtimeHours;
+        totalLunchHours += workHours.lunchHours;
       }
-      return total;
-    }, 0);
-
-    const regularHours = filteredHistory
-      .filter(record => record.sessionType === 'regular' && record.logoutTime)
-      .reduce((total, record) => {
-        const duration = new Date(record.logoutTime!).getTime() - new Date(record.loginTime).getTime();
-        return total + (duration / (1000 * 60 * 60));
-      }, 0);
-
-    const overtimeHours = filteredHistory
-      .filter(record => record.sessionType === 'overtime' && record.logoutTime)
-      .reduce((total, record) => {
-        const duration = new Date(record.logoutTime!).getTime() - new Date(record.loginTime).getTime();
-        return total + (duration / (1000 * 60 * 60));
-      }, 0);
+    });
 
     return (
       <View style={styles.summarySection}>
@@ -333,17 +494,29 @@ const AttendanceHistoryScreen: React.FC = () => {
             <Text style={styles.summaryLabel}>Sessions</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{totalHours.toFixed(1)}h</Text>
-            <Text style={styles.summaryLabel}>Total Hours</Text>
+            <Text style={styles.summaryValue}>{totalWorkHours.toFixed(1)}h</Text>
+            <Text style={styles.summaryLabel}>Work Hours</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{regularHours.toFixed(1)}h</Text>
+            <Text style={styles.summaryValue}>{totalRegularHours.toFixed(1)}h</Text>
             <Text style={styles.summaryLabel}>Regular</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryValue}>{overtimeHours.toFixed(1)}h</Text>
+            <Text style={[styles.summaryValue, totalOvertimeHours > 0 && styles.overtimeValue]}>
+              {totalOvertimeHours.toFixed(1)}h
+            </Text>
             <Text style={styles.summaryLabel}>Overtime</Text>
           </View>
+        </View>
+        
+        {/* Additional info row */}
+        <View style={styles.summaryInfoRow}>
+          <Text style={styles.summaryInfoText}>
+            Standard work day: {WORK_HOURS_CONFIG.STANDARD_WORK_HOURS} hours
+          </Text>
+          <Text style={styles.summaryInfoText}>
+            Overtime after: {WORK_HOURS_CONFIG.OVERTIME_THRESHOLD_HOURS} hours
+          </Text>
         </View>
       </View>
     );
@@ -376,7 +549,9 @@ const AttendanceHistoryScreen: React.FC = () => {
           </Text>
           
           {filteredHistory.length > 0 ? (
-            filteredHistory.map((record, index) => renderAttendanceRecord(record, index))
+            filteredHistory.map((record, index) => (
+              <AttendanceRecordItem key={record.id || index} record={record} index={index} />
+            ))
           ) : (
             <View style={styles.noDataContainer}>
               <Text style={styles.noDataText}>
@@ -587,11 +762,47 @@ const styles = StyleSheet.create({
   durationValue: {
     color: '#007AFF',
   },
+  regularHoursValue: {
+    color: '#28a745',
+  },
+  overtimeValue: {
+    color: '#ff6b35',
+    fontWeight: 'bold',
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  overtimeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: '#ff6b35',
+  },
+  overtimeBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  summaryInfoRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+  },
+  summaryInfoText: {
+    fontSize: 12,
+    color: '#6c757d',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
   locationRow: {
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#e9ecef',
+    flexDirection: 'column',
   },
   locationLabel: {
     fontSize: 12,
@@ -601,7 +812,7 @@ const styles = StyleSheet.create({
   locationValue: {
     fontSize: 12,
     color: '#333',
-    fontFamily: 'monospace',
+    fontFamily: 'monospace', // Use monospace for better coordinate display
   },
   accuracyValue: {
     fontSize: 12,

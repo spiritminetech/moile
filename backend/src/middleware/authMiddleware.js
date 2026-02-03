@@ -55,12 +55,13 @@ export const verifyToken = async (req, res, next) => {
 
     // ✅ Attach user info to request (matching your auth controller structure)
     req.user = {
+      id: decoded.userId,  // ← Fix: use 'id' to match controller expectations
       userId: decoded.userId,
       companyId: decoded.companyId,
       role: decoded.role, // Use from token (already validated in login)
       email: decoded.email,
-      name: user.name,
-        employeeId: employee?.id
+      name: employee?.fullName || user.name || decoded.email, // Use employee fullName
+      employeeId: employee?.id
     };
 
     next();

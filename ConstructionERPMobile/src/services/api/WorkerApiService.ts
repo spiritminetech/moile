@@ -158,7 +158,7 @@ export class WorkerApiService {
     createdAt: string;
     updatedAt: string;
   }>> {
-    return apiClient.get(`/project/${projectId}`);
+    return apiClient.get(`/projects/${projectId}`);
   }
 
   // Task Management APIs
@@ -197,6 +197,7 @@ export class WorkerApiService {
           const mappedTask: TaskAssignment = {
             assignmentId: task.assignmentId || task.id || 0,
             projectId: data.project?.id || 1, // Get from project data
+            projectName: data.project?.name || 'Unknown Project', // Add project name
             taskName: task.taskName || task.name || 'Unknown Task',
             description: task.description || '',
             dependencies: task.dependencies || [],
@@ -492,12 +493,13 @@ export class WorkerApiService {
   }
 
   async getTodaysAttendance(): Promise<ApiResponse<{
-    session: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT';
+    session: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT' | 'ON_LUNCH';
     checkInTime: string | null;
     checkOutTime: string | null;
     lunchStartTime: string | null;
     lunchEndTime: string | null;
     overtimeStartTime: string | null;
+    isOnLunchBreak: boolean;
     date: string;
     projectId?: string;
   }>> {
@@ -568,7 +570,7 @@ export class WorkerApiService {
   }
 
   async getCurrentAttendanceStatus(): Promise<ApiResponse<{
-    currentStatus: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT';
+    currentStatus: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT' | 'ON_LUNCH';
     checkInTime: string | null;
     checkOutTime: string | null;
     lunchStartTime: string | null;

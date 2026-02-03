@@ -50,7 +50,7 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
 
     Alert.alert(
       'Task Details',
-      `Task: ${task.taskName}\nStatus: ${task.status}\nProject ID: ${task.projectId}\nEstimated Hours: ${task.estimatedHours}h\nActual Hours: ${task.actualHours || 'N/A'}h\nCreated: ${formatDate(task.createdAt)}\nCompleted: ${formatDate(task.completedAt)}\n\nDescription:\n${task.description}`,
+      `Task: ${task.taskName}\nStatus: ${task.status}\nProject: ${task.projectName || `#${task.projectId}`}\nEstimated Hours: ${task.estimatedHours}h\nActual Hours: ${task.actualHours || 'N/A'}h\nCreated: ${formatDate(task.createdAt)}\nCompleted: ${formatDate(task.completedAt)}\n\nDescription:\n${task.description}`,
       [{ text: 'OK' }]
     );
   }, []);

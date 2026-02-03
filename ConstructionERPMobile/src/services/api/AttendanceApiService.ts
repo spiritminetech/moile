@@ -28,14 +28,18 @@ export interface AttendanceSubmitResponse {
 }
 
 export interface TodaysAttendanceResponse {
-  session: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT';
+  session: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT' | 'ON_LUNCH';
   checkInTime: string | null;
   checkOutTime: string | null;
   lunchStartTime: string | null;
   lunchEndTime: string | null;
   overtimeStartTime: string | null;
+  isOnLunchBreak: boolean;
   date: string;
   projectId?: string;
+  // Duration fields from backend API (in minutes)
+  workDuration?: number;
+  lunchDuration?: number;
 }
 
 export interface LunchReminderRequest {
@@ -150,7 +154,7 @@ export interface LunchEndResponse {
 }
 
 export interface WorkerAttendanceStatusResponse {
-  currentStatus: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT';
+  currentStatus: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT' | 'ON_LUNCH';
   checkInTime: string | null;
   checkOutTime: string | null;
   lunchStartTime: string | null;

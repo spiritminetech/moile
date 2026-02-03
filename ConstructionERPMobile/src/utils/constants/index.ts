@@ -15,13 +15,13 @@ const getApiBaseUrl = (): string => {
   if (__DEV__) {
     if (Platform.OS === 'android') {
       // Android emulator uses 10.0.2.2 to reach host machine
-      return 'http://10.0.2.2:5002/api';
+      return 'http://192.168.0.3:5002/api';
     } else if (Platform.OS === 'ios') {
       // iOS simulator can use localhost, but physical device needs actual IP
-      return 'http://192.168.1.8:5002/api';  // Your computer's IP
+      return 'http://192.168.0.3:5002/api';  // Your computer's IP
     } else {
       // Web or other platforms - use your actual IP
-      return 'http://192.168.1.8:5002/api';  // Your computer's IP
+      return 'http://192.168.0.3:5002/api';  // Your computer's IP
     }
   }
 
@@ -42,6 +42,14 @@ export const GPS_CONFIG = {
   LOCATION_TIMEOUT: 15000, // milliseconds
   MAXIMUM_AGE: 60000, // milliseconds
   GEOFENCE_BUFFER: 5, // meters buffer for geofence validation
+  // Development mode settings
+  ENABLE_FALLBACK_LOCATION: __DEV__, // Enable fallback location in development
+  BYPASS_GEOFENCE_IN_DEV: true, // Always bypass geofence validation in development
+  FALLBACK_COORDINATES: {
+    latitude: 12.9716,   // Bangalore coordinates - change this to match your project location
+    longitude: 77.5946,
+    accuracy: 10
+  }
 } as const;
 
 export const STORAGE_KEYS = {
@@ -81,6 +89,14 @@ export const ATTENDANCE_SESSION_TYPES = {
   REGULAR: 'regular',
   OVERTIME: 'overtime',
   LUNCH: 'lunch',
+} as const;
+
+export const WORK_HOURS_CONFIG = {
+  STANDARD_WORK_HOURS: 8, // 8 hours per day
+  WORK_START_HOUR: 8, // 8:00 AM
+  WORK_END_HOUR: 17, // 5:00 PM (8 hours + 1 hour lunch)
+  LUNCH_DURATION_MINUTES: 60, // 1 hour lunch break
+  OVERTIME_THRESHOLD_HOURS: 8, // Overtime after 8 hours of work
 } as const;
 
 export const UI_CONSTANTS = {

@@ -46,6 +46,7 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
         const mappedTasks: TaskAssignment[] = sortedTasks.map((task: any) => ({
           assignmentId: task.assignmentId,
           projectId: task.projectId || 1, // Use project ID from API response or fallback
+          projectName: task.projectName || `Project #${task.projectId || 1}`, // Add project name mapping
           taskName: task.taskName,
           description: task.taskType,
           dependencies: [],

@@ -104,7 +104,7 @@ export const clockIn = async (req, res) => {
 
     /* 2️⃣ Validate project */
     const project = await Project.findOne({ id: projectId, companyId });
-    if (!project) return res.status(404).json({ message: "Project not found" });
+    if (!project) return res.status(404).json({ success: false, message: "Project not found" });
 
     /* 3️⃣ Validate task assignment for today */
     const today = getTodayString();
@@ -113,20 +113,35 @@ export const clockIn = async (req, res) => {
       projectId,
       date: today
     });
-    if (!assignment) return res.status(400).json({ message: "No task assigned for this project today" });
+    if (!assignment) return res.status(400).json({ success: false, message: "No task assigned for this project today" });
 
     /* 4️⃣ Geofence check */
+    // Use the same coordinate logic as validateLocation
+    const centerLat = project.geofence?.center?.latitude || project.latitude || 0;
+    const centerLng = project.geofence?.center?.longitude || project.longitude || 0;
+    const radius = project.geofence?.radius || project.geofenceRadius || 100;
+
     const distance = getDistanceFromLatLonInMeters(
       latitude,
       longitude,
-      project.latitude,
-      project.longitude
+      centerLat,
+      centerLng
     );
-    if (distance > project.geofenceRadius) {
+    
+    console.log('🔍 Clock-in geofence check:', {
+      userLocation: { latitude, longitude },
+      projectCenter: { latitude: centerLat, longitude: centerLng },
+      distance: distance,
+      radius: radius,
+      isValid: distance <= radius
+    });
+    
+    if (distance > radius) {
       return res.status(400).json({ 
+        success: false,
         message: "Outside project geofence",
         distance: distance,
-        maxDistance: project.geofenceRadius
+        maxDistance: radius
       });
     }
 
@@ -135,6 +150,7 @@ export const clockIn = async (req, res) => {
     
     if (attendance && attendance.checkIn && !attendance.checkOut) {
       return res.status(400).json({ 
+        success: false,
         message: "Already checked in today",
         checkInTime: attendance.checkIn
       });
@@ -174,6 +190,7 @@ export const clockIn = async (req, res) => {
     });
 
     return res.json({ 
+      success: true,
       message: "Clock-in successful",
       checkInTime: attendance.checkIn,
       projectId: projectId,
@@ -186,7 +203,7 @@ export const clockIn = async (req, res) => {
 
   } catch (err) {
     console.error("❌ Worker clock-in error:", err);
-    res.status(500).json({ message: "Clock-in failed" });
+    res.status(500).json({ success: false, message: "Clock-in failed" });
   }
 };
 
@@ -204,39 +221,55 @@ export const clockOut = async (req, res) => {
       companyId,
       status: { $in: ["active", "ACTIVE"] }
     });
-    if (!employee) return res.status(403).json({ message: "Unauthorized employee" });
+    if (!employee) return res.status(403).json({ success: false, message: "Unauthorized employee" });
 
     /* 2️⃣ Validate project */
     const project = await Project.findOne({ id: projectId, companyId });
-    if (!project) return res.status(404).json({ message: "Project not found" });
+    if (!project) return res.status(404).json({ success: false, message: "Project not found" });
 
     /* 3️⃣ Get today's attendance */
     const today = getTodayString();
     const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
 
     if (!attendance || !attendance.checkIn) {
-      return res.status(400).json({ message: "Cannot clock out before clocking in" });
+      return res.status(400).json({ success: false, message: "Cannot clock out before clocking in" });
     }
 
     if (attendance.checkOut) {
       return res.status(400).json({ 
+        success: false,
         message: "Already clocked out today",
         checkOutTime: attendance.checkOut
       });
     }
 
     /* 4️⃣ Geofence check */
+    // Use the same coordinate logic as validateLocation
+    const centerLat = project.geofence?.center?.latitude || project.latitude || 0;
+    const centerLng = project.geofence?.center?.longitude || project.longitude || 0;
+    const radius = project.geofence?.radius || project.geofenceRadius || 100;
+
     const distance = getDistanceFromLatLonInMeters(
       latitude,
       longitude,
-      project.latitude,
-      project.longitude
+      centerLat,
+      centerLng
     );
-    if (distance > project.geofenceRadius) {
+    
+    console.log('🔍 Clock-out geofence check:', {
+      userLocation: { latitude, longitude },
+      projectCenter: { latitude: centerLat, longitude: centerLng },
+      distance: distance,
+      radius: radius,
+      isValid: distance <= radius
+    });
+    
+    if (distance > radius) {
       return res.status(400).json({ 
+        success: false,
         message: "Outside project geofence",
         distance: distance,
-        maxDistance: project.geofenceRadius
+        maxDistance: radius
       });
     }
 
@@ -265,6 +298,7 @@ export const clockOut = async (req, res) => {
     const workDuration = Math.round((attendance.checkOut - attendance.checkIn) / (1000 * 60)); // minutes
 
     return res.json({ 
+      success: true,
       message: "Clock-out successful",
       checkOutTime: attendance.checkOut,
       checkInTime: attendance.checkIn,
@@ -279,7 +313,7 @@ export const clockOut = async (req, res) => {
 
   } catch (err) {
     console.error("❌ Worker clock-out error:", err);
-    res.status(500).json({ message: "Clock-out failed" });
+    res.status(500).json({ success: false, message: "Clock-out failed" });
   }
 };
 
@@ -287,9 +321,15 @@ export const clockOut = async (req, res) => {
    LUNCH START
 --------------------------------------- */
 export const lunchStart = async (req, res) => {
+  console.log('🍽️ Lunch start controller called');
+  console.log('Request body:', req.body);
+  console.log('User from token:', req.user);
+  
   try {
     const { projectId, latitude, longitude, accuracy } = req.body;
     const { userId, companyId } = req.user;
+
+    console.log('🔍 Parameters:', { projectId, userId, companyId });
 
     /* 1️⃣ Resolve employee */
     const employee = await Employee.findOne({
@@ -297,57 +337,61 @@ export const lunchStart = async (req, res) => {
       companyId,
       status: { $in: ["active", "ACTIVE"] }
     });
-    if (!employee) return res.status(403).json({ message: "Unauthorized employee" });
+    if (!employee) {
+      console.log('❌ Employee not found');
+      return res.status(403).json({ success: false, message: "Unauthorized employee" });
+    }
+
+    console.log('✅ Employee found:', employee.id);
 
     /* 2️⃣ Get today's attendance */
     const today = getTodayString();
+    console.log('📅 Today:', today);
+    
     const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
 
     if (!attendance || !attendance.checkIn) {
-      return res.status(400).json({ message: "Must be clocked in to start lunch break" });
+      console.log('❌ No attendance or not checked in');
+      return res.status(400).json({ success: false, message: "Must be clocked in to start lunch break" });
     }
 
+    console.log('✅ Attendance found:', {
+      checkIn: attendance.checkIn,
+      checkOut: attendance.checkOut,
+      lunchStartTime: attendance.lunchStartTime
+    });
+
     if (attendance.checkOut) {
-      return res.status(400).json({ message: "Cannot start lunch break after clocking out" });
+      return res.status(400).json({ success: false, message: "Cannot start lunch break after clocking out" });
     }
 
     if (attendance.lunchStartTime) {
       return res.status(400).json({ 
+        success: false,
         message: "Lunch break already started",
         lunchStartTime: attendance.lunchStartTime
       });
     }
 
     /* 3️⃣ Update attendance record */
+    console.log('🔄 Updating lunch start time...');
     attendance.lunchStartTime = new Date();
     await attendance.save();
+    console.log('✅ Lunch start time saved:', attendance.lunchStartTime);
 
-    /* 4️⃣ Log location */
-    if (latitude && longitude) {
-      const lastLocationLog = await LocationLog.findOne().sort({ id: -1 }).select("id");
-      const nextLocationId = lastLocationLog ? lastLocationLog.id + 1 : 1;
-
-      await LocationLog.create({
-        id: nextLocationId,
-        employeeId: employee.id,
-        projectId,
-        latitude,
-        longitude,
-        insideGeofence: true,
-        logType: 'LUNCH_START',
-        accuracy: accuracy || null
-      });
-    }
-
-    return res.json({ 
+    const response = { 
+      success: true,
       message: "Lunch break started",
       lunchStartTime: attendance.lunchStartTime,
       projectId: projectId
-    });
+    };
+    
+    console.log('📤 Sending response:', response);
+    return res.json(response);
 
   } catch (err) {
     console.error("❌ Worker lunch start error:", err);
-    res.status(500).json({ message: "Lunch break start failed" });
+    res.status(500).json({ success: false, message: "Lunch break start failed" });
   }
 };
 
@@ -365,26 +409,30 @@ export const lunchEnd = async (req, res) => {
       companyId,
       status: { $in: ["active", "ACTIVE"] }
     });
-    if (!employee) return res.status(403).json({ message: "Unauthorized employee" });
+    if (!employee) {
+      console.log('❌ Employee not found');
+      return res.status(403).json({ success: false, message: "Unauthorized employee" });
+    }
 
     /* 2️⃣ Get today's attendance */
     const today = getTodayString();
     const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
 
     if (!attendance || !attendance.checkIn) {
-      return res.status(400).json({ message: "Must be clocked in to end lunch break" });
+      return res.status(400).json({ success: false, message: "Must be clocked in to end lunch break" });
     }
 
     if (attendance.checkOut) {
-      return res.status(400).json({ message: "Cannot end lunch break after clocking out" });
+      return res.status(400).json({ success: false, message: "Cannot end lunch break after clocking out" });
     }
 
     if (!attendance.lunchStartTime) {
-      return res.status(400).json({ message: "Lunch break not started" });
+      return res.status(400).json({ success: false, message: "Lunch break not started" });
     }
 
     if (attendance.lunchEndTime) {
       return res.status(400).json({ 
+        success: false,
         message: "Lunch break already ended",
         lunchEndTime: attendance.lunchEndTime
       });
@@ -394,27 +442,11 @@ export const lunchEnd = async (req, res) => {
     attendance.lunchEndTime = new Date();
     await attendance.save();
 
-    /* 4️⃣ Log location */
-    if (latitude && longitude) {
-      const lastLocationLog = await LocationLog.findOne().sort({ id: -1 }).select("id");
-      const nextLocationId = lastLocationLog ? lastLocationLog.id + 1 : 1;
-
-      await LocationLog.create({
-        id: nextLocationId,
-        employeeId: employee.id,
-        projectId,
-        latitude,
-        longitude,
-        insideGeofence: true,
-        logType: 'LUNCH_END',
-        accuracy: accuracy || null
-      });
-    }
-
-    /* 5️⃣ Calculate lunch duration */
+    /* 4️⃣ Calculate lunch duration */
     const lunchDuration = Math.round((attendance.lunchEndTime - attendance.lunchStartTime) / (1000 * 60)); // minutes
 
     return res.json({ 
+      success: true,
       message: "Lunch break ended",
       lunchEndTime: attendance.lunchEndTime,
       lunchStartTime: attendance.lunchStartTime,
@@ -424,7 +456,7 @@ export const lunchEnd = async (req, res) => {
 
   } catch (err) {
     console.error("❌ Worker lunch end error:", err);
-    res.status(500).json({ message: "Lunch break end failed" });
+    res.status(500).json({ success: false, message: "Lunch break end failed" });
   }
 };
 
@@ -540,10 +572,15 @@ export const getAttendanceHistory = async (req, res) => {
     const { projectId, startDate, endDate, limit = 30, page = 1 } = req.query;
     const { userId, companyId } = req.user;
 
+    console.log('🔍 Worker attendance history request:', { userId, companyId, projectId });
+
     const employee = await Employee.findOne({ userId, companyId });
     if (!employee) {
+      console.log('❌ Employee not found for userId:', userId, 'companyId:', companyId);
       return res.status(403).json({ message: "Unauthorized" });
     }
+
+    console.log('👤 Employee found:', { id: employee.id, userId: employee.userId });
 
     // Build query
     const query = {
@@ -560,6 +597,8 @@ export const getAttendanceHistory = async (req, res) => {
       if (endDate) query.date.$lte = endDate;
     }
 
+    console.log('🔍 Attendance query:', query);
+
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -569,12 +608,34 @@ export const getAttendanceHistory = async (req, res) => {
       .limit(parseInt(limit))
       .skip(skip);
 
+    console.log(`📊 Found ${records.length} attendance records`);
+
     // Get total count for pagination
     const totalRecords = await Attendance.countDocuments(query);
     const totalPages = Math.ceil(totalRecords / parseInt(limit));
 
-    // Calculate work durations and format response
+    // Get unique project IDs to fetch project details
+    const projectIds = [...new Set(records.map(record => record.projectId))];
+    console.log('🏗️ Project IDs to fetch:', projectIds);
+
+    // Fetch project details
+    const projects = await Project.find({ 
+      id: { $in: projectIds },
+      companyId 
+    }).select('id projectName projectCode address latitude longitude');
+    
+    console.log(`🏢 Found ${projects.length} projects:`, projects.map(p => ({ id: p.id, name: p.projectName })));
+
+    // Create a map for quick project lookup
+    const projectMap = {};
+    projects.forEach(project => {
+      projectMap[project.id] = project;
+    });
+
+    // Calculate work durations and format response with project names and location
     const formattedRecords = records.map(record => {
+      const project = projectMap[record.projectId];
+      
       let workDuration = 0;
       let lunchDuration = 0;
 
@@ -587,22 +648,37 @@ export const getAttendanceHistory = async (req, res) => {
         lunchDuration = Math.round((record.lunchEndTime - record.lunchStartTime) / (1000 * 60)); // minutes
       }
 
-      return {
+      const formatted = {
+        employeeId: record.employeeId.toString(),
+        projectId: record.projectId.toString(),
+        projectName: project ? project.projectName : `Project #${record.projectId}`,
         date: record.date,
-        projectId: record.projectId,
         checkInTime: record.checkIn,
         checkOutTime: record.checkOut,
         lunchStartTime: record.lunchStartTime,
         lunchEndTime: record.lunchEndTime,
+        overtimeStartTime: record.overtimeStartTime,
         workDuration: workDuration,
         lunchDuration: lunchDuration,
         insideGeofenceAtCheckin: record.insideGeofenceAtCheckin,
         insideGeofenceAtCheckout: record.insideGeofenceAtCheckout,
-        overtimeStartTime: record.overtimeStartTime
+        pendingCheckout: record.pendingCheckout,
+        // Include location data if available
+        latitude: record.lastLatitude || (project ? project.latitude : null),
+        longitude: record.lastLongitude || (project ? project.longitude : null),
       };
+
+      console.log('🔄 Formatted record:', {
+        projectId: formatted.projectId,
+        projectName: formatted.projectName,
+        latitude: formatted.latitude,
+        longitude: formatted.longitude
+      });
+
+      return formatted;
     });
 
-    res.json({ 
+    const response = {
       records: formattedRecords,
       pagination: {
         currentPage: parseInt(page),
@@ -612,7 +688,10 @@ export const getAttendanceHistory = async (req, res) => {
         hasNextPage: parseInt(page) < totalPages,
         hasPrevPage: parseInt(page) > 1
       }
-    });
+    };
+
+    console.log('📤 Sending worker attendance response with', formattedRecords.length, 'records');
+    res.json(response);
   } catch (err) {
     console.error('Error fetching worker attendance history:', err);
     res.status(500).json({ message: "Failed to fetch attendance history" });
