@@ -15,10 +15,12 @@ import {
   FlatList,
   ActivityIndicator,
   Dimensions,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
-import { TeamMember, TaskAssignmentRequest } from '../../types';
+import { TeamMember, TaskAssignment } from '../../types';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 import {
   ConstructionCard,
@@ -115,6 +117,66 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
       attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
     };
   }, [supervisorState.teamMembers]);
+
+  // Get project-based team summary for display
+  const projectTeamSummary = useMemo(() => {
+    const projectMap = new Map();
+    
+    // Group team members by project
+    supervisorState.teamMembers.forEach(member => {
+      // Find the project this member belongs to
+      const project = supervisorState.assignedProjects.find(p => {
+        // For now, we'll assign members to projects based on some logic
+        // TODO: This should come from the backend API
+        return true; // Assign all members to first project for now
+      });
+      
+      if (project) {
+        if (!projectMap.has(project.id)) {
+          projectMap.set(project.id, {
+            project,
+            members: [],
+            summary: {
+              total: 0,
+              present: 0,
+              absent: 0,
+              late: 0,
+              onBreak: 0,
+              progress: 0
+            }
+          });
+        }
+        
+        const projectData = projectMap.get(project.id);
+        projectData.members.push(member);
+        projectData.summary.total++;
+        
+        switch (member.attendanceStatus) {
+          case 'present':
+            projectData.summary.present++;
+            break;
+          case 'absent':
+            projectData.summary.absent++;
+            break;
+          case 'late':
+            projectData.summary.late++;
+            break;
+          case 'on_break':
+            projectData.summary.onBreak++;
+            break;
+        }
+        
+        // Calculate average task progress for the project
+        const membersWithTasks = projectData.members.filter((m: TeamMember) => m.currentTask);
+        if (membersWithTasks.length > 0) {
+          const totalProgress = membersWithTasks.reduce((sum: number, m: TeamMember) => sum + (m.currentTask?.progress || 0), 0);
+          projectData.summary.progress = Math.round(totalProgress / membersWithTasks.length);
+        }
+      }
+    });
+    
+    return Array.from(projectMap.values());
+  }, [supervisorState.teamMembers, supervisorState.assignedProjects]);
 
   // Load member details when selected
   const loadMemberDetails = useCallback(async (member: TeamMember) => {
@@ -283,92 +345,155 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Team Management</Text>
-        <TouchableOpacity
-          style={styles.filtersButton}
-          onPress={() => setShowFilters(true)}
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar backgroundColor={ConstructionTheme.colors.primary} barStyle="light-content" />
+      <View style={styles.container}>
+        {/* Header - Fixed at top */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Team Management</Text>
+          <TouchableOpacity
+            style={styles.filtersButton}
+            onPress={() => setShowFilters(true)}
+          >
+            <Text style={styles.filtersButtonIcon}>⚙️</Text>
+            <Text style={styles.filtersButtonText}>Filters</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Scrollable Content */}
+        <ScrollView 
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              colors={[ConstructionTheme.colors.primary]}
+              tintColor={ConstructionTheme.colors.primary}
+            />
+          }
+          showsVerticalScrollIndicator={true}
+          bounces={true}
+          alwaysBounceVertical={false}
+          nestedScrollEnabled={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.filtersButtonIcon}>⚙️</Text>
-          <Text style={styles.filtersButtonText}>Filters</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Team Summary */}
-      <ConstructionCard title="Team Summary" variant="elevated" style={styles.summaryCard}>
-        <View style={styles.summaryGrid}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>{teamSummary.total}</Text>
-            <Text style={styles.summaryLabel}>Total Members</Text>
+        {/* Team Summary */}
+        <ConstructionCard title="Team Summary" variant="elevated" style={styles.summaryCard}>
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryNumber}>{teamSummary.total}</Text>
+              <Text style={styles.summaryLabel}>Total Members</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.success }]}>
+                {teamSummary.present}
+              </Text>
+              <Text style={styles.summaryLabel}>Present</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.error }]}>
+                {teamSummary.absent}
+              </Text>
+              <Text style={styles.summaryLabel}>Absent</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.warning }]}>
+                {teamSummary.late}
+              </Text>
+              <Text style={styles.summaryLabel}>Late</Text>
+            </View>
           </View>
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.success }]}>
-              {teamSummary.present}
+          
+          <View style={styles.summaryFooter}>
+            <Text style={styles.attendanceRate}>
+              Attendance Rate: {teamSummary.attendanceRate}%
             </Text>
-            <Text style={styles.summaryLabel}>Present</Text>
+            {teamSummary.geofenceViolations > 0 && (
+              <Text style={styles.geofenceAlert}>
+                ⚠️ {teamSummary.geofenceViolations} geofence violations
+              </Text>
+            )}
           </View>
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.error }]}>
-              {teamSummary.absent}
-            </Text>
-            <Text style={styles.summaryLabel}>Absent</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.warning }]}>
-              {teamSummary.late}
-            </Text>
-            <Text style={styles.summaryLabel}>Late</Text>
-          </View>
-        </View>
-        
-        <View style={styles.summaryFooter}>
-          <Text style={styles.attendanceRate}>
-            Attendance Rate: {teamSummary.attendanceRate}%
-          </Text>
-          {teamSummary.geofenceViolations > 0 && (
-            <Text style={styles.geofenceAlert}>
-              ⚠️ {teamSummary.geofenceViolations} geofence violations
-            </Text>
-          )}
-        </View>
-      </ConstructionCard>
+        </ConstructionCard>
 
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <ConstructionInput
-          placeholder="Search team members..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          icon="🔍"
-          style={styles.searchInput}
-        />
-      </View>
+        {/* Project-based Team Overview */}
+        {projectTeamSummary.length > 0 && (
+          <ConstructionCard title="Projects Overview" variant="elevated" style={styles.summaryCard}>
+            {projectTeamSummary.map((projectData) => (
+              <View key={projectData.project.id} style={styles.projectSummaryCard}>
+                <View style={styles.projectHeader}>
+                  <Text style={styles.projectName}>{projectData.project.name}</Text>
+                  <Text style={styles.projectWorkerCount}>
+                    {projectData.summary.total} workers
+                  </Text>
+                </View>
+                
+                <View style={styles.projectStats}>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, { color: ConstructionTheme.colors.success }]}>
+                      {projectData.summary.present}
+                    </Text>
+                    <Text style={styles.statLabel}>Present</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, { color: ConstructionTheme.colors.error }]}>
+                      {projectData.summary.absent}
+                    </Text>
+                    <Text style={styles.statLabel}>Absent</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, { color: ConstructionTheme.colors.warning }]}>
+                      {projectData.summary.late}
+                    </Text>
+                    <Text style={styles.statLabel}>Late</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.progressInfo}>
+                  <Text style={styles.progressLabel}>
+                    Progress: {projectData.summary.progress}%
+                  </Text>
+                  <View style={styles.progressBarContainer}>
+                    <View style={styles.progressBar}>
+                      <View 
+                        style={[
+                          styles.progressFill, 
+                          { width: `${projectData.summary.progress}%` }
+                        ]} 
+                      />
+                    </View>
+                    <Text style={styles.progressText}>{projectData.summary.progress}%</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </ConstructionCard>
+        )}
 
-      {/* Error Display */}
-      {supervisorState.error && (
-        <ErrorDisplay
-          error={supervisorState.error}
-          onRetry={handleRefresh}
-          onDismiss={clearError}
-        />
-      )}
-
-      {/* Team Members List - Placeholder for now */}
-      <ScrollView 
-        style={styles.membersList}
-        contentContainerStyle={styles.membersListContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            colors={[ConstructionTheme.colors.primary]}
-            tintColor={ConstructionTheme.colors.primary}
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <ConstructionInput
+            placeholder="Search team members..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            icon="🔍"
+            style={styles.searchInput}
           />
-        }
-        showsVerticalScrollIndicator={false}
-      >
+        </View>
+
+        {/* Error Display */}
+        {supervisorState.error && (
+          <ErrorDisplay
+            error={supervisorState.error}
+            onRetry={handleRefresh}
+            onDismiss={clearError}
+          />
+        )}
+
+        {/* Team Members List */}
+        <View style={styles.membersList}>
         {filteredAndSortedMembers.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateIcon}>👥</Text>
@@ -387,97 +512,117 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
             />
           </View>
         ) : (
-          filteredAndSortedMembers.map((member) => (
-            <TouchableOpacity
-              key={member.id}
-              style={styles.memberCard}
-              onPress={() => handleMemberPress(member)}
-              activeOpacity={0.7}
-            >
-              <ConstructionCard variant="default" padding="medium">
-                <View style={styles.memberCardHeader}>
-                  <View style={styles.memberInfo}>
-                    <Text style={styles.memberName}>{member.name}</Text>
-                    <Text style={styles.memberRole}>{member.role}</Text>
+          <View style={styles.membersContainer}>
+            {filteredAndSortedMembers.map((member) => (
+              <TouchableOpacity
+                key={member.id}
+                style={styles.memberCard}
+                onPress={() => handleMemberPress(member)}
+                activeOpacity={0.7}
+              >
+                <ConstructionCard variant="default" padding="medium">
+                  <View style={styles.memberCardHeader}>
+                    <View style={styles.memberInfo}>
+                      <Text style={styles.memberName} numberOfLines={1} ellipsizeMode="tail">
+                        {member.name}
+                      </Text>
+                      <Text style={styles.memberRole} numberOfLines={1} ellipsizeMode="tail">
+                        {member.role}
+                      </Text>
+                    </View>
+                    <View style={styles.statusContainer}>
+                      <Text style={styles.statusIcon}>{getStatusIcon(member.attendanceStatus)}</Text>
+                      <Text 
+                        style={[styles.statusText, { color: getStatusColor(member.attendanceStatus) }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {member.attendanceStatus.replace('_', ' ').toUpperCase()}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.statusContainer}>
-                    <Text style={styles.statusIcon}>{getStatusIcon(member.attendanceStatus)}</Text>
-                    <Text style={[styles.statusText, { color: getStatusColor(member.attendanceStatus) }]}>
-                      {member.attendanceStatus.replace('_', ' ').toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
 
-                <View style={styles.memberCardContent}>
-                  {/* Current Task */}
-                  {member.currentTask ? (
-                    <View style={styles.taskInfo}>
-                      <Text style={styles.taskLabel}>Current Task:</Text>
-                      <Text style={styles.taskName}>{member.currentTask.name}</Text>
-                      <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
-                          <View 
-                            style={[
-                              styles.progressFill, 
-                              { width: `${member.currentTask.progress}%` }
-                            ]} 
-                          />
+                  <View style={styles.memberCardContent}>
+                    {/* Current Task */}
+                    {member.currentTask ? (
+                      <View style={styles.taskInfo}>
+                        <Text style={styles.taskLabel}>Current Task:</Text>
+                        <Text style={styles.taskName} numberOfLines={2} ellipsizeMode="tail">
+                          {member.currentTask.name}
+                        </Text>
+                        <View style={styles.progressContainer}>
+                          <View style={styles.progressBar}>
+                            <View 
+                              style={[
+                                styles.progressFill, 
+                                { width: `${member.currentTask.progress}%` }
+                              ]} 
+                            />
+                          </View>
+                          <Text style={styles.progressText}>{member.currentTask.progress}%</Text>
                         </View>
-                        <Text style={styles.progressText}>{member.currentTask.progress}%</Text>
                       </View>
-                    </View>
-                  ) : (
-                    <View style={styles.taskInfo}>
-                      <Text style={styles.noTaskText}>No active task assigned</Text>
-                    </View>
-                  )}
+                    ) : (
+                      <View style={styles.taskInfo}>
+                        <Text style={styles.noTaskText} numberOfLines={1}>
+                          No active task assigned
+                        </Text>
+                      </View>
+                    )}
 
-                  {/* Location Status */}
-                  <View style={styles.locationInfo}>
-                    <Text style={styles.locationLabel}>Location:</Text>
-                    <View style={styles.locationStatus}>
-                      <Text style={styles.locationIcon}>
-                        {member.location.insideGeofence ? '📍' : '⚠️'}
-                      </Text>
-                      <Text style={[
-                        styles.locationText,
-                        { color: member.location.insideGeofence ? ConstructionTheme.colors.success : ConstructionTheme.colors.warning }
-                      ]}>
-                        {member.location.insideGeofence ? 'On Site' : 'Outside Geofence'}
+                    {/* Location Status */}
+                    <View style={styles.locationInfo}>
+                      <Text style={styles.locationLabel}>Location:</Text>
+                      <View style={styles.locationStatus}>
+                        <Text style={styles.locationIcon}>
+                          {member.location.insideGeofence ? '📍' : '⚠️'}
+                        </Text>
+                        <Text 
+                          style={[
+                            styles.locationText,
+                            { color: member.location.insideGeofence ? ConstructionTheme.colors.success : ConstructionTheme.colors.warning }
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {member.location.insideGeofence ? 'On Site' : 'Outside Geofence'}
+                        </Text>
+                      </View>
+                      <Text style={styles.lastUpdated} numberOfLines={1}>
+                        Updated: {new Date(member.location.lastUpdated).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
                       </Text>
                     </View>
-                    <Text style={styles.lastUpdated}>
-                      Updated: {new Date(member.location.lastUpdated).toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </Text>
                   </View>
-                </View>
 
-                {/* Quick Actions */}
-                <View style={styles.quickActions}>
-                  <TouchableOpacity
-                    style={[styles.quickActionButton, styles.messageButton]}
-                    onPress={() => handleSendMessage(member)}
-                  >
-                    <Text style={styles.quickActionIcon}>💬</Text>
-                    <Text style={styles.quickActionText}>Message</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[styles.quickActionButton, styles.taskButton]}
-                    onPress={() => handleAssignTask(member)}
-                  >
-                    <Text style={styles.quickActionIcon}>📋</Text>
-                    <Text style={styles.quickActionText}>Assign Task</Text>
-                  </TouchableOpacity>
-                </View>
-              </ConstructionCard>
-            </TouchableOpacity>
-          ))
+                  {/* Quick Actions */}
+                  <View style={styles.quickActions}>
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.messageButton]}
+                      onPress={() => handleSendMessage(member)}
+                    >
+                      <Text style={styles.quickActionIcon}>💬</Text>
+                      <Text style={styles.quickActionText}>Message</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.taskButton]}
+                      onPress={() => handleAssignTask(member)}
+                    >
+                      <Text style={styles.quickActionIcon}>📋</Text>
+                      <Text style={styles.quickActionText}>Assign Task</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ConstructionCard>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
+        </View>
       </ScrollView>
+      </View>
 
       {/* Filters Modal */}
       <Modal
@@ -851,14 +996,25 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: ConstructionTheme.colors.primary,
+  },
   container: {
     flex: 1,
     backgroundColor: ConstructionTheme.colors.background,
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 120, // Increased padding to ensure content is fully visible above navigation
   },
   header: {
     flexDirection: 'row',
@@ -869,6 +1025,7 @@ const styles = StyleSheet.create({
     paddingBottom: ConstructionTheme.spacing.md,
     backgroundColor: ConstructionTheme.colors.primary,
     ...ConstructionTheme.shadows.medium,
+    zIndex: 1, // Ensure header stays on top
   },
   title: {
     ...ConstructionTheme.typography.headlineMedium,
@@ -934,6 +1091,59 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.warning,
     fontWeight: 'bold',
   },
+  // Project summary styles
+  projectSummaryCard: {
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    padding: ConstructionTheme.spacing.md,
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  projectHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  projectName: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  projectWorkerCount: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
+  },
+  projectStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    ...ConstructionTheme.typography.headlineSmall,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  statLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+  progressInfo: {
+    marginTop: ConstructionTheme.spacing.sm,
+  },
+  progressLabel: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  progressBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   searchContainer: {
     paddingHorizontal: ConstructionTheme.spacing.md,
     paddingVertical: ConstructionTheme.spacing.sm,
@@ -942,23 +1152,30 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   membersList: {
-    flex: 1,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingTop: ConstructionTheme.spacing.sm,
+    paddingBottom: ConstructionTheme.spacing.lg, // Added bottom padding for member cards
+  },
+  membersContainer: {
+    // Container for all member cards
   },
   membersListContent: {
     paddingHorizontal: ConstructionTheme.spacing.md,
     paddingBottom: ConstructionTheme.spacing.xl,
   },
   memberCard: {
-    marginBottom: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.md,
   },
   memberCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: ConstructionTheme.spacing.md,
+    minHeight: 50,
   },
   memberInfo: {
     flex: 1,
+    marginRight: ConstructionTheme.spacing.md,
   },
   memberName: {
     ...ConstructionTheme.typography.headlineSmall,
@@ -973,6 +1190,8 @@ const styles = StyleSheet.create({
   statusContainer: {
     alignItems: 'center',
     minWidth: 80,
+    maxWidth: 100,
+    flexShrink: 0,
   },
   statusIcon: {
     fontSize: 24,
@@ -1026,6 +1245,7 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onSurfaceVariant,
     fontWeight: 'bold',
     minWidth: 35,
+    textAlign: 'right',
   },
   locationInfo: {
     marginBottom: ConstructionTheme.spacing.md,
@@ -1047,6 +1267,7 @@ const styles = StyleSheet.create({
   locationText: {
     ...ConstructionTheme.typography.bodyMedium,
     fontWeight: 'bold',
+    flex: 1,
   },
   lastUpdated: {
     ...ConstructionTheme.typography.labelSmall,

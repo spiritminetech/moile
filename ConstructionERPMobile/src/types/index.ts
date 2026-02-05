@@ -822,6 +822,92 @@ export interface DriverContextData {
 }
 
 // Supervisor-Specific Context Data
+export interface SupervisorDashboardResponse {
+  projects: Array<{
+    id: number;
+    name: string;
+    location: string;
+    totalWorkers: number;
+    presentWorkers: number;
+    totalTasks: number;
+    completedTasks: number;
+    inProgressTasks: number;
+    workforceCount: number;
+    attendanceSummary: {
+      total: number;
+      present: number;
+      absent: number;
+      late: number;
+    };
+    progressSummary: {
+      overallProgress: number;
+      totalTasks: number;
+      completedTasks: number;
+      inProgressTasks: number;
+      queuedTasks: number;
+      dailyTarget: number;
+    };
+  }>;
+  teamOverview: {
+    totalMembers: number;
+    presentToday: number;
+    absentToday: number;
+    lateToday: number;
+    onBreak: number;
+  };
+  taskMetrics: {
+    totalTasks: number;
+    completedTasks: number;
+    inProgressTasks: number;
+    queuedTasks: number;
+    overdueTasks: number;
+  };
+  attendanceMetrics: {
+    attendanceRate: number;
+    onTimeRate: number;
+    averageWorkingHours: number;
+  };
+  pendingApprovals: {
+    leaveRequests: number;
+    materialRequests: number;
+    toolRequests: number;
+    urgent: number;
+    total: number;
+  };
+  alerts: Array<{
+    id: number;
+    type: string;
+    title: string;
+    message: string;
+    projectName: string;
+    timestamp: string;
+    severity: string;
+    priority: string;
+    workerId: number;
+    workerName: string;
+  }>;
+  recentActivity: Array<{
+    id: number;
+    type: string;
+    title: string;
+    message: string;
+    projectName: string;
+    timestamp: string;
+    workerId: number;
+    workerName: string;
+    taskId?: number;
+    taskName?: string;
+  }>;
+  summary: {
+    totalProjects: number;
+    totalWorkers: number;
+    totalTasks: number;
+    overallProgress: number;
+    lastUpdated: string;
+    date: string;
+  };
+}
+
 export interface SupervisorContextData {
   assignedProjects: Project[];
   teamMembers: TeamMember[];

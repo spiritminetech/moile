@@ -148,9 +148,7 @@ app.get('/test-image/:filename', (req, res) => {
 
 // MongoDB connection with centralized config
 mongoose.connect(appConfig.database.uri, { 
-  dbName: appConfig.database.name,
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+  dbName: appConfig.database.name
 })
   .then(async () => {
     appConfig.log(`✅ Connected to MongoDB database: ${appConfig.database.name}`);

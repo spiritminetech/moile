@@ -52,8 +52,8 @@ const TaskAssignmentCard: React.FC<TaskAssignmentCardProps> = ({
   }
 
   // Calculate overall task metrics
-  const totalTasks = projects.reduce((sum, project) => sum + project.progressSummary.totalTasks, 0);
-  const completedTasks = projects.reduce((sum, project) => sum + project.progressSummary.completedTasks, 0);
+  const totalTasks = projects.reduce((sum, project) => sum + (project.progressSummary?.totalTasks || 0), 0);
+  const completedTasks = projects.reduce((sum, project) => sum + (project.progressSummary?.completedTasks || 0), 0);
   const overallProgress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   return (
@@ -105,12 +105,12 @@ const TaskAssignmentCard: React.FC<TaskAssignmentCardProps> = ({
         <Text style={styles.projectsTitle}>Project Tasks</Text>
         <ScrollView style={styles.projectsList} showsVerticalScrollIndicator={false}>
           {projects.map((project) => {
-            const projectProgress = project.progressSummary.totalTasks > 0 
-              ? Math.round((project.progressSummary.completedTasks / project.progressSummary.totalTasks) * 100)
+            const projectProgress = (project.progressSummary?.totalTasks || 0) > 0 
+              ? Math.round(((project.progressSummary?.completedTasks || 0) / (project.progressSummary?.totalTasks || 1)) * 100)
               : 0;
             
-            const dailyTargetProgress = project.progressSummary.dailyTarget > 0
-              ? Math.round((project.progressSummary.completedTasks / project.progressSummary.dailyTarget) * 100)
+            const dailyTargetProgress = (project.progressSummary?.dailyTarget || 0) > 0
+              ? Math.round(((project.progressSummary?.completedTasks || 0) / (project.progressSummary?.dailyTarget || 1)) * 100)
               : 0;
 
             return (
@@ -137,7 +137,7 @@ const TaskAssignmentCard: React.FC<TaskAssignmentCardProps> = ({
                 <View style={styles.taskStats}>
                   <View style={styles.taskStatItem}>
                     <Text style={styles.taskStatValue}>
-                      {project.progressSummary.completedTasks}/{project.progressSummary.totalTasks}
+                      {project.progressSummary?.completedTasks || 0}/{project.progressSummary?.totalTasks || 0}
                     </Text>
                     <Text style={styles.taskStatLabel}>Tasks</Text>
                   </View>

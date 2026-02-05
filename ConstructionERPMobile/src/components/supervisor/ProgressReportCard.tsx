@@ -54,12 +54,12 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
   }
 
   // Calculate overall progress metrics
-  const totalTasks = projects.reduce((sum, project) => sum + project.progressSummary.totalTasks, 0);
-  const completedTasks = projects.reduce((sum, project) => sum + project.progressSummary.completedTasks, 0);
+  const totalTasks = projects.reduce((sum, project) => sum + (project.progressSummary?.totalTasks || 0), 0);
+  const completedTasks = projects.reduce((sum, project) => sum + (project.progressSummary?.completedTasks || 0), 0);
   const overallProgress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
   
   // Calculate daily target performance
-  const totalDailyTarget = projects.reduce((sum, project) => sum + project.progressSummary.dailyTarget, 0);
+  const totalDailyTarget = projects.reduce((sum, project) => sum + (project.progressSummary?.dailyTarget || 0), 0);
   const dailyTargetProgress = totalDailyTarget > 0 ? Math.round((completedTasks / totalDailyTarget) * 100) : 0;
 
   // Filter progress-related alerts
@@ -166,8 +166,8 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
         <Text style={styles.projectsTitle}>Project Progress</Text>
         <ScrollView style={styles.projectsList} showsVerticalScrollIndicator={false}>
           {projects.map((project) => {
-            const projectProgress = project.progressSummary.totalTasks > 0 
-              ? Math.round((project.progressSummary.completedTasks / project.progressSummary.totalTasks) * 100)
+            const projectProgress = (project.progressSummary?.totalTasks || 0) > 0 
+              ? Math.round(((project.progressSummary?.completedTasks || 0) / (project.progressSummary?.totalTasks || 1)) * 100)
               : 0;
             
             const projectStatus = getProgressStatus(projectProgress);
@@ -193,7 +193,7 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
                 <View style={styles.projectMetrics}>
                   <View style={styles.projectMetricItem}>
                     <Text style={styles.projectMetricValue}>
-                      {project.progressSummary.completedTasks}/{project.progressSummary.totalTasks}
+                      {project.progressSummary?.completedTasks || 0}/{project.progressSummary?.totalTasks || 0}
                     </Text>
                     <Text style={styles.projectMetricLabel}>Tasks</Text>
                   </View>
@@ -206,11 +206,11 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
                   <View style={styles.projectMetricItem}>
                     <Text style={[
                       styles.projectMetricValue,
-                      { color: project.attendanceSummary.present >= project.attendanceSummary.total * 0.8 
+                      { color: (project.attendanceSummary?.present || 0) >= (project.attendanceSummary?.total || 1) * 0.8 
                         ? ConstructionTheme.colors.success 
                         : ConstructionTheme.colors.warning }
                     ]}>
-                      {Math.round((project.attendanceSummary.present / project.attendanceSummary.total) * 100)}%
+                      {Math.round(((project.attendanceSummary?.present || 0) / (project.attendanceSummary?.total || 1)) * 100)}%
                     </Text>
                     <Text style={styles.projectMetricLabel}>Attendance</Text>
                   </View>

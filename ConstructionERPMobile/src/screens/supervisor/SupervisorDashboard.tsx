@@ -7,7 +7,8 @@ import {
   Alert, 
   ScrollView, 
   RefreshControl,
-  ActivityIndicator 
+  ActivityIndicator,
+  Dimensions 
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
@@ -39,13 +40,80 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
   const loadDashboardData = useCallback(async () => {
     try {
       clearError();
-      const response = await supervisorApiService.getDashboardData();
       
-      if (response.success && response.data) {
-        setDashboardData(response.data);
+      // Get projects data
+      const projectsResponse = await supervisorApiService.getSupervisorProjects();
+      
+      if (projectsResponse.success && projectsResponse.data) {
+        // Transform projects data to match dashboard format
+        const projects = await Promise.all(
+          projectsResponse.data.map(async (project: any) => {
+            // Get attendance data for this project
+            const attendanceResponse = await supervisorApiService.getAttendanceMonitoring({
+              projectId: project.id.toString(),
+              date: new Date().toISOString().split('T')[0]
+            });
+
+            // Get task progress data
+            const tasksResponse = await supervisorApiService.getActiveTasks(project.id);
+
+            let attendanceSummary = {
+              present: 0,
+              absent: 0,
+              late: 0,
+              total: 0
+            };
+
+            let workforceCount = 0;
+
+            if (attendanceResponse.success && attendanceResponse.data?.workers) {
+              const workers = attendanceResponse.data.workers;
+              workforceCount = workers.length;
+              
+              attendanceSummary = {
+                present: workers.filter((w: any) => w.status === 'CHECKED_IN').length,
+                absent: workers.filter((w: any) => w.status === 'ABSENT').length,
+                late: workers.filter((w: any) => w.isLate).length,
+                total: workers.length
+              };
+            }
+
+            // Calculate progress summary (mock for now, TODO: implement real calculation)
+            const progressSummary = {
+              overallProgress: Math.floor(Math.random() * 100), // TODO: Calculate from actual task data
+              completedTasks: 0,
+              totalTasks: 0,
+              onSchedule: true
+            };
+
+            return {
+              id: project.id,
+              name: project.projectName || project.name,
+              location: project.location || 'Unknown',
+              workforceCount,
+              attendanceSummary,
+              progressSummary,
+              alerts: [] // TODO: Get alerts from backend
+            };
+          })
+        );
+
+        const dashboardData: SupervisorDashboardResponse = {
+          projects,
+          pendingApprovals: {
+            leaveRequests: 0,
+            materialRequests: 0,
+            toolRequests: 0,
+            urgent: 0,
+            total: 0
+          },
+          alerts: []
+        };
+
+        setDashboardData(dashboardData);
         setLastRefresh(new Date());
       } else {
-        console.error('Failed to load dashboard data:', response.errors);
+        console.error('Failed to load dashboard data:', projectsResponse.errors);
       }
     } catch (error) {
       console.error('Dashboard data loading error:', error);
@@ -83,9 +151,17 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
 
   // Navigation handlers
   const handleViewTeamDetails = useCallback((projectId: number) => {
-    // TODO: Navigate to team management screen
-    console.log('Navigate to team details for project:', projectId);
-  }, []);
+    if (projectId === 0) {
+      // Navigate to Team Management screen (view all teams)
+      navigation.navigate('Team', { screen: 'TeamMain' });
+    } else {
+      // Navigate to specific project team details
+      navigation.navigate('Team', { 
+        screen: 'TeamMain', 
+        params: { projectId } 
+      });
+    }
+  }, [navigation]);
 
   const handleViewAttendanceDetails = useCallback((projectId: number) => {
     // TODO: Navigate to attendance monitoring screen
@@ -231,15 +307,15 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
           <>
             {/* Team Management Card */}
             <TeamManagementCard
-              projects={dashboardData.projects}
+              projects={dashboardData.projects || []}
               isLoading={supervisorState.teamLoading}
               onViewTeamDetails={handleViewTeamDetails}
             />
 
             {/* Attendance Monitor Card */}
             <AttendanceMonitorCard
-              projects={dashboardData.projects}
-              alerts={dashboardData.alerts}
+              projects={dashboardData.projects || []}
+              alerts={dashboardData.alerts || []}
               isLoading={supervisorState.teamLoading}
               onViewAttendanceDetails={handleViewAttendanceDetails}
               onResolveAlert={handleResolveAlert}
@@ -247,7 +323,7 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
 
             {/* Task Assignment Card */}
             <TaskAssignmentCard
-              projects={dashboardData.projects}
+              projects={dashboardData.projects || []}
               isLoading={supervisorState.isLoading}
               onCreateTask={handleCreateTask}
               onViewTaskDetails={handleViewTaskDetails}
@@ -256,7 +332,13 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
 
             {/* Approval Queue Card */}
             <ApprovalQueueCard
-              pendingApprovals={dashboardData.pendingApprovals}
+              pendingApprovals={dashboardData.pendingApprovals || {
+                leaveRequests: 0,
+                materialRequests: 0,
+                toolRequests: 0,
+                urgent: 0,
+                total: 0
+              }}
               isLoading={supervisorState.approvalsLoading}
               onViewApproval={handleViewApproval}
               onQuickApprove={handleQuickApprove}
@@ -265,8 +347,8 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
 
             {/* Progress Report Card */}
             <ProgressReportCard
-              projects={dashboardData.projects}
-              alerts={dashboardData.alerts}
+              projects={dashboardData.projects || []}
+              alerts={dashboardData.alerts || []}
               isLoading={supervisorState.reportsLoading}
               onViewProgressDetails={handleViewProgressDetails}
               onCreateReport={handleCreateReport}

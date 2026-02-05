@@ -340,70 +340,86 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
     try {
       dispatch({ type: 'SET_TEAM_LOADING', payload: true });
       
-      // TODO: Replace with actual API calls when SupervisorApiService is implemented
-      // For now, using mock data to complete the context structure
+      // Import the API service
+      const { supervisorApiService } = await import('../../services/api/SupervisorApiService');
       
-      // Mock assigned projects
-      const mockProjects: Project[] = [
-        {
-          id: 1,
-          name: 'Construction Site Alpha',
-          description: 'Main construction project',
+      // Get assigned projects
+      const projectsResponse = await supervisorApiService.getSupervisorProjects();
+      let projects: Project[] = [];
+      
+      if (projectsResponse.success && projectsResponse.data) {
+        projects = projectsResponse.data.map((proj: any) => ({
+          id: proj.id,
+          name: proj.projectName || proj.name,
+          description: proj.description || 'Construction project',
           location: {
-            address: '123 Construction Ave',
-            coordinates: { latitude: 1.3521, longitude: 103.8198, accuracy: 10, timestamp: new Date() },
-            landmarks: ['Near MRT Station'],
+            address: proj.location || 'Unknown location',
+            coordinates: { 
+              latitude: proj.latitude || 0, 
+              longitude: proj.longitude || 0, 
+              accuracy: 10, 
+              timestamp: new Date() 
+            },
+            landmarks: [],
             accessInstructions: 'Enter through main gate'
           },
           geofence: {
-            center: { latitude: 1.3521, longitude: 103.8198, accuracy: 10, timestamp: new Date() },
-            radius: 100,
+            center: { 
+              latitude: proj.latitude || 0, 
+              longitude: proj.longitude || 0, 
+              accuracy: 10, 
+              timestamp: new Date() 
+            },
+            radius: proj.geofenceRadius || 100,
             allowedAccuracy: 20
           },
-          startDate: new Date('2024-01-01'),
-          endDate: new Date('2024-12-31'),
+          startDate: new Date(proj.startDate || '2024-01-01'),
+          endDate: new Date(proj.endDate || '2024-12-31'),
           status: 'active',
           supervisor: {
-            id: 1,
-            name: 'John Supervisor',
-            phone: '+65 9123 4567',
-            email: 'supervisor@company.com'
+            id: proj.supervisorId || 1,
+            name: proj.supervisorName || 'Supervisor',
+            phone: proj.supervisorPhone || '',
+            email: proj.supervisorEmail || ''
           }
-        }
-      ];
+        }));
+      }
 
-      // Mock team members
-      const mockTeamMembers: TeamMember[] = [
-        {
-          id: 1,
-          name: 'Worker One',
-          role: 'Construction Worker',
-          attendanceStatus: 'present',
-          currentTask: {
-            id: 1,
-            name: 'Foundation Work',
-            progress: 75
-          },
+      // Get attendance monitoring data for team members
+      const attendanceResponse = await supervisorApiService.getAttendanceMonitoring({
+        date: new Date().toISOString().split('T')[0]
+      });
+      
+      let teamMembers: TeamMember[] = [];
+      
+      if (attendanceResponse.success && attendanceResponse.data?.workers) {
+        teamMembers = attendanceResponse.data.workers.map((worker: any) => ({
+          id: worker.employeeId,
+          name: worker.workerName,
+          role: worker.role || 'Worker',
+          attendanceStatus: worker.status === 'CHECKED_IN' ? 'present' : 
+                           worker.status === 'ABSENT' ? 'absent' : 
+                           worker.isLate ? 'late' : 'present',
+          currentTask: worker.taskAssigned && worker.taskAssigned !== 'No task assigned' ? {
+            id: worker.employeeId, // Use employeeId as task id for now
+            name: worker.taskAssigned,
+            progress: Math.floor(Math.random() * 100) // TODO: Get actual progress from backend
+          } : undefined,
           location: {
-            latitude: 1.3521,
-            longitude: 103.8198,
-            insideGeofence: true,
-            lastUpdated: new Date().toISOString()
+            latitude: worker.lastKnownLocation?.latitude || 0,
+            longitude: worker.lastKnownLocation?.longitude || 0,
+            insideGeofence: worker.insideGeofence || false,
+            lastUpdated: worker.lastLocationUpdate || new Date().toISOString()
           },
-          certifications: [
-            {
-              name: 'Safety Certification',
-              status: 'active',
-              expiryDate: '2024-12-31'
-            }
-          ]
-        }
-      ];
+          certifications: [] // TODO: Get certifications from backend
+        }));
+      }
 
-      dispatch({ type: 'SET_ASSIGNED_PROJECTS', payload: mockProjects });
-      dispatch({ type: 'SET_TEAM_MEMBERS', payload: mockTeamMembers });
+      dispatch({ type: 'SET_ASSIGNED_PROJECTS', payload: projects });
+      dispatch({ type: 'SET_TEAM_MEMBERS', payload: teamMembers });
       
     } catch (error) {
+      console.error('Error loading team data:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to load team data';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
     } finally {

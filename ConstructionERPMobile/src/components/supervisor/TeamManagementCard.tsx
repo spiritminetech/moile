@@ -38,10 +38,10 @@ const TeamManagementCard: React.FC<TeamManagementCardProps> = ({
     );
   }
 
-  const totalWorkforce = projects.reduce((sum, project) => sum + project.workforceCount, 0);
-  const totalPresent = projects.reduce((sum, project) => sum + project.attendanceSummary.present, 0);
-  const totalAbsent = projects.reduce((sum, project) => sum + project.attendanceSummary.absent, 0);
-  const totalLate = projects.reduce((sum, project) => sum + project.attendanceSummary.late, 0);
+  const totalWorkforce = projects.reduce((sum, project) => sum + (project.workforceCount || 0), 0);
+  const totalPresent = projects.reduce((sum, project) => sum + (project.attendanceSummary?.present || 0), 0);
+  const totalAbsent = projects.reduce((sum, project) => sum + (project.attendanceSummary?.absent || 0), 0);
+  const totalLate = projects.reduce((sum, project) => sum + (project.attendanceSummary?.late || 0), 0);
 
   return (
     <ConstructionCard title="Team Management" variant="default">
@@ -71,7 +71,11 @@ const TeamManagementCard: React.FC<TeamManagementCardProps> = ({
       </View>
 
       {/* Project Details */}
-      <ScrollView style={styles.projectsContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.projectsContainer} 
+        contentContainerStyle={styles.projectsContent}
+        showsVerticalScrollIndicator={false}
+      >
         {projects.map((project) => (
           <TouchableOpacity
             key={project.id}
@@ -92,32 +96,32 @@ const TeamManagementCard: React.FC<TeamManagementCardProps> = ({
               <View style={styles.attendanceItem}>
                 <View style={[styles.attendanceDot, styles.presentDot]} />
                 <Text style={styles.attendanceText}>
-                  {project.attendanceSummary.present} Present
+                  {project.attendanceSummary?.present || 0} Present
                 </Text>
               </View>
               <View style={styles.attendanceItem}>
                 <View style={[styles.attendanceDot, styles.absentDot]} />
                 <Text style={styles.attendanceText}>
-                  {project.attendanceSummary.absent} Absent
+                  {project.attendanceSummary?.absent || 0} Absent
                 </Text>
               </View>
               <View style={styles.attendanceItem}>
                 <View style={[styles.attendanceDot, styles.lateDot]} />
                 <Text style={styles.attendanceText}>
-                  {project.attendanceSummary.late} Late
+                  {project.attendanceSummary?.late || 0} Late
                 </Text>
               </View>
             </View>
 
             <View style={styles.progressContainer}>
               <Text style={styles.progressLabel}>
-                Progress: {project.progressSummary.overallProgress}%
+                Progress: {project.progressSummary?.overallProgress || 0}%
               </Text>
               <View style={styles.progressBar}>
                 <View 
                   style={[
                     styles.progressFill, 
-                    { width: `${project.progressSummary.overallProgress}%` }
+                    { width: `${project.progressSummary?.overallProgress || 0}%` }
                   ]} 
                 />
               </View>
@@ -189,14 +193,18 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onSurfaceVariant,
   },
   projectsContainer: {
-    maxHeight: 200,
+    maxHeight: 400, // Increased to show all 3 projects clearly without cutting off
     marginBottom: ConstructionTheme.spacing.md,
+  },
+  projectsContent: {
+    paddingBottom: ConstructionTheme.spacing.sm, // Add padding to ensure last project is fully visible
   },
   projectCard: {
     backgroundColor: ConstructionTheme.colors.surfaceVariant,
     borderRadius: ConstructionTheme.borderRadius.sm,
     padding: ConstructionTheme.spacing.md,
-    marginBottom: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.md, // Increased margin for better spacing
+    minHeight: 100, // Increased minimum height to ensure all content is visible
     ...ConstructionTheme.shadows.small,
   },
   projectHeader: {

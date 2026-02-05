@@ -1,8 +1,11 @@
 import express from 'express';
-import { getAssignedWorkers,removeQueuedTask, exportReport, refreshAttendance, getSupervisorProjects,getCheckedInWorkers,getProjectTasks,getWorkerTasks ,assignTask,completeTask,getWorkerTasksForDay ,getActiveTasks, updateTaskAssignment, sendOvertimeInstructions, updateDailyTargets, getLateAbsentWorkers, sendAttendanceAlert, getGeofenceViolations, getManualAttendanceWorkers, submitManualAttendanceOverride, getAttendanceMonitoring} from './supervisorController.js';
+import { getAssignedWorkers,removeQueuedTask, exportReport, refreshAttendance, getSupervisorProjects,getCheckedInWorkers,getProjectTasks,getWorkerTasks ,assignTask,completeTask,getWorkerTasksForDay ,getActiveTasks, updateTaskAssignment, sendOvertimeInstructions, updateDailyTargets, getLateAbsentWorkers, sendAttendanceAlert, getGeofenceViolations, getManualAttendanceWorkers, submitManualAttendanceOverride, getAttendanceMonitoring, getDashboardData} from './supervisorController.js';
 import {getTodayWorkerSubmissions,reviewWorkerProgress} from "../supervisor/submodules/supervisorReviewController.js";
 const router = express.Router();
 import { verifyToken } from '../../middleware/authMiddleware.js';
+
+// Dashboard endpoint
+router.get('/dashboard', getDashboardData);
 
 
 

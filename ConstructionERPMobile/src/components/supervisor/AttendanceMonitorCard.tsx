@@ -49,9 +49,9 @@ const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
   }
 
   // Calculate overall attendance metrics
-  const totalWorkers = projects.reduce((sum, project) => sum + project.attendanceSummary.total, 0);
-  const totalPresent = projects.reduce((sum, project) => sum + project.attendanceSummary.present, 0);
-  const totalLate = projects.reduce((sum, project) => sum + project.attendanceSummary.late, 0);
+  const totalWorkers = projects.reduce((sum, project) => sum + (project.attendanceSummary?.total || 0), 0);
+  const totalPresent = projects.reduce((sum, project) => sum + (project.attendanceSummary?.present || 0), 0);
+  const totalLate = projects.reduce((sum, project) => sum + (project.attendanceSummary?.late || 0), 0);
   const attendanceRate = totalWorkers > 0 ? Math.round((totalPresent / totalWorkers) * 100) : 0;
 
   // Filter attendance-related alerts
@@ -129,8 +129,8 @@ const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
         <Text style={styles.projectsTitle}>Project Breakdown</Text>
         <ScrollView style={styles.projectsList} showsVerticalScrollIndicator={false}>
           {projects.map((project) => {
-            const projectAttendanceRate = project.attendanceSummary.total > 0 
-              ? Math.round((project.attendanceSummary.present / project.attendanceSummary.total) * 100)
+            const projectAttendanceRate = (project.attendanceSummary?.total || 0) > 0 
+              ? Math.round(((project.attendanceSummary?.present || 0) / (project.attendanceSummary?.total || 1)) * 100)
               : 0;
             
             return (
@@ -154,11 +154,11 @@ const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
                 
                 <View style={styles.projectMetrics}>
                   <Text style={styles.projectMetricText}>
-                    {project.attendanceSummary.present}/{project.attendanceSummary.total} present
+                    {project.attendanceSummary?.present || 0}/{project.attendanceSummary?.total || 0} present
                   </Text>
-                  {project.attendanceSummary.late > 0 && (
+                  {(project.attendanceSummary?.late || 0) > 0 && (
                     <Text style={[styles.projectMetricText, styles.lateText]}>
-                      {project.attendanceSummary.late} late
+                      {project.attendanceSummary?.late || 0} late
                     </Text>
                   )}
                 </View>
