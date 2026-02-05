@@ -62,6 +62,20 @@ export const STORAGE_KEYS = {
   CACHED_TASKS: '@construction_erp:cached_tasks',
   CACHED_ATTENDANCE: '@construction_erp:cached_attendance',
   LAST_SYNC: '@construction_erp:last_sync',
+  // Driver-specific storage keys
+  DRIVER_TRANSPORT_TASKS: '@construction_erp:driver_transport_tasks',
+  DRIVER_VEHICLE_INFO: '@construction_erp:driver_vehicle_info',
+  DRIVER_TRIP_HISTORY: '@construction_erp:driver_trip_history',
+  DRIVER_PERFORMANCE: '@construction_erp:driver_performance',
+  DRIVER_MAINTENANCE_ALERTS: '@construction_erp:driver_maintenance_alerts',
+  DRIVER_LAST_SYNC: '@construction_erp:driver_last_sync',
+  // Supervisor-specific storage keys
+  SUPERVISOR_TEAM_MEMBERS: '@construction_erp:supervisor_team_members',
+  SUPERVISOR_PENDING_APPROVALS: '@construction_erp:supervisor_pending_approvals',
+  SUPERVISOR_DAILY_REPORTS: '@construction_erp:supervisor_daily_reports',
+  SUPERVISOR_MATERIAL_REQUESTS: '@construction_erp:supervisor_material_requests',
+  SUPERVISOR_TOOL_ALLOCATIONS: '@construction_erp:supervisor_tool_allocations',
+  SUPERVISOR_LAST_SYNC: '@construction_erp:supervisor_last_sync',
 } as const;
 
 // Notification types removed - notification features not needed

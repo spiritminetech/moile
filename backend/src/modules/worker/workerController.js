@@ -9,6 +9,7 @@ import FleetTaskPassenger from "../fleetTask/submodules/fleetTaskPassenger/Fleet
 import Project from '../project/models/Project.js';
 import FleetVehicle from "../fleetTask/submodules/fleetvehicle/FleetVehicle.js";
 import Employee from "../employee/Employee.js";
+import EmployeeWorkPass from "../employee/EmployeeWorkPass.js";
 import User from "../user/User.js";
 import Company from "../company/Company.js";
 import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
@@ -136,11 +137,12 @@ export const getWorkerProfile = async (req, res) => {
       });
     }
 
-    // Fetch company, user, and employee details in parallel for efficiency
-    const [company, user, employee] = await Promise.all([
+    // Fetch company, user, employee details, and work pass in parallel for efficiency
+    const [company, user, employee, workPass] = await Promise.all([
       Company.findOne({ id: companyId }),
       User.findOne({ id: userId }),
       Employee.findOne({ userId: userId, companyId: companyId }),
+      EmployeeWorkPass.findOne({ employeeId: userId }).sort({ createdAt: -1 }) // Get latest work pass
     ]);
 
     if (!company) {
@@ -164,7 +166,7 @@ export const getWorkerProfile = async (req, res) => {
       });
     }
 
-    // Construct profile
+    // Construct profile with work pass information
     const profile = {
       id: userId,
       employeeId: employee.id,
@@ -178,6 +180,21 @@ export const getWorkerProfile = async (req, res) => {
       jobTitle: employee.jobTitle || "Worker",
       department: employee.department || "Construction",
       status: employee.status || "ACTIVE",
+      workPassNumber: workPass?.workPermitNo || workPass?.finNumber || null,
+      workPass: workPass ? {
+        id: workPass.id || workPass._id,
+        passNumber: workPass.workPermitNo || workPass.finNumber || 'N/A',
+        issueDate: workPass.issuanceDate || workPass.createdAt,
+        expiryDate: workPass.expiryDate,
+        status: workPass.status?.toLowerCase() || 'active'
+      } : {
+        id: 0,
+        passNumber: 'N/A',
+        issueDate: new Date().toISOString(),
+        expiryDate: new Date().toISOString(),
+        status: 'active'
+      },
+      certifications: employee.certifications || [],
       createdAt: employee.createdAt || user.createdAt,
       updatedAt: employee.updatedAt || employee.createdAt || user.updatedAt,
     };

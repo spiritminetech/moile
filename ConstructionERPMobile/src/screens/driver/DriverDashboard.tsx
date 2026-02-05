@@ -1,10 +1,129 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Alert, 
+  ScrollView, 
+  RefreshControl,
+  Linking 
+} from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
+import { useLocation } from '../../store/context/LocationContext';
+import { useOffline } from '../../store/context/OfflineContext';
+import { driverApiService } from '../../services/api/DriverApiService';
+import { 
+  TransportTask, 
+  VehicleInfo, 
+  DriverPerformance, 
+  DriverDashboardResponse,
+  GeoLocation 
+} from '../../types';
+
+// Import driver-specific components
+import TransportTaskCard from '../../components/driver/TransportTaskCard';
+import RouteMapCard from '../../components/driver/RouteMapCard';
+import WorkerManifestCard from '../../components/driver/WorkerManifestCard';
+import VehicleStatusCard from '../../components/driver/VehicleStatusCard';
+import PerformanceMetricsCard from '../../components/driver/PerformanceMetricsCard';
+
+// Import common components
+import { 
+  ConstructionButton, 
+  ConstructionCard, 
+  ConstructionLoadingIndicator,
+  ErrorDisplay,
+  OfflineIndicator 
+} from '../../components/common';
+import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
 const DriverDashboard: React.FC = () => {
-  const { state, logout } = useAuth();
+  const { state: authState, logout } = useAuth();
+  const { state: locationState, getCurrentLocation } = useLocation();
+  const { isOffline } = useOffline();
 
+  // Dashboard data state
+  const [dashboardData, setDashboardData] = useState<DriverDashboardResponse | null>(null);
+  const [transportTasks, setTransportTasks] = useState<TransportTask[]>([]);
+  const [assignedVehicle, setAssignedVehicle] = useState<VehicleInfo | null>(null);
+  const [performanceMetrics, setPerformanceMetrics] = useState<DriverPerformance | null>(null);
+  const [activeTask, setActiveTask] = useState<TransportTask | null>(null);
+
+  // UI state
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // Load dashboard data
+  const loadDashboardData = useCallback(async (showLoading = true) => {
+    try {
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      setError(null);
+
+      console.log('🚛 Loading driver dashboard data...');
+
+      // Load dashboard overview
+      const dashboardResponse = await driverApiService.getDashboardData();
+      if (dashboardResponse.success && dashboardResponse.data) {
+        setDashboardData(dashboardResponse.data);
+        console.log('✅ Dashboard data loaded');
+      }
+
+      // Load transport tasks
+      const tasksResponse = await driverApiService.getTodaysTransportTasks();
+      if (tasksResponse.success && tasksResponse.data) {
+        setTransportTasks(tasksResponse.data);
+        
+        // Set active task (first non-completed task)
+        const activeTask = tasksResponse.data.find(task => 
+          task.status !== 'completed'
+        );
+        setActiveTask(activeTask || null);
+        
+        console.log('✅ Transport tasks loaded:', tasksResponse.data.length);
+      }
+
+      // Load assigned vehicle
+      const vehicleResponse = await driverApiService.getAssignedVehicle();
+      if (vehicleResponse.success && vehicleResponse.data) {
+        setAssignedVehicle(vehicleResponse.data);
+        console.log('✅ Vehicle info loaded');
+      }
+
+      // Load performance metrics
+      const performanceResponse = await driverApiService.getPerformanceMetrics();
+      if (performanceResponse.success && performanceResponse.data) {
+        setPerformanceMetrics(performanceResponse.data);
+        console.log('✅ Performance metrics loaded');
+      }
+
+      setLastUpdated(new Date());
+
+    } catch (error: any) {
+      console.error('❌ Dashboard loading error:', error);
+      setError(error.message || 'Failed to load dashboard data');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // Handle refresh
+  const handleRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    loadDashboardData(false);
+  }, [loadDashboardData]);
+
+  // Handle logout
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
@@ -26,62 +145,312 @@ const DriverDashboard: React.FC = () => {
     );
   };
 
+  // Transport task handlers
+  const handleStartRoute = useCallback(async (taskId: number) => {
+    try {
+      const response = await driverApiService.updateTransportTaskStatus(
+        taskId, 
+        'en_route_pickup',
+        locationState.currentLocation || undefined,
+        'Route started from dashboard'
+      );
+
+      if (response.success) {
+        Alert.alert('Success', 'Route started successfully!');
+        // Refresh tasks to get updated status
+        const tasksResponse = await driverApiService.getTodaysTransportTasks();
+        if (tasksResponse.success && tasksResponse.data) {
+          setTransportTasks(tasksResponse.data);
+          const updatedActiveTask = tasksResponse.data.find(task => task.taskId === taskId);
+          setActiveTask(updatedActiveTask || null);
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Start route error:', error);
+      Alert.alert('Error', error.message || 'Failed to start route');
+    }
+  }, [locationState.currentLocation]);
+
+  const handleViewRoute = useCallback((task: TransportTask) => {
+    setActiveTask(task);
+    // Could navigate to a detailed route screen here
+    Alert.alert('Route Details', `Viewing route details for ${task.route}`);
+  }, []);
+
+  const handleUpdateTaskStatus = useCallback(async (taskId: number, status: string) => {
+    try {
+      const response = await driverApiService.updateTransportTaskStatus(
+        taskId, 
+        status as TransportTask['status'],
+        locationState.currentLocation || undefined,
+        `Status updated to ${status} from dashboard`
+      );
+
+      if (response.success) {
+        Alert.alert('Success', 'Task status updated successfully!');
+        // Refresh tasks
+        const tasksResponse = await driverApiService.getTodaysTransportTasks();
+        if (tasksResponse.success && tasksResponse.data) {
+          setTransportTasks(tasksResponse.data);
+          const updatedActiveTask = tasksResponse.data.find(task => task.taskId === taskId);
+          setActiveTask(updatedActiveTask || null);
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Update task status error:', error);
+      Alert.alert('Error', error.message || 'Failed to update task status');
+    }
+  }, [locationState.currentLocation]);
+
+  // Navigation handlers
+  const handleNavigateToLocation = useCallback((coordinates: { latitude: number; longitude: number }, name: string) => {
+    const url = `https://maps.google.com/?q=${coordinates.latitude},${coordinates.longitude}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'Could not open navigation app');
+    });
+  }, []);
+
+  // Worker manifest handlers
+  const handleCheckInWorker = useCallback(async (workerId: number, locationId: number) => {
+    try {
+      if (!locationState.currentLocation) {
+        Alert.alert('Error', 'Location not available. Please enable GPS.');
+        return;
+      }
+
+      const response = await driverApiService.checkInWorker(
+        locationId,
+        workerId,
+        locationState.currentLocation
+      );
+
+      if (response.success) {
+        Alert.alert('Success', `Worker checked in successfully!`);
+        // Refresh tasks to update worker status
+        handleRefresh();
+      }
+    } catch (error: any) {
+      console.error('❌ Check in worker error:', error);
+      Alert.alert('Error', error.message || 'Failed to check in worker');
+    }
+  }, [locationState.currentLocation, handleRefresh]);
+
+  const handleCheckOutWorker = useCallback(async (workerId: number, locationId: number) => {
+    try {
+      if (!locationState.currentLocation) {
+        Alert.alert('Error', 'Location not available. Please enable GPS.');
+        return;
+      }
+
+      const response = await driverApiService.checkOutWorker(
+        locationId,
+        workerId,
+        locationState.currentLocation
+      );
+
+      if (response.success) {
+        Alert.alert('Success', `Worker checked out successfully!`);
+        // Refresh tasks to update worker status
+        handleRefresh();
+      }
+    } catch (error: any) {
+      console.error('❌ Check out worker error:', error);
+      Alert.alert('Error', error.message || 'Failed to check out worker');
+    }
+  }, [locationState.currentLocation, handleRefresh]);
+
+  const handleCallWorker = useCallback((phone: string, name: string) => {
+    const url = `tel:${phone}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'Could not open phone app');
+    });
+  }, []);
+
+  // Vehicle handlers
+  const handleLogFuel = useCallback(() => {
+    Alert.alert('Fuel Log', 'Fuel logging feature coming soon!');
+  }, []);
+
+  const handleReportIssue = useCallback(() => {
+    Alert.alert('Report Issue', 'Vehicle issue reporting feature coming soon!');
+  }, []);
+
+  const handleViewMaintenance = useCallback(() => {
+    Alert.alert('Maintenance', 'Vehicle maintenance details coming soon!');
+  }, []);
+
+  // Performance handlers
+  const handleViewPerformanceDetails = useCallback(() => {
+    Alert.alert('Performance Details', 'Detailed performance analytics coming soon!');
+  }, []);
+
+  const handleViewTripHistory = useCallback(() => {
+    Alert.alert('Trip History', 'Trip history feature coming soon!');
+  }, []);
+
+  // Render loading state
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Driver Dashboard</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ConstructionLoadingIndicator 
+            message="Loading driver dashboard..."
+            size="large"
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // Render error state
+  if (error && !dashboardData) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Driver Dashboard</Text>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.errorContainer}>
+          <ErrorDisplay 
+            error={error}
+            onRetry={() => loadDashboardData()}
+            showRetry={!isOffline}
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Driver Dashboard</Text>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Driver Dashboard</Text>
+          <Text style={styles.subtitle}>
+            Welcome, {authState.user?.name || 'Driver'}
+          </Text>
+        </View>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Text style={styles.logoutButtonText}>Logout</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.content}>
-        <View style={styles.welcomeCard}>
-          <Text style={styles.welcomeTitle}>Driver Portal</Text>
-          <Text style={styles.welcomeText}>
-            Hello {state.user?.name || 'Driver'}
-          </Text>
-          <Text style={styles.companyText}>
-            Company: {state.company?.name || 'N/A'}
-          </Text>
-          <Text style={styles.roleText}>
-            Role: {state.user?.role || state.company?.role || 'Driver'}
-          </Text>
-        </View>
+      {/* Offline indicator */}
+      {isOffline && <OfflineIndicator />}
 
-        <View style={styles.actionsGrid}>
-          <TouchableOpacity style={styles.actionCard}>
-            <Text style={styles.actionIcon}>🚛</Text>
-            <Text style={styles.actionTitle}>Delivery Routes</Text>
-            <Text style={styles.actionSubtitle}>View assigned routes</Text>
-          </TouchableOpacity>
+      {/* Content */}
+      <ScrollView 
+        style={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[ConstructionTheme.colors.primary]}
+            tintColor={ConstructionTheme.colors.primary}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Quick stats summary */}
+        {dashboardData && (
+          <ConstructionCard variant="elevated" style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>📊 Today's Overview</Text>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryValue}>{dashboardData.todaysTransportTasks.length}</Text>
+                <Text style={styles.summaryLabel}>Transport Tasks</Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryValue}>
+                  {dashboardData.todaysTransportTasks.reduce((sum, task) => sum + task.workerCount, 0)}
+                </Text>
+                <Text style={styles.summaryLabel}>Workers</Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryValue}>
+                  {dashboardData.assignedVehicle?.plateNumber || 'N/A'}
+                </Text>
+                <Text style={styles.summaryLabel}>Vehicle</Text>
+              </View>
+            </View>
+          </ConstructionCard>
+        )}
 
-          <TouchableOpacity style={styles.actionCard}>
-            <Text style={styles.actionIcon}>📦</Text>
-            <Text style={styles.actionTitle}>Load Management</Text>
-            <Text style={styles.actionSubtitle}>Track cargo</Text>
-          </TouchableOpacity>
+        {/* Transport Tasks */}
+        {transportTasks.length > 0 ? (
+          transportTasks.map((task) => (
+            <TransportTaskCard
+              key={task.taskId}
+              task={task}
+              onStartRoute={handleStartRoute}
+              onViewRoute={handleViewRoute}
+              onUpdateStatus={handleUpdateTaskStatus}
+              isOffline={isOffline}
+            />
+          ))
+        ) : (
+          <ConstructionCard variant="outlined" style={styles.noTasksCard}>
+            <Text style={styles.noTasksText}>🚛 No transport tasks today</Text>
+            <Text style={styles.noTasksSubtext}>Check back later or contact dispatch</Text>
+          </ConstructionCard>
+        )}
 
-          <TouchableOpacity style={styles.actionCard}>
-            <Text style={styles.actionIcon}>📍</Text>
-            <Text style={styles.actionTitle}>GPS Tracking</Text>
-            <Text style={styles.actionSubtitle}>Location updates</Text>
-          </TouchableOpacity>
+        {/* Route Map */}
+        <RouteMapCard
+          task={activeTask}
+          currentLocation={locationState.currentLocation}
+          onNavigateToLocation={handleNavigateToLocation}
+          onRefreshLocation={getCurrentLocation}
+          isLocationEnabled={locationState.isLocationEnabled}
+          isOffline={isOffline}
+        />
 
-          <TouchableOpacity style={styles.actionCard}>
-            <Text style={styles.actionIcon}>📋</Text>
-            <Text style={styles.actionTitle}>Trip Reports</Text>
-            <Text style={styles.actionSubtitle}>Submit delivery logs</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Worker Manifest */}
+        <WorkerManifestCard
+          task={activeTask}
+          onCheckInWorker={handleCheckInWorker}
+          onCheckOutWorker={handleCheckOutWorker}
+          onCallWorker={handleCallWorker}
+          isOffline={isOffline}
+        />
 
-        <View style={styles.statusCard}>
-          <Text style={styles.statusTitle}>🎉 Driver Access Granted!</Text>
-          <Text style={styles.statusText}>
-            You have successfully logged in with driver privileges.
-          </Text>
-        </View>
-      </View>
+        {/* Vehicle Status */}
+        <VehicleStatusCard
+          vehicle={assignedVehicle}
+          onLogFuel={handleLogFuel}
+          onReportIssue={handleReportIssue}
+          onViewMaintenance={handleViewMaintenance}
+          isOffline={isOffline}
+        />
+
+        {/* Performance Metrics */}
+        <PerformanceMetricsCard
+          performance={performanceMetrics}
+          onViewDetails={handleViewPerformanceDetails}
+          onViewHistory={handleViewTripHistory}
+          isLoading={false}
+        />
+
+        {/* Last updated info */}
+        {lastUpdated && (
+          <View style={styles.lastUpdatedContainer}>
+            <Text style={styles.lastUpdatedText}>
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </Text>
+          </View>
+        )}
+
+        {/* Bottom spacing */}
+        <View style={styles.bottomSpacing} />
+      </ScrollView>
     </View>
   );
 };
@@ -89,119 +458,129 @@ const DriverDashboard: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: ConstructionTheme.colors.background,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 50,
-    backgroundColor: '#4CAF50',
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    paddingTop: ConstructionTheme.spacing.xl,
+    paddingBottom: ConstructionTheme.spacing.lg,
+    backgroundColor: ConstructionTheme.colors.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  headerContent: {
+    flex: 1,
   },
   title: {
-    fontSize: 24,
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.onPrimary,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+  },
+  subtitle: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onPrimary + 'CC',
+    marginTop: 4,
   },
   logoutButton: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.md,
   },
   logoutButtonText: {
-    color: '#FFFFFF',
+    color: ConstructionTheme.colors.onPrimary,
+    ...ConstructionTheme.typography.labelLarge,
     fontWeight: 'bold',
   },
   content: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    paddingTop: ConstructionTheme.spacing.md,
   },
-  welcomeCard: {
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  welcomeTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#212121',
-    marginBottom: 8,
-  },
-  welcomeText: {
-    fontSize: 16,
-    color: '#757575',
-    marginBottom: 4,
-  },
-  companyText: {
-    fontSize: 14,
-    color: '#757575',
-    marginBottom: 4,
-  },
-  roleText: {
-    fontSize: 14,
-    color: '#4CAF50',
-    fontWeight: 'bold',
-  },
-  actionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  actionCard: {
-    backgroundColor: '#FFFFFF',
-    width: '48%',
-    padding: 16,
-    borderRadius: 12,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    paddingHorizontal: ConstructionTheme.spacing.lg,
   },
-  actionIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: ConstructionTheme.spacing.lg,
   },
-  actionTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#212121',
+  summaryCard: {
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  summaryTitle: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.lg,
     textAlign: 'center',
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    paddingVertical: ConstructionTheme.spacing.lg,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+  },
+  summaryItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  summaryValue: {
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: '700',
     marginBottom: 4,
   },
-  actionSubtitle: {
-    fontSize: 12,
-    color: '#757575',
+  summaryLabel: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
     textAlign: 'center',
   },
-  statusCard: {
-    backgroundColor: '#E8F5E8',
-    padding: 16,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
+  summaryDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: ConstructionTheme.colors.outline,
+    marginHorizontal: ConstructionTheme.spacing.md,
   },
-  statusTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2E7D32',
-    marginBottom: 8,
+  noTasksCard: {
+    marginBottom: ConstructionTheme.spacing.lg,
+    alignItems: 'center',
+    paddingVertical: ConstructionTheme.spacing.xl,
   },
-  statusText: {
-    fontSize: 14,
-    color: '#388E3C',
-    lineHeight: 20,
+  noTasksText: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  noTasksSubtext: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+  },
+  lastUpdatedContainer: {
+    alignItems: 'center',
+    paddingVertical: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.lg,
+  },
+  lastUpdatedText: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontStyle: 'italic',
+  },
+  bottomSpacing: {
+    height: ConstructionTheme.spacing.xl,
   },
 });
 

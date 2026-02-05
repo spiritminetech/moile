@@ -126,8 +126,14 @@ interface OfflineContextValue {
 const OfflineContext = createContext<OfflineContextValue | undefined>(undefined);
 
 // Provider Component
-export const OfflineProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(offlineReducer, initialState);
+export const OfflineProvider: React.FC<{ 
+  children: React.ReactNode;
+  initialOfflineState?: boolean;
+}> = ({ children, initialOfflineState }) => {
+  const [state, dispatch] = useReducer(offlineReducer, {
+    ...initialState,
+    isOnline: initialOfflineState !== undefined ? !initialOfflineState : initialState.isOnline,
+  });
 
   // Initialize offline state from storage
   useEffect(() => {

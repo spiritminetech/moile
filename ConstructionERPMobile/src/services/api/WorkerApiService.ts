@@ -167,37 +167,26 @@ export class WorkerApiService {
       const params = date ? { date } : {};
       console.log('🚀 Making API call to /worker/tasks/today with params:', params);
       
-      const response = await apiClient.get('/worker/tasks/today', { params });
-      console.log('📊 Raw API response:', {
+      // First try to get dashboard data which includes tasks
+      const response = await this.getDashboardData(date);
+      console.log('📊 Dashboard API response:', {
         success: response.success,
-        dataType: typeof response.data,
         hasData: !!response.data,
+        hasTasks: !!(response.data?.tasks),
+        tasksLength: response.data?.tasks?.length || 0,
         message: response.message
       });
       
-      // Handle different response structures
-      if (response.success && response.data) {
-        let rawTasks: any[] = [];
-        const data = response.data as any; // Type assertion for flexibility
-        
-        // Check if response.data has tasks array (dashboard format)
-        if (data.tasks && Array.isArray(data.tasks)) {
-          console.log('📋 Found tasks in dashboard format:', data.tasks.length);
-          rawTasks = data.tasks;
-        }
-        // Check if response.data is directly an array of tasks
-        else if (Array.isArray(data)) {
-          console.log('📋 Found tasks as direct array:', data.length);
-          rawTasks = data;
-        }
+      if (response.success && response.data && response.data.tasks) {
+        const rawTasks = response.data.tasks;
+        console.log('📋 Found tasks in dashboard:', rawTasks.length);
         
         // Map API response to TaskAssignment interface
         const mappedTasks: TaskAssignment[] = rawTasks.map((task: any) => {
-          // Map API response fields to TaskAssignment interface
           const mappedTask: TaskAssignment = {
             assignmentId: task.assignmentId || task.id || 0,
-            projectId: data.project?.id || 1, // Get from project data
-            projectName: data.project?.name || 'Unknown Project', // Add project name
+            projectId: response.data.project?.id || 1,
+            projectName: response.data.project?.name || 'Unknown Project',
             taskName: task.taskName || task.name || 'Unknown Task',
             description: task.description || '',
             dependencies: task.dependencies || [],
@@ -208,13 +197,13 @@ export class WorkerApiService {
               longitude: 0,
               accuracy: 0,
               timestamp: new Date()
-            }, // Default location - will be updated when task starts
-            estimatedHours: task.timeEstimate?.estimated ? task.timeEstimate.estimated / 60 : 8, // Convert minutes to hours
+            },
+            estimatedHours: task.timeEstimate?.estimated ? task.timeEstimate.estimated / 60 : 8,
             actualHours: task.timeEstimate?.elapsed ? task.timeEstimate.elapsed / 60 : undefined,
-            createdAt: new Date().toISOString(), // Default since API doesn't provide
+            createdAt: new Date().toISOString(),
             updatedAt: task.progress?.lastUpdated || new Date().toISOString(),
             startedAt: task.startTime || undefined,
-            completedAt: undefined // API doesn't provide this field
+            completedAt: task.status === 'completed' ? task.estimatedEndTime : undefined
           };
           
           return mappedTask;
@@ -226,20 +215,30 @@ export class WorkerApiService {
         return {
           success: true,
           data: mappedTasks,
-          message: response.message
+          message: response.message || 'Tasks loaded successfully'
         };
       }
       
-      // Handle empty or unexpected format
-      console.log('⚠️ Unexpected response format, returning empty array');
+      // If no tasks found, return empty array with success
+      console.log('📋 No tasks found, returning empty array');
       return {
         success: true,
         data: [],
-        message: 'No tasks found'
+        message: 'No tasks assigned for today'
       };
       
     } catch (error: any) {
       console.error('❌ getTodaysTasks error:', error);
+      
+      // Handle specific error cases
+      if (error.response?.data?.error === 'NO_TASKS_ASSIGNED' || 
+          error.message?.includes('NO_TASKS_ASSIGNED')) {
+        return {
+          success: true,
+          data: [],
+          message: 'No tasks assigned for today'
+        };
+      }
       
       // If it's a 401 error, provide more specific guidance
       if (error.message?.includes('401') || error.code === 'UNAUTHORIZED') {
@@ -1007,12 +1006,12 @@ export class WorkerApiService {
               email: profile.email,
               phone: profile.phoneNumber,
               profileImage: profile.photoUrl,
-              employeeId: profile.employeeCode || profile.employeeId?.toString() || profile.id?.toString()
+              employeeId: profile.employeeId?.toString() || profile.employeeCode || profile.id?.toString()
             },
             certifications: profile.certifications || [], // Default to empty array if not provided
             workPass: profile.workPass || {
               id: 0,
-              passNumber: 'N/A',
+              passNumber: profile.workPassNumber || 'N/A',
               issueDate: new Date().toISOString(),
               expiryDate: new Date().toISOString(),
               status: 'active' as const
@@ -1133,10 +1132,32 @@ export class WorkerApiService {
     };
     photoUrl: string;
   }>> {
-    const formData = new FormData();
-    formData.append('photo', photo);
-    
-    return apiClient.uploadFile('/worker/profile/photo', formData);
+    try {
+      const formData = new FormData();
+      formData.append('photo', photo);
+      
+      const response = await apiClient.uploadFile('/worker/profile/photo', formData);
+      
+      // Handle the response structure from backend
+      if (response.success) {
+        return {
+          success: true,
+          data: {
+            success: response.success,
+            message: response.message,
+            worker: response.worker,
+            photoUrl: response.photoUrl
+          },
+          message: response.message,
+          photoUrl: response.photoUrl // Add this for backward compatibility
+        } as any;
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('❌ uploadProfilePhoto error:', error);
+      throw error;
+    }
   }
 
   // Help and Support APIs

@@ -1,7 +1,7 @@
 // Task History Screen - Display worker's completed and historical tasks
 // Requirements: 4.1, 4.2, 4.3, 4.6
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { TaskAssignment } from '../../types';
 import { useTaskHistory } from '../../hooks/useTaskHistory';
 import { useOffline } from '../../store/context/OfflineContext';
@@ -41,6 +42,13 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
   } = useTaskHistory();
   const { isOffline } = useOffline();
 
+  // Refresh data when screen comes into focus to ensure counts are up to date
+  useFocusEffect(
+    useCallback(() => {
+      refreshData();
+    }, [refreshData])
+  );
+
   // Handle task view details
   const handleViewTaskDetails = useCallback((task: TaskAssignment) => {
     const formatDate = (dateString?: string) => {
@@ -50,7 +58,7 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
 
     Alert.alert(
       'Task Details',
-      `Task: ${task.taskName}\nStatus: ${task.status}\nProject: ${task.projectName || `#${task.projectId}`}\nEstimated Hours: ${task.estimatedHours}h\nActual Hours: ${task.actualHours || 'N/A'}h\nCreated: ${formatDate(task.createdAt)}\nCompleted: ${formatDate(task.completedAt)}\n\nDescription:\n${task.description}`,
+      `Task: ${task.taskName}\nStatus: ${task.status}\nProject: ${task.projectName || `Project ${task.projectId}`}\nEstimated Hours: ${task.estimatedHours}h\nActual Hours: ${task.actualHours || 'N/A'}h\nCreated: ${formatDate(task.createdAt)}\nCompleted: ${formatDate(task.completedAt)}\n\nDescription:\n${task.description}`,
       [{ text: 'OK' }]
     );
   }, []);
@@ -80,41 +88,71 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
     currentFilter === filter && styles.filterButtonTextActive
   ];
 
+  // Calculate task counts safely with memoization
+  const taskCounts = useMemo(() => {
+    const safeTasks = tasks || [];
+    console.log('📊 Calculating task counts from tasks:', safeTasks.length);
+    console.log('📋 Sample tasks:', safeTasks.slice(0, 2));
+    
+    const counts = {
+      all: safeTasks.length,
+      completed: safeTasks.filter(t => t.status === 'completed').length,
+      inProgress: safeTasks.filter(t => t.status === 'in_progress').length,
+      cancelled: safeTasks.filter(t => t.status === 'cancelled').length,
+    };
+    
+    console.log('📊 Task counts calculated:', counts);
+    return counts;
+  }, [tasks]);
+
+  // Debug task counts when they change
+  useEffect(() => {
+    console.log('📊 TaskHistoryScreen - Task counts updated:', {
+      taskCounts,
+      tasksLength: tasks?.length || 0,
+      tasksIsArray: Array.isArray(tasks),
+      filteredTasksLength: filteredTasks?.length || 0,
+      currentFilter
+    });
+  }, [taskCounts, tasks, filteredTasks, currentFilter]);
+
   // Render filter buttons
-  const renderFilterButtons = () => (
-    <View style={styles.filterContainer}>
-      <TouchableOpacity
-        style={getFilterButtonStyle('all')}
-        onPress={() => filterTasks('all')}
-      >
-        <Text style={getFilterTextStyle('all')}>All ({tasks.length})</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={getFilterButtonStyle('completed')}
-        onPress={() => filterTasks('completed')}
-      >
-        <Text style={getFilterTextStyle('completed')}>
-          Completed ({tasks.filter(t => t.status === 'completed').length})
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={getFilterButtonStyle('in_progress')}
-        onPress={() => filterTasks('in_progress')}
-      >
-        <Text style={getFilterTextStyle('in_progress')}>
-          In Progress ({tasks.filter(t => t.status === 'in_progress').length})
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={getFilterButtonStyle('cancelled')}
-        onPress={() => filterTasks('cancelled')}
-      >
-        <Text style={getFilterTextStyle('cancelled')}>
-          Cancelled ({tasks.filter(t => t.status === 'cancelled').length})
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+  const renderFilterButtons = () => {
+    return (
+      <View style={styles.filterContainer}>
+        <TouchableOpacity
+          style={getFilterButtonStyle('all')}
+          onPress={() => filterTasks('all')}
+        >
+          <Text style={getFilterTextStyle('all')}>All ({taskCounts?.all || 0})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={getFilterButtonStyle('completed')}
+          onPress={() => filterTasks('completed')}
+        >
+          <Text style={getFilterTextStyle('completed')}>
+            Completed ({taskCounts?.completed || 0})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={getFilterButtonStyle('in_progress')}
+          onPress={() => filterTasks('in_progress')}
+        >
+          <Text style={getFilterTextStyle('in_progress')}>
+            In Progress ({taskCounts?.inProgress || 0})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={getFilterButtonStyle('cancelled')}
+          onPress={() => filterTasks('cancelled')}
+        >
+          <Text style={getFilterTextStyle('cancelled')}>
+            Cancelled ({taskCounts?.cancelled || 0})
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   // Render task item with historical context
   const renderTaskItem = ({ item }: { item: TaskAssignment }) => (
@@ -165,6 +203,11 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
     <View style={styles.container}>
       <OfflineIndicator />
       
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Task History</Text>
+      </View>
+      
       {error && !tasks.length ? (
         <ErrorDisplay
           error={error}
@@ -184,7 +227,7 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
           )}
           
           <FlatList
-            data={filteredTasks}
+            data={filteredTasks || []}
             renderItem={renderTaskItem}
             keyExtractor={(item) => `${item.assignmentId}-${item.updatedAt}`}
             contentContainerStyle={styles.listContainer}
@@ -210,6 +253,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: ConstructionTheme.colors.background,
+  },
+  header: {
+    backgroundColor: ConstructionTheme.colors.surface,
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    paddingVertical: ConstructionTheme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ConstructionTheme.colors.outline,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.onSurface,
+  },
+  taskCount: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.primary,
+    backgroundColor: ConstructionTheme.colors.primaryContainer,
+    paddingHorizontal: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.full,
   },
   filterContainer: {
     flexDirection: 'row',

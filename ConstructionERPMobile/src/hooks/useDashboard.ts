@@ -141,12 +141,30 @@ const transformDashboardData = (apiData: DashboardApiResponse): DashboardData =>
     attendanceStatus: null, // Not provided in this API
     workingHours: {
       currentSessionDuration: 0, // Calculate from dailySummary if needed
-      totalHours: apiData.dailySummary.totalHoursWorked,
+      totalHours: apiData.dailySummary?.totalHoursWorked || 0,
     },
-    supervisor: apiData.supervisor,
-    worker: apiData.worker,
-    toolsAndMaterials: apiData.toolsAndMaterials,
-    dailySummary: apiData.dailySummary,
+    supervisor: apiData.supervisor || null,
+    worker: apiData.worker || null,
+    toolsAndMaterials: apiData.toolsAndMaterials || { tools: [], materials: [] },
+    dailySummary: apiData.dailySummary ? {
+      totalTasks: apiData.dailySummary.totalTasks || 0,
+      completedTasks: apiData.dailySummary.completedTasks || 0,
+      inProgressTasks: apiData.dailySummary.inProgressTasks || 0,
+      queuedTasks: apiData.dailySummary.queuedTasks || 0,
+      errorTasks: apiData.dailySummary.errorTasks || 0,
+      totalHoursWorked: apiData.dailySummary.totalHoursWorked || 0,
+      remainingHours: apiData.dailySummary.remainingHours || 8,
+      overallProgress: apiData.dailySummary.overallProgress || 0,
+    } : {
+      totalTasks: 0,
+      completedTasks: 0,
+      inProgressTasks: 0,
+      queuedTasks: 0,
+      errorTasks: 0,
+      totalHoursWorked: 0,
+      remainingHours: 8,
+      overallProgress: 0,
+    },
   };
 };
 
@@ -161,8 +179,20 @@ export const useDashboard = (): UseDashboardReturn => {
     },
     supervisor: null,
     worker: null,
-    toolsAndMaterials: null,
-    dailySummary: null,
+    toolsAndMaterials: {
+      tools: [],
+      materials: [],
+    },
+    dailySummary: {
+      totalTasks: 0,
+      completedTasks: 0,
+      inProgressTasks: 0,
+      queuedTasks: 0,
+      errorTasks: 0,
+      totalHoursWorked: 0,
+      remainingHours: 8,
+      overallProgress: 0,
+    },
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);

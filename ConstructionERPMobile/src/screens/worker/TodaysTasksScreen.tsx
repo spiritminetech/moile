@@ -56,7 +56,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     };
   }, [loadingTimeout]);
 
-  // Debug authentication status
+  // Debug authentication status and task count
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -88,6 +88,16 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     
     checkAuth();
   }, []);
+
+  // Debug task count updates
+  useEffect(() => {
+    console.log('📊 TodaysTasksScreen - Tasks updated:', {
+      tasksLength: tasks.length,
+      tasksArray: tasks,
+      isLoading,
+      error
+    });
+  }, [tasks, isLoading, error]);
 
   // Load tasks data with request deduplication
   const loadTasks = useCallback(async (showLoading = true) => {
@@ -155,6 +165,8 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         const errorMsg = response.message || 'Failed to load tasks';
         console.log('❌ API returned error:', errorMsg);
         setError(errorMsg);
+        // Set empty array on API error
+        setTasks([]);
       }
     } catch (err: any) {
       // Clear timeout on error
@@ -410,21 +422,28 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   }
 
   console.log('🎨 Rendering TodaysTasksScreen with:', {
-    tasksCount: tasks.length,
+    tasksCount: tasks?.length || 0,
+    tasksIsArray: Array.isArray(tasks),
     isLoading,
     error,
-    isOffline
+    isOffline,
+    tasksData: tasks
   });
 
   return (
     <View style={styles.container}>
       <OfflineIndicator />
       
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Today's Tasks</Text>
+      </View>
+      
       {/* Debug info - remove in production */}
       {__DEV__ && (
         <View style={styles.debugInfo}>
           <Text style={styles.debugText}>
-            Tasks: {tasks.length} | Loading: {isLoading.toString()} | Error: {error ? 'Yes' : 'No'}
+            Tasks: {tasks?.length || 0} | Loading: {isLoading.toString()} | Error: {error ? 'Yes' : 'No'} | Array: {Array.isArray(tasks) ? 'Yes' : 'No'}
           </Text>
         </View>
       )}
@@ -433,7 +452,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         renderErrorState()
       ) : (
         <FlatList
-          data={tasks}
+          data={tasks || []}
           renderItem={renderTaskItem}
           keyExtractor={(item) => `task-${item.assignmentId}-${item.updatedAt}`}
           contentContainerStyle={styles.listContainer}
@@ -462,6 +481,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+  },
+  header: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  taskCount: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2196F3',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   listContainer: {
     padding: 16,

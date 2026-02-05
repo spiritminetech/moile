@@ -216,7 +216,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
         )}
         <View style={styles.detailItem}>
           <Text style={styles.detailLabel}>Project:</Text>
-          <Text style={styles.detailValue}>{task.projectName || `#${task.projectId}`}</Text>
+          <Text style={styles.detailValue}>{task.projectName || `Project ${task.projectId}`}</Text>
         </View>
       </View>
 

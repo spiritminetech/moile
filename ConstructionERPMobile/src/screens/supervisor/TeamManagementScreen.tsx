@@ -1,0 +1,1430 @@
+// Team Management Screen - Supervisor role-specific screen for managing team members
+// Requirements: 3.1, 3.2, 3.3
+
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  RefreshControl,
+  Alert,
+  Modal,
+  TextInput,
+  FlatList,
+  ActivityIndicator,
+  Dimensions,
+} from 'react-native';
+import { useSupervisorContext } from '../../store/context/SupervisorContext';
+import { supervisorApiService } from '../../services/api/SupervisorApiService';
+import { TeamMember, TaskAssignmentRequest } from '../../types';
+import { ConstructionTheme } from '../../utils/theme/constructionTheme';
+import {
+  ConstructionCard,
+  ConstructionButton,
+  ConstructionInput,
+  ConstructionSelector,
+  LoadingOverlay,
+  ErrorDisplay,
+} from '../../components/common';
+
+// Filter and sort options
+type AttendanceFilter = 'all' | 'present' | 'absent' | 'late' | 'on_break';
+type SortOption = 'name' | 'status' | 'task_progress' | 'last_updated';
+
+interface TeamManagementScreenProps {
+  navigation?: any; // Navigation prop for future use
+}
+
+const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation }) => {
+  const { state: supervisorState, refreshTeamMembers, updateTeamMemberStatus, clearError } = useSupervisorContext();
+  
+  // Local state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [attendanceFilter, setAttendanceFilter] = useState<AttendanceFilter>('all');
+  const [sortBy, setSortBy] = useState<SortOption>('name');
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [showMemberDetail, setShowMemberDetail] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [memberDetails, setMemberDetails] = useState<any>(null);
+  const [loadingMemberDetails, setLoadingMemberDetails] = useState(false);
+  const [showCommunicationModal, setShowCommunicationModal] = useState(false);
+  const [communicationMessage, setCommunicationMessage] = useState('');
+  const [communicationType, setCommunicationType] = useState<'message' | 'notification' | 'alert'>('message');
+
+  // Filter and sort team members
+  const filteredAndSortedMembers = useMemo(() => {
+    let filtered = supervisorState.teamMembers;
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(member =>
+        member.name.toLowerCase().includes(query) ||
+        member.role.toLowerCase().includes(query) ||
+        (member.currentTask?.name.toLowerCase().includes(query))
+      );
+    }
+
+    // Apply attendance filter
+    if (attendanceFilter !== 'all') {
+      filtered = filtered.filter(member => member.attendanceStatus === attendanceFilter);
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'name':
+          return a.name.localeCompare(b.name);
+        case 'status':
+          return a.attendanceStatus.localeCompare(b.attendanceStatus);
+        case 'task_progress':
+          const aProgress = a.currentTask?.progress || 0;
+          const bProgress = b.currentTask?.progress || 0;
+          return bProgress - aProgress; // Descending order
+        case 'last_updated':
+          return new Date(b.location.lastUpdated).getTime() - new Date(a.location.lastUpdated).getTime();
+        default:
+          return 0;
+      }
+    });
+
+    return filtered;
+  }, [supervisorState.teamMembers, searchQuery, attendanceFilter, sortBy]);
+
+  // Get team summary statistics
+  const teamSummary = useMemo(() => {
+    const total = supervisorState.teamMembers.length;
+    const present = supervisorState.teamMembers.filter(m => m.attendanceStatus === 'present').length;
+    const absent = supervisorState.teamMembers.filter(m => m.attendanceStatus === 'absent').length;
+    const late = supervisorState.teamMembers.filter(m => m.attendanceStatus === 'late').length;
+    const onBreak = supervisorState.teamMembers.filter(m => m.attendanceStatus === 'on_break').length;
+    const withTasks = supervisorState.teamMembers.filter(m => m.currentTask).length;
+    const geofenceViolations = supervisorState.teamMembers.filter(m => !m.location.insideGeofence).length;
+
+    return {
+      total,
+      present,
+      absent,
+      late,
+      onBreak,
+      withTasks,
+      geofenceViolations,
+      attendanceRate: total > 0 ? Math.round((present / total) * 100) : 0,
+    };
+  }, [supervisorState.teamMembers]);
+
+  // Load member details when selected
+  const loadMemberDetails = useCallback(async (member: TeamMember) => {
+    try {
+      setLoadingMemberDetails(true);
+      const response = await supervisorApiService.getWorkerDetails(member.id);
+      
+      if (response.success && response.data) {
+        setMemberDetails(response.data);
+      } else {
+        Alert.alert('Error', 'Failed to load member details');
+      }
+    } catch (error) {
+      console.error('Error loading member details:', error);
+      Alert.alert('Error', 'Failed to load member details');
+    } finally {
+      setLoadingMemberDetails(false);
+    }
+  }, []);
+
+  // Handle member selection
+  const handleMemberPress = useCallback(async (member: TeamMember) => {
+    setSelectedMember(member);
+    setShowMemberDetail(true);
+    await loadMemberDetails(member);
+  }, [loadMemberDetails]);
+
+  // Handle refresh
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshTeamMembers();
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshTeamMembers]);
+
+  // Handle attendance status update
+  const handleUpdateAttendanceStatus = useCallback(async (memberId: number, newStatus: TeamMember['attendanceStatus']) => {
+    try {
+      await updateTeamMemberStatus(memberId, newStatus);
+      Alert.alert('Success', 'Attendance status updated successfully');
+    } catch (error) {
+      console.error('Error updating attendance status:', error);
+      Alert.alert('Error', 'Failed to update attendance status');
+    }
+  }, [updateTeamMemberStatus]);
+
+  // Handle task assignment (placeholder for future implementation)
+  const handleAssignTask = useCallback((member: TeamMember) => {
+    Alert.alert(
+      'Assign Task',
+      `Task assignment for ${member.name} will be implemented in the task assignment screen.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Go to Task Assignment', onPress: () => {
+          // TODO: Navigate to task assignment screen
+          console.log('Navigate to task assignment for member:', member.id);
+        }}
+      ]
+    );
+  }, []);
+
+  // Handle team communication (enhanced implementation)
+  const handleSendMessage = useCallback((member: TeamMember) => {
+    setSelectedMember(member);
+    setShowCommunicationModal(true);
+    setCommunicationMessage('');
+    setCommunicationType('message');
+  }, []);
+
+  // Send communication to team member
+  const sendCommunication = useCallback(async () => {
+    if (!selectedMember || !communicationMessage.trim()) {
+      Alert.alert('Error', 'Please enter a message');
+      return;
+    }
+
+    try {
+      // TODO: Replace with actual API call when implemented
+      console.log('Sending communication:', {
+        memberId: selectedMember.id,
+        type: communicationType,
+        message: communicationMessage
+      });
+
+      Alert.alert(
+        'Success',
+        `${communicationType.charAt(0).toUpperCase() + communicationType.slice(1)} sent to ${selectedMember.name}`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setShowCommunicationModal(false);
+              setCommunicationMessage('');
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error sending communication:', error);
+      Alert.alert('Error', 'Failed to send communication');
+    }
+  }, [selectedMember, communicationMessage, communicationType]);
+
+  // Send notification to all team members
+  const sendTeamNotification = useCallback(() => {
+    Alert.alert(
+      'Send Team Notification',
+      'Send a notification to all team members?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: () => {
+            // TODO: Implement team notification functionality
+            Alert.alert('Success', 'Notification sent to all team members');
+          }
+        }
+      ]
+    );
+  }, []);
+
+  // Get status color
+  const getStatusColor = (status: TeamMember['attendanceStatus']) => {
+    switch (status) {
+      case 'present':
+        return ConstructionTheme.colors.success;
+      case 'absent':
+        return ConstructionTheme.colors.error;
+      case 'late':
+        return ConstructionTheme.colors.warning;
+      case 'on_break':
+        return ConstructionTheme.colors.info;
+      default:
+        return ConstructionTheme.colors.neutral;
+    }
+  };
+
+  // Get status icon
+  const getStatusIcon = (status: TeamMember['attendanceStatus']) => {
+    switch (status) {
+      case 'present':
+        return '✅';
+      case 'absent':
+        return '❌';
+      case 'late':
+        return '⚠️';
+      case 'on_break':
+        return '☕';
+      default:
+        return '❓';
+    }
+  };
+
+  // Show loading overlay during initial load
+  if (supervisorState.teamLoading && supervisorState.teamMembers.length === 0) {
+    return (
+      <LoadingOverlay
+        visible={true}
+        message="Loading team members..."
+      />
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Team Management</Text>
+        <TouchableOpacity
+          style={styles.filtersButton}
+          onPress={() => setShowFilters(true)}
+        >
+          <Text style={styles.filtersButtonIcon}>⚙️</Text>
+          <Text style={styles.filtersButtonText}>Filters</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Team Summary */}
+      <ConstructionCard title="Team Summary" variant="elevated" style={styles.summaryCard}>
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryNumber}>{teamSummary.total}</Text>
+            <Text style={styles.summaryLabel}>Total Members</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.success }]}>
+              {teamSummary.present}
+            </Text>
+            <Text style={styles.summaryLabel}>Present</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.error }]}>
+              {teamSummary.absent}
+            </Text>
+            <Text style={styles.summaryLabel}>Absent</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={[styles.summaryNumber, { color: ConstructionTheme.colors.warning }]}>
+              {teamSummary.late}
+            </Text>
+            <Text style={styles.summaryLabel}>Late</Text>
+          </View>
+        </View>
+        
+        <View style={styles.summaryFooter}>
+          <Text style={styles.attendanceRate}>
+            Attendance Rate: {teamSummary.attendanceRate}%
+          </Text>
+          {teamSummary.geofenceViolations > 0 && (
+            <Text style={styles.geofenceAlert}>
+              ⚠️ {teamSummary.geofenceViolations} geofence violations
+            </Text>
+          )}
+        </View>
+      </ConstructionCard>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <ConstructionInput
+          placeholder="Search team members..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          icon="🔍"
+          style={styles.searchInput}
+        />
+      </View>
+
+      {/* Error Display */}
+      {supervisorState.error && (
+        <ErrorDisplay
+          error={supervisorState.error}
+          onRetry={handleRefresh}
+          onDismiss={clearError}
+        />
+      )}
+
+      {/* Team Members List - Placeholder for now */}
+      <ScrollView 
+        style={styles.membersList}
+        contentContainerStyle={styles.membersListContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[ConstructionTheme.colors.primary]}
+            tintColor={ConstructionTheme.colors.primary}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {filteredAndSortedMembers.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>👥</Text>
+            <Text style={styles.emptyStateTitle}>No Team Members Found</Text>
+            <Text style={styles.emptyStateMessage}>
+              {searchQuery || attendanceFilter !== 'all'
+                ? 'Try adjusting your search or filters'
+                : 'No team members have been assigned yet'}
+            </Text>
+            <ConstructionButton
+              title="Refresh"
+              onPress={handleRefresh}
+              variant="outline"
+              size="medium"
+              style={styles.emptyStateButton}
+            />
+          </View>
+        ) : (
+          filteredAndSortedMembers.map((member) => (
+            <TouchableOpacity
+              key={member.id}
+              style={styles.memberCard}
+              onPress={() => handleMemberPress(member)}
+              activeOpacity={0.7}
+            >
+              <ConstructionCard variant="default" padding="medium">
+                <View style={styles.memberCardHeader}>
+                  <View style={styles.memberInfo}>
+                    <Text style={styles.memberName}>{member.name}</Text>
+                    <Text style={styles.memberRole}>{member.role}</Text>
+                  </View>
+                  <View style={styles.statusContainer}>
+                    <Text style={styles.statusIcon}>{getStatusIcon(member.attendanceStatus)}</Text>
+                    <Text style={[styles.statusText, { color: getStatusColor(member.attendanceStatus) }]}>
+                      {member.attendanceStatus.replace('_', ' ').toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.memberCardContent}>
+                  {/* Current Task */}
+                  {member.currentTask ? (
+                    <View style={styles.taskInfo}>
+                      <Text style={styles.taskLabel}>Current Task:</Text>
+                      <Text style={styles.taskName}>{member.currentTask.name}</Text>
+                      <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                          <View 
+                            style={[
+                              styles.progressFill, 
+                              { width: `${member.currentTask.progress}%` }
+                            ]} 
+                          />
+                        </View>
+                        <Text style={styles.progressText}>{member.currentTask.progress}%</Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.taskInfo}>
+                      <Text style={styles.noTaskText}>No active task assigned</Text>
+                    </View>
+                  )}
+
+                  {/* Location Status */}
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationLabel}>Location:</Text>
+                    <View style={styles.locationStatus}>
+                      <Text style={styles.locationIcon}>
+                        {member.location.insideGeofence ? '📍' : '⚠️'}
+                      </Text>
+                      <Text style={[
+                        styles.locationText,
+                        { color: member.location.insideGeofence ? ConstructionTheme.colors.success : ConstructionTheme.colors.warning }
+                      ]}>
+                        {member.location.insideGeofence ? 'On Site' : 'Outside Geofence'}
+                      </Text>
+                    </View>
+                    <Text style={styles.lastUpdated}>
+                      Updated: {new Date(member.location.lastUpdated).toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Quick Actions */}
+                <View style={styles.quickActions}>
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.messageButton]}
+                    onPress={() => handleSendMessage(member)}
+                  >
+                    <Text style={styles.quickActionIcon}>💬</Text>
+                    <Text style={styles.quickActionText}>Message</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.taskButton]}
+                    onPress={() => handleAssignTask(member)}
+                  >
+                    <Text style={styles.quickActionIcon}>📋</Text>
+                    <Text style={styles.quickActionText}>Assign Task</Text>
+                  </TouchableOpacity>
+                </View>
+              </ConstructionCard>
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
+
+      {/* Filters Modal */}
+      <Modal
+        visible={showFilters}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowFilters(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Filter & Sort Options</Text>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowFilters(false)}
+            >
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {/* Attendance Filter */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>Filter by Attendance Status</Text>
+              <View style={styles.filterOptions}>
+                {(['all', 'present', 'absent', 'late', 'on_break'] as AttendanceFilter[]).map((filter) => (
+                  <TouchableOpacity
+                    key={filter}
+                    style={[
+                      styles.filterOption,
+                      attendanceFilter === filter && styles.filterOptionActive
+                    ]}
+                    onPress={() => setAttendanceFilter(filter)}
+                  >
+                    <Text style={[
+                      styles.filterOptionText,
+                      attendanceFilter === filter && styles.filterOptionTextActive
+                    ]}>
+                      {filter.replace('_', ' ').toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Sort Options */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>Sort by</Text>
+              <View style={styles.filterOptions}>
+                {([
+                  { key: 'name', label: 'Name' },
+                  { key: 'status', label: 'Status' },
+                  { key: 'task_progress', label: 'Task Progress' },
+                  { key: 'last_updated', label: 'Last Updated' }
+                ] as Array<{ key: SortOption; label: string }>).map((option) => (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.filterOption,
+                      sortBy === option.key && styles.filterOptionActive
+                    ]}
+                    onPress={() => setSortBy(option.key)}
+                  >
+                    <Text style={[
+                      styles.filterOptionText,
+                      sortBy === option.key && styles.filterOptionTextActive
+                    ]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Team Actions */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>Team Actions</Text>
+              <ConstructionButton
+                title="Send Team Notification"
+                onPress={sendTeamNotification}
+                variant="outline"
+                size="medium"
+                style={styles.teamActionButton}
+              />
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Worker Detail Modal */}
+      <Modal
+        visible={showMemberDetail}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowMemberDetail(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              {selectedMember?.name || 'Worker Details'}
+            </Text>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowMemberDetail(false)}
+            >
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {loadingMemberDetails ? (
+              <View style={styles.modalLoadingContainer}>
+                <ActivityIndicator size="large" color={ConstructionTheme.colors.primary} />
+                <Text style={styles.modalLoadingText}>Loading worker details...</Text>
+              </View>
+            ) : selectedMember ? (
+              <>
+                {/* Worker Basic Info */}
+                <ConstructionCard title="Basic Information" variant="elevated" style={styles.detailCard}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Name:</Text>
+                    <Text style={styles.detailValue}>{selectedMember.name}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Role:</Text>
+                    <Text style={styles.detailValue}>{selectedMember.role}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Status:</Text>
+                    <View style={styles.statusBadge}>
+                      <Text style={styles.statusIcon}>{getStatusIcon(selectedMember.attendanceStatus)}</Text>
+                      <Text style={[styles.statusBadgeText, { color: getStatusColor(selectedMember.attendanceStatus) }]}>
+                        {selectedMember.attendanceStatus.replace('_', ' ').toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                </ConstructionCard>
+
+                {/* Current Task */}
+                <ConstructionCard title="Current Task" variant="elevated" style={styles.detailCard}>
+                  {selectedMember.currentTask ? (
+                    <>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Task:</Text>
+                        <Text style={styles.detailValue}>{selectedMember.currentTask.name}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Progress:</Text>
+                        <View style={styles.progressDetailContainer}>
+                          <View style={styles.progressDetailBar}>
+                            <View 
+                              style={[
+                                styles.progressDetailFill, 
+                                { width: `${selectedMember.currentTask.progress}%` }
+                              ]} 
+                            />
+                          </View>
+                          <Text style={styles.progressDetailText}>{selectedMember.currentTask.progress}%</Text>
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.noDataText}>No active task assigned</Text>
+                  )}
+                </ConstructionCard>
+
+                {/* Location Information */}
+                <ConstructionCard title="Location Status" variant="elevated" style={styles.detailCard}>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Geofence Status:</Text>
+                    <View style={styles.locationStatusDetail}>
+                      <Text style={styles.locationIcon}>
+                        {selectedMember.location.insideGeofence ? '📍' : '⚠️'}
+                      </Text>
+                      <Text style={[
+                        styles.locationStatusText,
+                        { color: selectedMember.location.insideGeofence ? ConstructionTheme.colors.success : ConstructionTheme.colors.warning }
+                      ]}>
+                        {selectedMember.location.insideGeofence ? 'On Site' : 'Outside Geofence'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Last Updated:</Text>
+                    <Text style={styles.detailValue}>
+                      {new Date(selectedMember.location.lastUpdated).toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Coordinates:</Text>
+                    <Text style={styles.detailValue}>
+                      {selectedMember.location.latitude.toFixed(6)}, {selectedMember.location.longitude.toFixed(6)}
+                    </Text>
+                  </View>
+                </ConstructionCard>
+
+                {/* Certifications */}
+                <ConstructionCard title="Certifications" variant="elevated" style={styles.detailCard}>
+                  {selectedMember.certifications && selectedMember.certifications.length > 0 ? (
+                    selectedMember.certifications.map((cert, index) => (
+                      <View key={index} style={styles.certificationItem}>
+                        <View style={styles.certificationHeader}>
+                          <Text style={styles.certificationName}>{cert.name}</Text>
+                          <View style={[
+                            styles.certificationStatusBadge,
+                            { backgroundColor: cert.status === 'active' ? ConstructionTheme.colors.success : 
+                                               cert.status === 'expiring' ? ConstructionTheme.colors.warning : 
+                                               ConstructionTheme.colors.error }
+                          ]}>
+                            <Text style={styles.certificationStatusText}>
+                              {cert.status.toUpperCase()}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.certificationExpiry}>
+                          Expires: {new Date(cert.expiryDate).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.noDataText}>No certifications on record</Text>
+                  )}
+                </ConstructionCard>
+
+                {/* Performance Metrics (Mock Data) */}
+                <ConstructionCard title="Performance Overview" variant="elevated" style={styles.detailCard}>
+                  <View style={styles.performanceGrid}>
+                    <View style={styles.performanceItem}>
+                      <Text style={styles.performanceValue}>95%</Text>
+                      <Text style={styles.performanceLabel}>Attendance Rate</Text>
+                    </View>
+                    <View style={styles.performanceItem}>
+                      <Text style={styles.performanceValue}>87%</Text>
+                      <Text style={styles.performanceLabel}>Task Completion</Text>
+                    </View>
+                    <View style={styles.performanceItem}>
+                      <Text style={styles.performanceValue}>4.2</Text>
+                      <Text style={styles.performanceLabel}>Quality Score</Text>
+                    </View>
+                    <View style={styles.performanceItem}>
+                      <Text style={styles.performanceValue}>12</Text>
+                      <Text style={styles.performanceLabel}>Tasks This Week</Text>
+                    </View>
+                  </View>
+                </ConstructionCard>
+
+                {/* Action Buttons */}
+                <View style={styles.detailActions}>
+                  <ConstructionButton
+                    title="Send Message"
+                    onPress={() => {
+                      setShowMemberDetail(false);
+                      handleSendMessage(selectedMember);
+                    }}
+                    variant="primary"
+                    size="medium"
+                    style={styles.detailActionButton}
+                  />
+                  <ConstructionButton
+                    title="Assign Task"
+                    onPress={() => {
+                      setShowMemberDetail(false);
+                      handleAssignTask(selectedMember);
+                    }}
+                    variant="outline"
+                    size="medium"
+                    style={styles.detailActionButton}
+                  />
+                </View>
+              </>
+            ) : null}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Communication Modal */}
+      <Modal
+        visible={showCommunicationModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowCommunicationModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Send Message to {selectedMember?.name}
+            </Text>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowCommunicationModal(false)}
+            >
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalContent}>
+            {/* Communication Type Selector */}
+            <View style={styles.communicationTypeSection}>
+              <Text style={styles.sectionTitle}>Message Type</Text>
+              <View style={styles.communicationTypes}>
+                {(['message', 'notification', 'alert'] as Array<typeof communicationType>).map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      styles.communicationTypeOption,
+                      communicationType === type && styles.communicationTypeOptionActive
+                    ]}
+                    onPress={() => setCommunicationType(type)}
+                  >
+                    <Text style={[
+                      styles.communicationTypeText,
+                      communicationType === type && styles.communicationTypeTextActive
+                    ]}>
+                      {type.charAt(0).toUpperCase() + type.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Message Input */}
+            <View style={styles.messageInputSection}>
+              <Text style={styles.sectionTitle}>Message</Text>
+              <TextInput
+                style={styles.messageInput}
+                placeholder={`Enter your ${communicationType} here...`}
+                value={communicationMessage}
+                onChangeText={setCommunicationMessage}
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+              />
+            </View>
+
+            {/* Quick Message Templates */}
+            <View style={styles.quickMessagesSection}>
+              <Text style={styles.sectionTitle}>Quick Messages</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {[
+                  'Please check in at the site',
+                  'Task assignment updated',
+                  'Safety briefing at 2 PM',
+                  'Good work today!',
+                  'Please report to supervisor'
+                ].map((template, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.quickMessageButton}
+                    onPress={() => setCommunicationMessage(template)}
+                  >
+                    <Text style={styles.quickMessageText}>{template}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Send Button */}
+            <View style={styles.communicationActions}>
+              <ConstructionButton
+                title={`Send ${communicationType.charAt(0).toUpperCase() + communicationType.slice(1)}`}
+                onPress={sendCommunication}
+                variant="primary"
+                size="large"
+                disabled={!communicationMessage.trim()}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: ConstructionTheme.colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    paddingTop: ConstructionTheme.spacing.xl,
+    paddingBottom: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.primary,
+    ...ConstructionTheme.shadows.medium,
+  },
+  title: {
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  filtersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    minHeight: ConstructionTheme.dimensions.buttonSmall,
+  },
+  filtersButtonIcon: {
+    fontSize: 16,
+    marginRight: ConstructionTheme.spacing.xs,
+  },
+  filtersButtonText: {
+    ...ConstructionTheme.typography.buttonSmall,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  summaryCard: {
+    marginHorizontal: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.md,
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  summaryItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  summaryNumber: {
+    ...ConstructionTheme.typography.headlineLarge,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  summaryLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+  },
+  summaryFooter: {
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+    paddingTop: ConstructionTheme.spacing.md,
+    alignItems: 'center',
+  },
+  attendanceRate: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  geofenceAlert: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.warning,
+    fontWeight: 'bold',
+  },
+  searchContainer: {
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingVertical: ConstructionTheme.spacing.sm,
+  },
+  searchInput: {
+    marginBottom: 0,
+  },
+  membersList: {
+    flex: 1,
+  },
+  membersListContent: {
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingBottom: ConstructionTheme.spacing.xl,
+  },
+  memberCard: {
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  memberCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  memberRole: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+  statusContainer: {
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  statusIcon: {
+    fontSize: 24,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  statusText: {
+    ...ConstructionTheme.typography.labelSmall,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  memberCardContent: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  taskInfo: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  taskLabel: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  taskName: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  noTaskText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontStyle: 'italic',
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: ConstructionTheme.colors.outline,
+    borderRadius: 4,
+    marginRight: ConstructionTheme.spacing.sm,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: ConstructionTheme.colors.primary,
+    borderRadius: 4,
+  },
+  progressText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: 'bold',
+    minWidth: 35,
+  },
+  locationInfo: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  locationLabel: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  locationStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  locationIcon: {
+    fontSize: 16,
+    marginRight: ConstructionTheme.spacing.xs,
+  },
+  locationText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    fontWeight: 'bold',
+  },
+  lastUpdated: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+    paddingTop: ConstructionTheme.spacing.md,
+  },
+  quickActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: ConstructionTheme.spacing.sm,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    marginHorizontal: ConstructionTheme.spacing.xs,
+    minHeight: ConstructionTheme.dimensions.buttonSmall,
+  },
+  messageButton: {
+    backgroundColor: ConstructionTheme.colors.info,
+  },
+  taskButton: {
+    backgroundColor: ConstructionTheme.colors.primary,
+  },
+  quickActionIcon: {
+    fontSize: 16,
+    marginRight: ConstructionTheme.spacing.xs,
+  },
+  quickActionText: {
+    ...ConstructionTheme.typography.buttonSmall,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: ConstructionTheme.spacing.xxl,
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+  },
+  emptyStateIcon: {
+    fontSize: 64,
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  emptyStateTitle: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.sm,
+    textAlign: 'center',
+  },
+  emptyStateMessage: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  emptyStateButton: {
+    minWidth: 120,
+  },
+  
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: ConstructionTheme.colors.background,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    paddingTop: ConstructionTheme.spacing.xl,
+    paddingBottom: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.primary,
+    ...ConstructionTheme.shadows.medium,
+  },
+  modalTitle: {
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseText: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  modalContent: {
+    flex: 1,
+    padding: ConstructionTheme.spacing.md,
+  },
+  modalLoadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: ConstructionTheme.spacing.xxl,
+  },
+  modalLoadingText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginTop: ConstructionTheme.spacing.md,
+  },
+
+  // Filter Modal Styles
+  filterSection: {
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  filterSectionTitle: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: ConstructionTheme.spacing.sm,
+  },
+  filterOption: {
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.outline,
+    backgroundColor: ConstructionTheme.colors.surface,
+    minHeight: ConstructionTheme.dimensions.buttonSmall,
+    justifyContent: 'center',
+  },
+  filterOptionActive: {
+    backgroundColor: ConstructionTheme.colors.primary,
+    borderColor: ConstructionTheme.colors.primary,
+  },
+  filterOptionText: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurface,
+    textAlign: 'center',
+  },
+  filterOptionTextActive: {
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  teamActionButton: {
+    marginTop: ConstructionTheme.spacing.sm,
+  },
+
+  // Worker Detail Modal Styles
+  detailCard: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: ConstructionTheme.spacing.sm,
+    minHeight: 24,
+  },
+  detailLabel: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    flex: 1,
+    marginRight: ConstructionTheme.spacing.md,
+  },
+  detailValue: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    flex: 2,
+    textAlign: 'right',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    paddingHorizontal: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  statusBadgeText: {
+    ...ConstructionTheme.typography.labelSmall,
+    fontWeight: 'bold',
+    marginLeft: ConstructionTheme.spacing.xs,
+  },
+  progressDetailContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 2,
+  },
+  progressDetailBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: ConstructionTheme.colors.outline,
+    borderRadius: 4,
+    marginRight: ConstructionTheme.spacing.sm,
+  },
+  progressDetailFill: {
+    height: '100%',
+    backgroundColor: ConstructionTheme.colors.primary,
+    borderRadius: 4,
+  },
+  progressDetailText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: 'bold',
+    minWidth: 35,
+    textAlign: 'right',
+  },
+  locationStatusDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 2,
+    justifyContent: 'flex-end',
+  },
+  locationStatusText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    fontWeight: 'bold',
+    marginLeft: ConstructionTheme.spacing.xs,
+  },
+  noDataText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: ConstructionTheme.spacing.md,
+  },
+
+  // Certification Styles
+  certificationItem: {
+    marginBottom: ConstructionTheme.spacing.md,
+    paddingBottom: ConstructionTheme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: ConstructionTheme.colors.outline,
+  },
+  certificationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  certificationName: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  certificationStatusBadge: {
+    paddingHorizontal: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  certificationStatusText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  certificationExpiry: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+
+  // Performance Styles
+  performanceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  performanceItem: {
+    width: '48%',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  performanceValue: {
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  performanceLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+  },
+
+  // Detail Actions
+  detailActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.lg,
+    paddingTop: ConstructionTheme.spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+  },
+  detailActionButton: {
+    flex: 1,
+  },
+
+  // Communication Modal Styles
+  communicationTypeSection: {
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  sectionTitle: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  communicationTypes: {
+    flexDirection: 'row',
+    gap: ConstructionTheme.spacing.sm,
+  },
+  communicationTypeOption: {
+    flex: 1,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.outline,
+    backgroundColor: ConstructionTheme.colors.surface,
+    alignItems: 'center',
+    minHeight: ConstructionTheme.dimensions.buttonSmall,
+    justifyContent: 'center',
+  },
+  communicationTypeOptionActive: {
+    backgroundColor: ConstructionTheme.colors.primary,
+    borderColor: ConstructionTheme.colors.primary,
+  },
+  communicationTypeText: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurface,
+  },
+  communicationTypeTextActive: {
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  messageInputSection: {
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  messageInput: {
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.outline,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    padding: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.surface,
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    minHeight: 120,
+  },
+  quickMessagesSection: {
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  quickMessageButton: {
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    marginRight: ConstructionTheme.spacing.sm,
+    minHeight: ConstructionTheme.dimensions.buttonSmall,
+    justifyContent: 'center',
+  },
+  quickMessageText: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+  communicationActions: {
+    paddingTop: ConstructionTheme.spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+  },
+});
+
+export default TeamManagementScreen;

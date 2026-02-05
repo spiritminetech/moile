@@ -25,6 +25,6 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|@react-navigation|expo)/)',
+    'node_modules/(?!(react-native|@react-native|@react-navigation|expo|@expo|expo-.*)/)',
   ],
 };

@@ -155,13 +155,13 @@ const WorkerDashboard: React.FC = () => {
         />
 
         {/* Daily Summary Card */}
-        {data.dailySummary && (
+        {data.dailySummary ? (
           <ConstructionCard
             title="Today's Progress"
             variant="default"
             style={styles.summaryCard}
           >
-            {data.dailySummary.totalTasks === 0 ? (
+            {(data.dailySummary.totalTasks || 0) === 0 ? (
               <View style={styles.emptyStateContainer}>
                 <Text style={styles.emptyStateIcon}>📋</Text>
                 <Text style={styles.emptyStateTitle}>No Tasks Assigned Today</Text>
@@ -173,31 +173,31 @@ const WorkerDashboard: React.FC = () => {
               <>
                 <View style={styles.summaryGrid}>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{data.dailySummary.totalTasks}</Text>
+                    <Text style={styles.summaryValue}>{data.dailySummary.totalTasks || 0}</Text>
                     <Text style={styles.summaryLabel}>Total Tasks</Text>
                   </View>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{data.dailySummary.completedTasks}</Text>
+                    <Text style={styles.summaryValue}>{data.dailySummary.completedTasks || 0}</Text>
                     <Text style={styles.summaryLabel}>Completed</Text>
                   </View>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{data.dailySummary.inProgressTasks}</Text>
+                    <Text style={styles.summaryValue}>{data.dailySummary.inProgressTasks || 0}</Text>
                     <Text style={styles.summaryLabel}>In Progress</Text>
                   </View>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{data.dailySummary.overallProgress}%</Text>
+                    <Text style={styles.summaryValue}>{data.dailySummary.overallProgress || 0}%</Text>
                     <Text style={styles.summaryLabel}>Progress</Text>
                   </View>
                 </View>
                 <View style={styles.hoursContainer}>
                   <Text style={styles.hoursText}>
-                    Hours Worked: {data.dailySummary.totalHoursWorked}h / Remaining: {data.dailySummary.remainingHours}h
+                    Hours Worked: {data.dailySummary.totalHoursWorked || 0}h / Remaining: {data.dailySummary.remainingHours || 0}h
                   </Text>
                 </View>
               </>
             )}
           </ConstructionCard>
-        )}
+        ) : null}
 
         {/* Tools and Materials Card */}
         {data.toolsAndMaterials && (
@@ -262,7 +262,7 @@ const WorkerDashboard: React.FC = () => {
             <Text style={styles.actionIcon}>📋</Text>
             <Text style={styles.actionTitle}>Today's Tasks</Text>
             <Text style={styles.actionSubtitle}>
-              {data.todaysTasks.length > 0 
+              {(data.todaysTasks && data.todaysTasks.length > 0)
                 ? `${data.todaysTasks.length} tasks assigned`
                 : 'No tasks assigned today'
               }

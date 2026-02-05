@@ -143,7 +143,9 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
       const response = await workerApiService.uploadProfilePhoto(file);
 
       if (response.success) {
-        onPhotoUpdated(response.data.photoUrl);
+        // Use the photoUrl from the response to update the UI immediately
+        const photoUrl = response.data.photoUrl || response.photoUrl;
+        onPhotoUpdated(photoUrl);
         Alert.alert('Success', 'Profile photo updated successfully!');
       } else {
         throw new Error(response.message || 'Failed to upload photo');

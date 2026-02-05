@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/store/context/AuthContext';
 import { LocationProvider } from './src/store/context/LocationContext';
 import { OfflineProvider } from './src/store/context/OfflineContext';
+import { SupervisorProvider } from './src/store/context/SupervisorContext';
+import { DriverProvider } from './src/store/context/DriverContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
 // Main App with all context providers
@@ -15,8 +17,12 @@ const App: React.FC = () => {
       <AuthProvider>
         <LocationProvider>
           <OfflineProvider>
-            <AppContent />
-            <StatusBar style="auto" />
+            <SupervisorProvider>
+              <DriverProvider>
+                <AppContent />
+                <StatusBar style="auto" />
+              </DriverProvider>
+            </SupervisorProvider>
           </OfflineProvider>
         </LocationProvider>
       </AuthProvider>

@@ -161,8 +161,9 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
     }
   };
 
-  const handlePhotoUpdated = (photoUrl: string) => {
+  const handlePhotoUpdated = async (photoUrl: string) => {
     if (profileData) {
+      // Update the local state immediately for better UX
       setProfileData({
         ...profileData,
         user: {
@@ -170,6 +171,13 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
           profileImage: photoUrl,
         },
       });
+      
+      // Refresh the profile data from server to ensure consistency
+      try {
+        await loadProfileData();
+      } catch (error) {
+        console.warn('Failed to refresh profile data after photo update:', error);
+      }
     }
   };
 

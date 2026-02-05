@@ -16,6 +16,22 @@ export interface User {
     name: string;
     location: string;
   };
+  
+  // Role-specific data
+  supervisorData?: {
+    assignedProjects: number[];
+    teamMembers: number[];
+    approvalLevel: 'basic' | 'advanced' | 'senior';
+    specializations: string[];
+  };
+  
+  driverData?: {
+    licenseNumber: string;
+    licenseClass: string;
+    licenseExpiry: Date;
+    assignedVehicles: number[];
+    certifications: string[];
+  };
 }
 
 export interface Company {
@@ -37,6 +53,10 @@ export interface AuthState {
   // Multi-company support
   requiresCompanySelection?: boolean;
   availableCompanies?: Company[];
+  
+  // Role-specific state
+  supervisorContext?: SupervisorContextData;
+  driverContext?: DriverContextData;
 }
 
 export interface Certification {
@@ -555,12 +575,93 @@ export interface CachedData {
   lastUpdated: Date;
 }
 
+// Driver-Specific State Types
+export interface TransportState {
+  todaysTasks: TransportTask[];
+  activeTask: TransportTask | null;
+  routeOptimization: RouteData | null;
+  workerManifests: WorkerManifest[];
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface VehicleState {
+  assignedVehicle: VehicleInfo | null;
+  maintenanceAlerts: MaintenanceAlert[];
+  fuelLogs: Array<{
+    date: string;
+    amount: number;
+    cost: number;
+    mileage: number;
+    location: string;
+  }>;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface TripState {
+  currentTrip: TripRecord | null;
+  tripHistory: TripRecord[];
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface PerformanceState {
+  metrics: DriverPerformance | null;
+  monthlyStats: Array<{
+    month: string;
+    tripsCompleted: number;
+    onTimePerformance: number;
+    fuelEfficiency: number;
+  }>;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface RouteData {
+  optimizedRoute: Array<{
+    locationId: number;
+    coordinates: {
+      latitude: number;
+      longitude: number;
+    };
+    estimatedArrival: string;
+    travelTime: number;
+  }>;
+  totalDistance: number;
+  estimatedDuration: number;
+  fuelEstimate: number;
+}
+
+export interface WorkerManifest {
+  locationId: number;
+  locationName: string;
+  workers: Array<{
+    workerId: number;
+    name: string;
+    phone: string;
+    checkedIn: boolean;
+    checkInTime?: string;
+    profileImage?: string;
+  }>;
+  totalWorkers: number;
+  checkedInWorkers: number;
+}
+
 export interface AppState {
   auth: AuthState;
   location: LocationState;
   offline: OfflineState;
   tasks: TaskState;
   attendance: AttendanceState;
+  
+  // New Driver state
+  driver?: {
+    transport: TransportState;
+    vehicle: VehicleState;
+    trips: TripState;
+    performance: PerformanceState;
+  };
 }
 
 // GPS Accuracy Warning
@@ -570,6 +671,327 @@ export interface GPSAccuracyWarning {
   requiredAccuracy: number;
   message: string;
   canProceed: boolean;
+}
+
+// Driver-Specific Types
+export interface DriverDashboardResponse {
+  todaysTransportTasks: Array<{
+    taskId: number;
+    route: string;
+    pickupTime: string;
+    pickupLocation: {
+      name: string;
+      address: string;
+      coordinates: {
+        latitude: number;
+        longitude: number;
+      };
+    };
+    dropoffLocation: {
+      name: string;
+      address: string;
+      coordinates: {
+        latitude: number;
+        longitude: number;
+      };
+    };
+    workerCount: number;
+    status: 'pending' | 'en_route_pickup' | 'pickup_complete' | 'en_route_dropoff' | 'completed';
+  }>;
+  assignedVehicle: {
+    id: number;
+    plateNumber: string;
+    model: string;
+    capacity: number;
+    fuelLevel: number;
+    maintenanceStatus: 'good' | 'due_soon' | 'overdue';
+  };
+  performanceMetrics: {
+    onTimePerformance: number;
+    completedTrips: number;
+    totalDistance: number;
+    fuelEfficiency: number;
+  };
+}
+
+export interface TransportTask {
+  taskId: number;
+  route: string;
+  pickupLocations: Array<{
+    locationId: number;
+    name: string;
+    address: string;
+    coordinates: {
+      latitude: number;
+      longitude: number;
+    };
+    workerManifest: Array<{
+      workerId: number;
+      name: string;
+      phone: string;
+      checkedIn: boolean;
+      checkInTime?: string;
+    }>;
+    estimatedPickupTime: string;
+    actualPickupTime?: string;
+  }>;
+  dropoffLocation: {
+    name: string;
+    address: string;
+    coordinates: {
+      latitude: number;
+      longitude: number;
+    };
+    estimatedArrival: string;
+    actualArrival?: string;
+  };
+  status: 'pending' | 'en_route_pickup' | 'pickup_complete' | 'en_route_dropoff' | 'completed';
+  totalWorkers: number;
+  checkedInWorkers: number;
+}
+
+export interface VehicleInfo {
+  id: number;
+  plateNumber: string;
+  model: string;
+  year: number;
+  capacity: number;
+  currentMileage: number;
+  fuelLevel: number;
+  maintenanceSchedule: Array<{
+    type: 'oil_change' | 'tire_rotation' | 'inspection' | 'major_service';
+    dueDate: string;
+    dueMileage: number;
+    status: 'upcoming' | 'due' | 'overdue';
+  }>;
+  fuelLog: Array<{
+    date: string;
+    amount: number;
+    cost: number;
+    mileage: number;
+    location: string;
+  }>;
+}
+
+export interface TripRecord {
+  tripId: number;
+  date: Date;
+  route: string;
+  pickupLocations: string[];
+  dropoffLocation: string;
+  totalWorkers: number;
+  actualPickupTime: Date;
+  actualDropoffTime: Date;
+  totalDistance: number;
+  fuelUsed: number;
+  delays: Array<{
+    reason: string;
+    duration: number;
+    location: string;
+  }>;
+  status: 'completed' | 'cancelled' | 'incident';
+}
+
+export interface DriverPerformance {
+  onTimePerformance: number;
+  totalTripsCompleted: number;
+  totalDistance: number;
+  averageFuelEfficiency: number;
+  safetyScore: number;
+  customerRating: number;
+  incidentCount: number;
+}
+
+export interface MaintenanceAlert {
+  id: number;
+  vehicleId: number;
+  type: 'scheduled' | 'urgent' | 'overdue';
+  description: string;
+  dueDate: Date;
+  dueMileage?: number;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  estimatedCost?: number;
+}
+
+export interface DriverContextData {
+  assignedVehicle: VehicleInfo;
+  todaysRoutes: TransportTask[];
+  tripHistory: TripRecord[];
+  performanceMetrics: DriverPerformance;
+  maintenanceAlerts: MaintenanceAlert[];
+}
+
+// Supervisor-Specific Context Data
+export interface SupervisorContextData {
+  assignedProjects: Project[];
+  teamMembers: TeamMember[];
+  pendingApprovals: PendingApproval[];
+  dailyReports: SupervisorReport[];
+  materialRequests: MaterialRequest[];
+  toolAllocations: ToolAllocation[];
+}
+
+export interface TeamMember {
+  id: number;
+  name: string;
+  role: string;
+  attendanceStatus: 'present' | 'absent' | 'late' | 'on_break';
+  currentTask: {
+    id: number;
+    name: string;
+    progress: number;
+  } | null;
+  location: {
+    latitude: number;
+    longitude: number;
+    insideGeofence: boolean;
+    lastUpdated: string;
+  };
+  certifications: Array<{
+    name: string;
+    status: 'active' | 'expiring' | 'expired';
+    expiryDate: string;
+  }>;
+}
+
+export interface PendingApproval {
+  id: number;
+  requestType: 'leave' | 'material' | 'tool' | 'reimbursement' | 'advance_payment';
+  requesterId: number;
+  requesterName: string;
+  requestDate: Date;
+  urgency: 'low' | 'normal' | 'high' | 'urgent';
+  details: any;
+  estimatedCost?: number;
+  approvalDeadline?: Date;
+}
+
+export interface SupervisorReport {
+  id: string;
+  date: string;
+  projectId: number;
+  manpowerUtilization: {
+    totalWorkers: number;
+    activeWorkers: number;
+    productivity: number;
+    efficiency: number;
+  };
+  progressMetrics: {
+    overallProgress: number;
+    milestonesCompleted: number;
+    tasksCompleted: number;
+    hoursWorked: number;
+  };
+  issues: Array<{
+    type: 'safety' | 'quality' | 'delay' | 'resource';
+    description: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+    status: 'open' | 'in_progress' | 'resolved';
+  }>;
+  materialConsumption: Array<{
+    materialId: number;
+    name: string;
+    consumed: number;
+    remaining: number;
+    unit: string;
+  }>;
+  photos: Array<{
+    photoId: string;
+    category: 'progress' | 'issue' | 'completion';
+    url: string;
+    timestamp: string;
+  }>;
+}
+
+export interface MaterialRequest {
+  id: number;
+  projectId: number;
+  requesterId: number;
+  itemName: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  urgency: 'low' | 'normal' | 'high' | 'urgent';
+  requiredDate: Date;
+  purpose: string;
+  justification: string;
+  estimatedCost?: number;
+  status: 'pending' | 'approved' | 'rejected' | 'delivered';
+}
+
+export interface ToolAllocation {
+  id: number;
+  toolId: number;
+  toolName: string;
+  allocatedTo: number;
+  allocatedToName: string;
+  allocationDate: Date;
+  expectedReturnDate: Date;
+  actualReturnDate?: Date;
+  condition: 'good' | 'fair' | 'needs_maintenance' | 'damaged';
+  location: string;
+}
+
+// Notification Types (Placeholder for future implementation)
+export type NotificationType = 
+  | 'team_alert' 
+  | 'attendance_issue' 
+  | 'task_update' 
+  | 'approval_request' 
+  | 'safety_incident' 
+  | 'material_request' 
+  | 'progress_update' 
+  | 'system_alert';
+
+export type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
+export type NotificationStatus = 'unread' | 'read' | 'archived';
+
+export interface SupervisorNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  status: NotificationStatus;
+  timestamp: Date;
+  projectId?: number;
+  workerId?: number;
+  taskId?: number;
+  actionRequired?: boolean;
+  actionUrl?: string;
+  metadata?: {
+    [key: string]: any;
+  };
+}
+
+export interface NotificationCategory {
+  type: NotificationType;
+  label: string;
+  icon: string;
+  description: string;
+  enabled: boolean;
+  soundEnabled: boolean;
+  vibrationEnabled: boolean;
+}
+
+export interface NotificationSettings {
+  globalEnabled: boolean;
+  soundEnabled: boolean;
+  vibrationEnabled: boolean;
+  quietHours: {
+    enabled: boolean;
+    startTime: string;
+    endTime: string;
+  };
+  categories: NotificationCategory[];
+}
+
+export interface NotificationState {
+  notifications: SupervisorNotification[];
+  unreadCount: number;
+  settings: NotificationSettings;
+  isLoading: boolean;
+  error: string | null;
 }
 
 // Component Props Types
