@@ -54,7 +54,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ✅ Serve uploaded files statically - THIS IS CRITICAL FOR PHOTO PREVIEWS
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', (req, res, next) => {
+  // Add CORS headers for static files
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+}, express.static(path.join(__dirname, 'uploads')));
 
 // Log static file requests for debugging
 if (appConfig.server.isDevelopment) {
@@ -115,6 +126,24 @@ app.get(`${apiPrefix}/test-upload`, (req, res) => {
     maxFileSize: appConfig.upload.maxFileSize,
     allowedTypes: appConfig.upload.allowedTypes
   });
+});
+
+// Test endpoint for debugging image access
+app.get('/test-image/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const imagePath = path.join(__dirname, 'uploads', 'workers', filename);
+  
+  console.log('🧪 Test image request:', {
+    filename,
+    imagePath,
+    exists: require('fs').existsSync(imagePath)
+  });
+  
+  if (require('fs').existsSync(imagePath)) {
+    res.sendFile(imagePath);
+  } else {
+    res.status(404).json({ error: 'Image not found', path: imagePath });
+  }
 });
 
 // MongoDB connection with centralized config
@@ -180,7 +209,7 @@ app.listen(appConfig.server.port, () => {
   appConfig.log(`📁 Static files: ${appConfig.getFullUrl('/uploads/')}`);
   appConfig.log(`🔗 Health check: ${appConfig.getFullUrl(`${apiPrefix}/health`)}`);
   appConfig.log(`🖼️  Upload endpoints: ${Object.keys(appConfig.upload.paths).join(', ')}`);
-  appConfig.log(`🔒 CORS origins: ${appConfig.cors.origin.join(', ')}`);
+  appConfig.log(`🔒 CORS origins: ${Array.isArray(appConfig.cors.origin) ? appConfig.cors.origin.join(', ') : appConfig.cors.origin}`);
   console.log('================================');
 });
 

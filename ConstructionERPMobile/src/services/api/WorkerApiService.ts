@@ -1015,7 +1015,7 @@ export class WorkerApiService {
               issueDate: new Date().toISOString(),
               expiryDate: new Date().toISOString(),
               status: 'active' as const
-            }, // Default work pass if not provided
+            }, // Use work pass data from backend or default
             salaryInfo: profile.salaryInfo // Optional field
           };
           
@@ -1049,42 +1049,9 @@ export class WorkerApiService {
     try {
       const response = await apiClient.get('/worker/profile/certification-alerts');
       
-      // Handle case where API returns empty or no data
       if (response.success) {
-        // The API returns alerts data directly in response, not in response.data
-        const responseData = response as any;
-        let alerts: any[] = [];
-        
-        // Check if response has alerts object with expiringSoon and expired arrays
-        if (responseData.alerts) {
-          const alertsData = responseData.alerts;
-          
-          // Combine expiringSoon and expired arrays
-          const expiringSoon = alertsData.expiringSoon || [];
-          const expired = alertsData.expired || [];
-          
-          // Map to expected format
-          alerts = [
-            ...expiringSoon.map((alert: any) => ({
-              certificationId: alert.id,
-              name: alert.name,
-              expiryDate: alert.expiryDate,
-              daysUntilExpiry: alert.daysUntilExpiry,
-              alertLevel: alert.daysUntilExpiry <= 7 ? 'urgent' : 'warning'
-            })),
-            ...expired.map((alert: any) => ({
-              certificationId: alert.id,
-              name: alert.name,
-              expiryDate: alert.expiryDate,
-              daysUntilExpiry: alert.daysUntilExpiry,
-              alertLevel: 'expired' as const
-            }))
-          ];
-        }
-        // Check if response is directly an array
-        else if (Array.isArray(responseData)) {
-          alerts = responseData;
-        }
+        // The backend now returns data as a flat array
+        const alerts = response.data || [];
         
         return {
           success: true,

@@ -10,7 +10,6 @@ import {
   RefreshControl,
   Alert,
   TouchableOpacity,
-  Image,
 } from 'react-native';
 import { workerApiService } from '../../services/api/WorkerApiService';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
@@ -18,7 +17,6 @@ import ProfilePhotoManager from '../../components/forms/ProfilePhotoManager';
 
 interface ProfileData {
   user: {
-    id: number;
     name: string;
     email: string;
     phone: string;
@@ -77,11 +75,21 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
       }
       setError(null);
 
+      console.log('📊 Loading profile data...');
+
       // Load profile data and certification alerts in parallel
       const [profileResponse, alertsResponse] = await Promise.all([
         workerApiService.getProfile(),
         workerApiService.getCertificationExpiryAlerts(),
       ]);
+
+      console.log('📥 Profile response:', {
+        success: profileResponse.success,
+        hasData: !!profileResponse.data,
+        hasUser: !!profileResponse.data?.user,
+        hasProfileImage: !!profileResponse.data?.user?.profileImage,
+        profileImageUrl: profileResponse.data?.user?.profileImage
+      });
 
       if (profileResponse.success) {
         setProfileData(profileResponse.data);
@@ -96,6 +104,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
         console.warn('Failed to load certification alerts:', alertsResponse.message);
       }
     } catch (err) {
+      console.error('❌ Profile loading error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to load profile data';
       setError(errorMessage);
       Alert.alert('Error', errorMessage);
@@ -162,22 +171,26 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
   };
 
   const handlePhotoUpdated = async (photoUrl: string) => {
+    console.log('📸 Photo updated callback received:', photoUrl);
+    
     if (profileData) {
       // Update the local state immediately for better UX
-      setProfileData({
+      const updatedProfileData = {
         ...profileData,
         user: {
           ...profileData.user,
           profileImage: photoUrl,
         },
-      });
+      };
       
-      // Refresh the profile data from server to ensure consistency
-      try {
-        await loadProfileData();
-      } catch (error) {
-        console.warn('Failed to refresh profile data after photo update:', error);
-      }
+      console.log('🔄 Updating local profile state with new photo URL');
+      setProfileData(updatedProfileData);
+      
+      // Optional: Refresh profile data from server after a short delay to ensure consistency
+      setTimeout(() => {
+        console.log('🔄 Refreshing profile data from server...');
+        loadProfileData(false);
+      }, 1000);
     }
   };
 
@@ -195,7 +208,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
           
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{profileData.user.name}</Text>
-            <Text style={styles.profileDetail}>ID: {profileData.user.employeeId}</Text>
           </View>
           
           <View style={styles.infoRow}>
@@ -222,7 +234,20 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
 
   const renderCertifications = () => {
     if (!profileData?.certifications || !Array.isArray(profileData.certifications) || profileData.certifications.length === 0) {
-      return null;
+      return (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Certifications</Text>
+          <View style={styles.card}>
+            <View style={styles.emptyStateContainer}>
+              <Text style={styles.emptyStateIcon}>📜</Text>
+              <Text style={styles.emptyStateTitle}>No Certifications Found</Text>
+              <Text style={styles.emptyStateMessage}>
+                No certifications are currently on record. Contact your supervisor to add certifications.
+              </Text>
+            </View>
+          </View>
+        </View>
+      );
     }
 
     return (
@@ -231,30 +256,32 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
         {profileData.certifications.map((cert) => (
           <View key={cert.id} style={styles.card}>
             <View style={styles.certificationHeader}>
-              <Text style={styles.certificationName}>{cert.name}</Text>
+              <Text style={styles.certificationName}>{cert.name || 'Unknown Certification'}</Text>
               <View style={[
                 styles.statusBadge,
-                { backgroundColor: getCertificationStatusColor(cert.status) }
+                { backgroundColor: getCertificationStatusColor(cert.status || 'active') }
               ]}>
                 <Text style={styles.statusText}>
-                  {cert.status.replace('_', ' ').toUpperCase()}
+                  {cert.status ? cert.status.replace('_', ' ').toUpperCase() : 'ACTIVE'}
                 </Text>
               </View>
             </View>
             
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Issuer:</Text>
-              <Text style={styles.infoValue}>{cert.issuer}</Text>
+              <Text style={styles.infoValue}>{cert.issuer || 'N/A'}</Text>
             </View>
             
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Certificate #:</Text>
-              <Text style={styles.infoValue}>{cert.certificateNumber}</Text>
+              <Text style={styles.infoValue}>{cert.certificateNumber || 'N/A'}</Text>
             </View>
             
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Issue Date:</Text>
-              <Text style={styles.infoValue}>{formatDate(cert.issueDate)}</Text>
+              <Text style={styles.infoValue}>
+                {cert.issueDate ? formatDate(cert.issueDate) : 'N/A'}
+              </Text>
             </View>
             
             <View style={styles.infoRow}>
@@ -264,7 +291,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
                 cert.status === 'expired' && styles.expiredText,
                 cert.status === 'expiring_soon' && styles.warningText
               ]}>
-                {formatDate(cert.expiryDate)}
+                {cert.expiryDate ? formatDate(cert.expiryDate) : 'No Expiry'}
               </Text>
             </View>
           </View>

@@ -5,7 +5,7 @@ import Employee from './src/modules/employee/Employee.js';
 import User from './src/modules/user/User.js';
 import { validateGeofence } from './utils/geofenceUtil.js';
 
-const API_BASE = 'http://192.168.1.8:5002/api';
+const API_BASE = 'http://192.168.0.3:5002/api';
 
 async function debugYourGeofenceIssue() {
   try {

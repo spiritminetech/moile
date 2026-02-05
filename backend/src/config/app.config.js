@@ -40,6 +40,17 @@ class AppConfig {
     const frontendUrls = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',');
     const driverUrls = (process.env.DRIVER_APP_URL || 'http://localhost:3000').split(',');
     
+    // In development, be more permissive with CORS for mobile apps
+    if (this.server.isDevelopment) {
+      return {
+        origin: true, // Allow all origins in development
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+        exposedHeaders: ['Content-Length', 'Content-Type']
+      };
+    }
+    
     return {
       origin: [...frontendUrls, ...driverUrls],
       credentials: true,

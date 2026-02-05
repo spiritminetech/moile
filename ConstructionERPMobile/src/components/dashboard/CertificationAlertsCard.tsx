@@ -28,6 +28,14 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
 }) => {
   const { alerts, isLoading, error } = useCertificationAlerts();
 
+  // Debug logging
+  console.log('🏆 CertificationAlertsCard render:', {
+    alertsCount: alerts?.length || 0,
+    isLoading,
+    error,
+    alerts: alerts
+  });
+
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -88,78 +96,104 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
     }
   };
 
-  // Don't render if no alerts or still loading
-  if (isLoading || error || !alerts || alerts.length === 0) {
-    return null;
-  }
-
-  // Sort alerts by severity (expired > urgent > warning)
-  const sortedAlerts = alerts ? [...alerts].sort((a, b) => {
-    const severityOrder = { expired: 3, urgent: 2, warning: 1 };
-    return severityOrder[b.alertLevel] - severityOrder[a.alertLevel];
-  }) : [];
-
-  // Show only the most critical alerts (max 3)
-  const displayAlerts = sortedAlerts.slice(0, 3);
-  const hasMoreAlerts = alerts && alerts.length > 3;
-
+  // Always render the card with View Profile button
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>🏆 Certification Alerts</Text>
-        {hasMoreAlerts && (
+        {alerts && alerts.length > 3 && (
           <TouchableOpacity onPress={handleViewAllAlerts}>
             <Text style={styles.viewAllText}>View All ({alerts?.length || 0})</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {displayAlerts.map((alert) => (
-        <TouchableOpacity
-          key={alert.certificationId}
-          style={[
-            styles.alertItem,
-            { borderLeftColor: getAlertLevelColor(alert.alertLevel) }
-          ]}
-          onPress={() => handleAlertPress(alert)}
-        >
-          <View style={styles.alertContent}>
-            <View style={styles.alertHeader}>
-              <Text style={styles.alertIcon}>
-                {getAlertIcon(alert.alertLevel)}
-              </Text>
-              <View style={styles.alertInfo}>
-                <Text style={styles.alertTitle} numberOfLines={1}>
-                  {alert.name}
-                </Text>
-                <Text style={[
-                  styles.alertMessage,
-                  { color: getAlertLevelColor(alert.alertLevel) }
-                ]}>
-                  {alert.alertLevel === 'expired' 
-                    ? `Expired ${formatDate(alert.expiryDate)}`
-                    : `Expires in ${alert.daysUntilExpiry} days`
-                  }
-                </Text>
-              </View>
-            </View>
-            <View style={[
-              styles.alertBadge,
-              { backgroundColor: getAlertLevelColor(alert.alertLevel) }
-            ]}>
-              <Text style={styles.alertBadgeText}>
-                {alert.alertLevel.toUpperCase()}
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      ))}
-
-      {!hasMoreAlerts && alerts && alerts.length > 0 && (
-        <TouchableOpacity style={styles.viewProfileButton} onPress={handleViewAllAlerts}>
-          <Text style={styles.viewProfileText}>View Profile for Details</Text>
-        </TouchableOpacity>
+      {/* Show loading state */}
+      {isLoading && (
+        <View style={styles.alertItem}>
+          <Text style={styles.alertTitle}>Loading alerts...</Text>
+          <Text style={styles.alertMessage}>Please wait</Text>
+        </View>
       )}
+
+      {/* Show error state */}
+      {!isLoading && error && (
+        <View style={styles.alertItem}>
+          <Text style={styles.alertTitle}>Error loading alerts</Text>
+          <Text style={styles.alertMessage}>{error}</Text>
+        </View>
+      )}
+
+      {/* Show empty state */}
+      {!isLoading && !error && (!alerts || alerts.length === 0) && (
+        <View style={styles.alertItem}>
+          <Text style={styles.alertTitle}>No certification alerts</Text>
+          <Text style={styles.alertMessage}>All certifications are up to date</Text>
+        </View>
+      )}
+
+      {/* Show alerts */}
+      {!isLoading && !error && alerts && alerts.length > 0 && (
+        <>
+          {/* Sort alerts by severity and show top 3 */}
+          {alerts
+            .sort((a, b) => {
+              const severityOrder = { expired: 3, urgent: 2, warning: 1 };
+              return severityOrder[b.alertLevel] - severityOrder[a.alertLevel];
+            })
+            .slice(0, 3)
+            .map((alert) => (
+              <TouchableOpacity
+                key={alert.certificationId}
+                style={[
+                  styles.alertItem,
+                  { borderLeftColor: getAlertLevelColor(alert.alertLevel) }
+                ]}
+                onPress={() => handleAlertPress(alert)}
+              >
+                <View style={styles.alertContent}>
+                  <View style={styles.alertHeader}>
+                    <Text style={styles.alertIcon}>
+                      {getAlertIcon(alert.alertLevel)}
+                    </Text>
+                    <View style={styles.alertInfo}>
+                      <Text style={styles.alertTitle} numberOfLines={1}>
+                        {alert.name}
+                      </Text>
+                      <Text style={[
+                        styles.alertMessage,
+                        { color: getAlertLevelColor(alert.alertLevel) }
+                      ]}>
+                        {alert.alertLevel === 'expired' 
+                          ? `Expired ${formatDate(alert.expiryDate)}`
+                          : `Expires in ${alert.daysUntilExpiry} days`
+                        }
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={[
+                    styles.alertBadge,
+                    { backgroundColor: getAlertLevelColor(alert.alertLevel) }
+                  ]}>
+                    <Text style={styles.alertBadgeText}>
+                      {alert.alertLevel.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+        </>
+      )}
+
+      {/* Simple View Profile text link */}
+      <TouchableOpacity 
+        style={styles.viewProfileButton} 
+        onPress={handleViewAllAlerts}
+      >
+        <Text style={styles.viewProfileText}>
+          View Profile
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -238,14 +272,15 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   viewProfileButton: {
-    padding: 16,
-    paddingTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     alignItems: 'center',
+    marginBottom: 8,
   },
   viewProfileText: {
     fontSize: 14,
     color: '#2196F3',
-    fontWeight: '600',
+    fontWeight: '500',
   },
 });
 

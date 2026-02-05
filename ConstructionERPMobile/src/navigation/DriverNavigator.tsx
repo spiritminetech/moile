@@ -51,16 +51,28 @@ const useDriverNavigationGuard = () => {
       }
 
       // Check if user has required driver permissions
-      const requiredPermissions = ['transport_tasks', 'vehicle_info', 'trip_updates'];
+      // Map backend permission names to expected functionality
       const userPermissions = authState.permissions || [];
       
-      const hasRequiredPermissions = requiredPermissions.some(permission => 
-        userPermissions.includes(permission) || userPermissions.includes('*')
+      const hasTransportAccess = userPermissions.some(p => 
+        p.includes('DRIVER_TASK') || p.includes('DRIVER_VIEW') || p.includes('transport_tasks')
       );
+      
+      const hasVehicleAccess = userPermissions.some(p => 
+        p.includes('DRIVER_VEHICLE') || p.includes('vehicle_info')
+      );
+      
+      const hasTripAccess = userPermissions.some(p => 
+        p.includes('DRIVER_TRIP') || p.includes('trip_updates') || p.includes('DRIVER_TASK')
+      );
+      
+      const hasRequiredPermissions = hasTransportAccess || hasVehicleAccess || hasTripAccess || 
+        userPermissions.includes('*') || 
+        userPermissions.some(p => p.includes('DRIVER')); // Allow access if user has any driver-related permissions
 
       if (!hasRequiredPermissions) {
         console.warn('Driver user lacks required permissions:', { 
-          required: requiredPermissions, 
+          required: ['transport_tasks', 'vehicle_info', 'trip_updates'], 
           actual: userPermissions 
         });
         setAccessError('Insufficient permissions for driver features');
@@ -68,16 +80,17 @@ const useDriverNavigationGuard = () => {
         return;
       }
 
-      // Validate driver context data
-      if (!authState.user?.driverId) {
+      // Validate driver context data (make driverId optional for now)
+      // TODO: Ensure driver users have proper driverId in the backend
+      if (authState.user?.role === 'Driver' && !authState.user?.driverId && !authState.user?.id) {
         console.warn('Driver user missing driver ID');
         setAccessError('Driver profile incomplete');
         setHasDriverAccess(false);
         return;
       }
 
-      // Additional validation for driver status
-      if (authState.user?.status !== 'active') {
+      // Additional validation for driver status (make more lenient)
+      if (authState.user?.status && authState.user?.status !== 'active' && authState.user?.status !== 'Active') {
         console.warn('Driver user account not active:', authState.user?.status);
         setAccessError('Driver account not active');
         setHasDriverAccess(false);

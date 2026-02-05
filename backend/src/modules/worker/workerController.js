@@ -10,6 +10,7 @@ import Project from '../project/models/Project.js';
 import FleetVehicle from "../fleetTask/submodules/fleetvehicle/FleetVehicle.js";
 import Employee from "../employee/Employee.js";
 import EmployeeWorkPass from "../employee/EmployeeWorkPass.js";
+import EmployeeCertifications from "../employee/EmployeeCertifications.js";
 import User from "../user/User.js";
 import Company from "../company/Company.js";
 import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
@@ -137,12 +138,22 @@ export const getWorkerProfile = async (req, res) => {
       });
     }
 
-    // Fetch company, user, employee details, and work pass in parallel for efficiency
-    const [company, user, employee, workPass] = await Promise.all([
+    // First fetch employee to get the employee.id
+    const employee = await Employee.findOne({ userId: userId, companyId: companyId });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee details not found",
+      });
+    }
+
+    // Fetch company, user, work pass, and certifications in parallel for efficiency
+    const [company, user, workPass, certifications] = await Promise.all([
       Company.findOne({ id: companyId }),
       User.findOne({ id: userId }),
-      Employee.findOne({ userId: userId, companyId: companyId }),
-      EmployeeWorkPass.findOne({ employeeId: userId }).sort({ createdAt: -1 }) // Get latest work pass
+      EmployeeWorkPass.findOne({ employeeId: employee.id }).sort({ createdAt: -1 }), // Get latest work pass using employee.id
+      EmployeeCertifications.find({ employeeId: employee.id }).sort({ expiryDate: 1 }) // Get certifications sorted by expiry
     ]);
 
     if (!company) {
@@ -159,23 +170,32 @@ export const getWorkerProfile = async (req, res) => {
       });
     }
 
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee details not found",
-      });
+    // Construct profile with work pass information (remove ID from response)
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5002';
+    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+    const photoUrl = employee.photoUrl || employee.photo_url;
+    
+    // Ensure photo URL is absolute
+    let fullPhotoUrl = null;
+    if (photoUrl) {
+      if (photoUrl.startsWith('http')) {
+        fullPhotoUrl = photoUrl;
+      } else if (photoUrl.startsWith('/uploads')) {
+        fullPhotoUrl = `${baseUrl}${photoUrl}`;
+      } else {
+        fullPhotoUrl = `${baseUrl}/uploads/workers/${photoUrl}`;
+      }
     }
 
-    // Construct profile with work pass information
     const profile = {
-      id: userId,
       employeeId: employee.id,
       name: employee.fullName,
       email: user.email,
       phoneNumber: employee.phone || user.phone || "N/A",
       companyName: company.name,
       role,
-      photoUrl: employee.photoUrl || employee.photo_url || null,
+      photoUrl: fullPhotoUrl,
       employeeCode: employee.employeeCode || null,
       jobTitle: employee.jobTitle || "Worker",
       department: employee.department || "Construction",
@@ -194,10 +214,68 @@ export const getWorkerProfile = async (req, res) => {
         expiryDate: new Date().toISOString(),
         status: 'active'
       },
-      certifications: employee.certifications || [],
+      certifications: certifications ? certifications.map(cert => {
+        // Calculate status based on expiry date
+        let status = 'active';
+        if (cert.expiryDate) {
+          const now = new Date();
+          const expiryDate = new Date(cert.expiryDate);
+          const daysUntilExpiry = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
+          
+          if (daysUntilExpiry < 0) {
+            status = 'expired';
+          } else if (daysUntilExpiry <= 30) {
+            status = 'expiring_soon';
+          } else {
+            status = 'active';
+          }
+        }
+
+        // Extract certificate number from document path
+        let certificateNumber = 'N/A';
+        if (cert.documentPath) {
+          const filename = path.basename(cert.documentPath, path.extname(cert.documentPath));
+          // Remove common prefixes and use a more meaningful number
+          certificateNumber = filename.replace(/^(cert_|certificate_|doc_)/, '').toUpperCase();
+        }
+
+        // Determine issuer based on ownership
+        let issuer = 'N/A';
+        if (cert.ownership === 'company') {
+          issuer = company?.name || 'Company';
+        } else if (cert.ownership === 'employee') {
+          issuer = 'External Provider';
+        }
+
+        return {
+          id: cert.id || cert._id?.toString() || Math.random().toString(),
+          name: cert.name || 'Unknown Certification',
+          issuer: issuer,
+          issueDate: cert.issueDate ? cert.issueDate.toISOString() : new Date().toISOString(),
+          expiryDate: cert.expiryDate ? cert.expiryDate.toISOString() : null,
+          certificateNumber: certificateNumber,
+          status: status
+        };
+      }) : [],
       createdAt: employee.createdAt || user.createdAt,
       updatedAt: employee.updatedAt || employee.createdAt || user.updatedAt,
     };
+
+    console.log("✅ Profile retrieved:", {
+      userId,
+      companyId,
+      hasPhoto: !!fullPhotoUrl,
+      photoUrl: fullPhotoUrl,
+      originalPhotoUrl: photoUrl,
+      baseUrl,
+      certificationsCount: certifications?.length || 0,
+      sampleCertification: certifications?.[0] ? {
+        name: certifications[0].name,
+        ownership: certifications[0].ownership,
+        documentPath: certifications[0].documentPath,
+        expiryDate: certifications[0].expiryDate
+      } : null
+    });
 
     return res.json({ success: true, profile });
 
@@ -257,7 +335,11 @@ export const uploadWorkerPhoto = async (req, res) => {
     if (!req.file)
       return res.status(400).json({ success: false, message: "No photo file uploaded" });
 
-    const photoUrl = `/uploads/workers/${req.file.filename}`;
+    // Construct full photo URL with server base URL (without /api prefix for static files)
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5002';
+    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+    const photoUrl = `${baseUrl}/uploads/workers/${req.file.filename}`;
 
     await Employee.updateOne(
       { userId: userId, companyId: companyId },
@@ -271,7 +353,6 @@ export const uploadWorkerPhoto = async (req, res) => {
     ]);
 
     const updatedProfile = {
-      id: userId,
       employeeId: employee.id,
       name: employee.fullName,
       email: user?.email || "N/A",
@@ -283,11 +364,24 @@ export const uploadWorkerPhoto = async (req, res) => {
       jobTitle: employee.jobTitle || "Worker",
     };
 
+    console.log("✅ Photo uploaded successfully:", {
+      filename: req.file.filename,
+      photoUrl,
+      userId,
+      companyId,
+      protocol,
+      host,
+      baseUrl
+    });
+
     res.json({
       success: true,
       message: "Profile photo updated successfully",
-      worker: updatedProfile,
-      photoUrl,
+      data: {
+        worker: updatedProfile,
+        photoUrl,
+      },
+      photoUrl, // Include this for backward compatibility
     });
   } catch (err) {
     console.error("❌ Error uploading photo:", err);
@@ -319,61 +413,80 @@ export const getWorkerCertificationAlerts = async (req, res) => {
       });
     }
 
-    // For now, return a placeholder structure for certifications
-    // This would be expanded when certification models are implemented
-    const alerts = {
-      expiringSoon: [], // Certifications expiring within 30 days
-      expired: [], // Already expired certifications
-      upToDate: [], // Valid certifications
-      totalCertifications: 0,
-      alertCount: 0
-    };
+    // Get certifications from the database
+    const certifications = await EmployeeCertifications.find({ employeeId: employee.id });
 
-    // TODO: Implement actual certification logic when models are available
-    // This is a placeholder response structure
-    const mockCertifications = [
-      {
-        id: 1,
-        name: "Safety Training Certificate",
-        issueDate: "2023-06-01T00:00:00.000Z",
-        expiryDate: "2024-06-01T00:00:00.000Z",
-        status: "expired",
-        daysUntilExpiry: -245
-      },
-      {
-        id: 2,
-        name: "Equipment Operation License",
-        issueDate: "2023-03-15T00:00:00.000Z",
-        expiryDate: "2025-03-15T00:00:00.000Z",
-        status: "expiring_soon",
-        daysUntilExpiry: 28
-      }
-    ];
+    if (!certifications || certifications.length === 0) {
+      return res.json({ 
+        success: true, 
+        data: [], // Return empty array for frontend compatibility
+        message: "No certifications found for this employee"
+      });
+    }
 
-    // Categorize certifications
+    // Generate alerts array for frontend
+    const alerts = [];
     const now = new Date();
-    mockCertifications.forEach(cert => {
+
+    certifications.forEach(cert => {
+      if (!cert.expiryDate) {
+        // Skip certifications without expiry dates (they don't need alerts)
+        return;
+      }
+
       const expiryDate = new Date(cert.expiryDate);
       const daysUntilExpiry = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
       
+      let alertLevel = null;
+      
       if (daysUntilExpiry < 0) {
-        alerts.expired.push({ ...cert, daysUntilExpiry });
+        alertLevel = 'expired';
+      } else if (daysUntilExpiry <= 7) {
+        alertLevel = 'urgent';
       } else if (daysUntilExpiry <= 30) {
-        alerts.expiringSoon.push({ ...cert, daysUntilExpiry });
-      } else {
-        alerts.upToDate.push({ ...cert, daysUntilExpiry });
+        alertLevel = 'warning';
+      }
+
+      // Only create alerts for certifications that need attention
+      if (alertLevel) {
+        alerts.push({
+          certificationId: cert.id || cert._id,
+          name: cert.name || 'Unknown Certification',
+          expiryDate: cert.expiryDate,
+          daysUntilExpiry: daysUntilExpiry,
+          alertLevel: alertLevel
+        });
       }
     });
 
-    alerts.totalCertifications = mockCertifications.length;
-    alerts.alertCount = alerts.expiringSoon.length + alerts.expired.length;
+    // Sort alerts by severity (expired > urgent > warning)
+    alerts.sort((a, b) => {
+      const severityOrder = { expired: 3, urgent: 2, warning: 1 };
+      return severityOrder[b.alertLevel] - severityOrder[a.alertLevel];
+    });
+
+    // Generate summary message
+    let summaryMessage = '';
+    if (alerts.length === 0) {
+      summaryMessage = "All certifications are up to date";
+    } else {
+      const expiredCount = alerts.filter(a => a.alertLevel === 'expired').length;
+      const urgentCount = alerts.filter(a => a.alertLevel === 'urgent').length;
+      const warningCount = alerts.filter(a => a.alertLevel === 'warning').length;
+      
+      if (expiredCount > 0) {
+        summaryMessage = `${expiredCount} certification${expiredCount === 1 ? '' : 's'} expired - immediate action required`;
+      } else if (urgentCount > 0) {
+        summaryMessage = `${urgentCount} certification${urgentCount === 1 ? '' : 's'} expiring within 7 days`;
+      } else {
+        summaryMessage = `${warningCount} certification${warningCount === 1 ? '' : 's'} expiring within 30 days`;
+      }
+    }
 
     return res.json({ 
       success: true, 
-      alerts,
-      message: alerts.alertCount > 0 ? 
-        `You have ${alerts.alertCount} certification alerts` : 
-        "All certifications are up to date"
+      data: alerts, // Return flat array for frontend compatibility
+      message: summaryMessage
     });
 
   } catch (err) {

@@ -140,17 +140,62 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
         name: `profile_photo_${Date.now()}.jpg`,
       } as any;
 
+      console.log('📤 Uploading photo:', {
+        uri: asset.uri,
+        type: asset.mimeType,
+        size: asset.fileSize
+      });
+
       const response = await workerApiService.uploadProfilePhoto(file);
 
+      console.log('📥 Upload response:', {
+        success: response.success,
+        hasData: !!response.data,
+        hasPhotoUrl: !!(response.data?.photoUrl || response.photoUrl),
+        photoUrl: response.data?.photoUrl || response.photoUrl
+      });
+
       if (response.success) {
-        // Use the photoUrl from the response to update the UI immediately
-        const photoUrl = response.data.photoUrl || response.photoUrl;
-        onPhotoUpdated(photoUrl);
-        Alert.alert('Success', 'Profile photo updated successfully!');
+        // Extract photoUrl from multiple possible locations in the response
+        const photoUrl = response.data?.photoUrl || 
+                         response.photoUrl || 
+                         response.data?.worker?.profileImage ||
+                         response.data?.data?.photoUrl;
+        
+        if (photoUrl) {
+          console.log('✅ Photo URL extracted:', photoUrl);
+          
+          // Test if the URL is accessible before updating UI
+          try {
+            const testResponse = await fetch(photoUrl, { method: 'HEAD' });
+            console.log('🌐 Photo URL accessibility test:', {
+              url: photoUrl,
+              status: testResponse.status,
+              ok: testResponse.ok
+            });
+            
+            if (testResponse.ok) {
+              onPhotoUpdated(photoUrl);
+              Alert.alert('Success', 'Profile photo updated successfully!');
+            } else {
+              console.error('❌ Photo URL not accessible:', testResponse.status);
+              Alert.alert('Warning', `Photo uploaded but may not be accessible (Status: ${testResponse.status}). Please try refreshing the page.`);
+              onPhotoUpdated(photoUrl); // Still update UI, maybe it will work
+            }
+          } catch (accessError) {
+            console.error('❌ Photo URL accessibility test failed:', accessError);
+            Alert.alert('Warning', 'Photo uploaded but accessibility test failed. Please try refreshing the page.');
+            onPhotoUpdated(photoUrl); // Still update UI
+          }
+        } else {
+          console.error('❌ No photo URL found in response:', response);
+          Alert.alert('Error', 'Photo uploaded but URL not found. Please refresh the page.');
+        }
       } else {
         throw new Error(response.message || 'Failed to upload photo');
       }
     } catch (error) {
+      console.error('❌ Upload error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to upload photo';
       Alert.alert('Error', errorMessage);
     } finally {
@@ -159,16 +204,63 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
   };
 
   const renderProfilePhoto = () => {
+    console.log('🖼️ Rendering profile photo:', {
+      hasCurrentPhotoUrl: !!currentPhotoUrl,
+      currentPhotoUrl,
+      urlLength: currentPhotoUrl?.length
+    });
+
     if (currentPhotoUrl) {
+      // Test URL accessibility
+      fetch(currentPhotoUrl, { method: 'HEAD' })
+        .then(response => {
+          console.log('🌐 URL accessibility test:', {
+            url: currentPhotoUrl,
+            status: response.status,
+            ok: response.ok,
+            headers: Object.fromEntries(response.headers.entries())
+          });
+        })
+        .catch(error => {
+          console.error('🌐 URL accessibility test failed:', {
+            url: currentPhotoUrl,
+            error: error.message
+          });
+        });
+
+      // Add cache busting parameter to prevent image caching issues
+      const cacheBustUrl = currentPhotoUrl.includes('?') 
+        ? `${currentPhotoUrl}&t=${Date.now()}` 
+        : `${currentPhotoUrl}?t=${Date.now()}`;
+      
+      console.log('🔗 Using photo URL:', cacheBustUrl);
+      
       return (
         <Image
-          source={{ uri: currentPhotoUrl }}
+          source={{ uri: cacheBustUrl }}
           style={styles.profilePhoto}
           resizeMode="cover"
+          onError={(error) => {
+            console.error('❌ Image load error details:', {
+              error: error,
+              errorString: JSON.stringify(error, null, 2),
+              nativeEvent: error.nativeEvent,
+              message: error.nativeEvent?.error || 'Unknown error'
+            });
+            console.log('🔍 Failed URL:', cacheBustUrl);
+            console.log('🔍 Original URL:', currentPhotoUrl);
+          }}
+          onLoad={() => {
+            console.log('✅ Image loaded successfully:', cacheBustUrl);
+          }}
+          onLoadStart={() => {
+            console.log('🔄 Image loading started:', cacheBustUrl);
+          }}
         />
       );
     }
 
+    console.log('📷 Showing placeholder - no photo URL available');
     return (
       <View style={styles.placeholderPhoto}>
         <Text style={styles.placeholderIcon}>📷</Text>

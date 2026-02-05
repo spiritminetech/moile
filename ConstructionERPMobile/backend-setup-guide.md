@@ -1,7 +1,7 @@
 # Backend Server Setup Guide
 
 ## Your React Native app is now configured to connect to:
-**API Base URL**: `http://192.168.1.8:5002/api`
+**API Base URL**: `http://192.168.0.3:5002/api`
 
 ## Required API Endpoints:
 
@@ -81,7 +81,7 @@ const app = express();
 
 // Enable CORS for your React Native app
 app.use(cors({
-  origin: ['http://192.168.1.8:3000', 'http://localhost:3000'],
+  origin: ['http://192.168.0.3:3000', 'http://localhost:3000'],
   credentials: true
 }));
 
@@ -136,7 +136,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 // Start server
 app.listen(5002, '0.0.0.0', () => {
-  console.log('Server running on http://192.168.1.8:5002');
+  console.log('Server running on http://192.168.0.3:5002');
 });
 ```
 
@@ -147,14 +147,14 @@ app.listen(5002, '0.0.0.0', () => {
 3. **Install dependencies**: `npm install express cors`
 4. **Create server.js** with the code above
 5. **Start server**: `node server.js`
-6. **Test**: Visit `http://192.168.1.8:5002/api/health`
+6. **Test**: Visit `http://192.168.0.3:5002/api/health`
 
 ## Network Configuration:
 
 Your React Native app will automatically use:
 - **Android Emulator**: `http://10.0.2.2:5002/api`
-- **iOS Simulator**: `http://192.168.1.8:5002/api`
-- **Physical Devices**: `http://192.168.1.8:5002/api`
+- **iOS Simulator**: `http://192.168.0.3:5002/api`
+- **Physical Devices**: `http://192.168.0.3:5002/api`
 
 ## Testing the Connection:
 

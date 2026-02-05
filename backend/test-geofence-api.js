@@ -2,7 +2,7 @@
 
 import fetch from 'node-fetch';
 
-const API_BASE_URL = 'http://192.168.1.8:5002/api';
+const API_BASE_URL = 'http://192.168.0.3:5002/api';
 
 async function testGeofenceAPI() {
   try {

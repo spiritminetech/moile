@@ -33,53 +33,18 @@ export const useCertificationAlerts = (): UseCertificationAlertsReturn => {
       setIsLoading(true);
       setError(null);
 
+      console.log('🔍 Loading certification alerts...');
       const response = await workerApiService.getCertificationExpiryAlerts();
+      console.log('📊 Certification alerts API response:', response);
       
       if (response.success && response.data) {
-        // Handle the actual API response structure
-        let alertsArray: CertificationAlert[] = [];
-        
-        if (Array.isArray(response.data)) {
-          // API returns array of alerts directly
-          alertsArray = response.data;
-        } else if (response.data && typeof response.data === 'object') {
-          // Handle nested structure if it exists
-          const data = response.data as any;
-          if (data.alerts && Array.isArray(data.alerts)) {
-            alertsArray = data.alerts;
-          } else if (data.expired || data.expiringSoon) {
-            // Handle structured response with expired and expiring soon
-            const expired = Array.isArray(data.expired) ? data.expired : [];
-            const expiringSoon = Array.isArray(data.expiringSoon) ? data.expiringSoon : [];
-            
-            // Convert expired certifications to alerts
-            const expiredAlerts = expired.map((cert: any) => ({
-              certificationId: cert.id || cert.certificationId || 0,
-              name: cert.name || 'Unknown Certification',
-              expiryDate: cert.expiryDate || cert.expiry_date || new Date().toISOString(),
-              daysUntilExpiry: cert.daysUntilExpiry || cert.days_until_expiry || 0,
-              alertLevel: 'expired' as const,
-            }));
-            
-            // Convert expiring soon certifications to alerts
-            const expiringSoonAlerts = expiringSoon.map((cert: any) => ({
-              certificationId: cert.id || cert.certificationId || 0,
-              name: cert.name || 'Unknown Certification',
-              expiryDate: cert.expiryDate || cert.expiry_date || new Date().toISOString(),
-              daysUntilExpiry: cert.daysUntilExpiry || cert.days_until_expiry || 0,
-              alertLevel: (cert.daysUntilExpiry || cert.days_until_expiry || 0) <= 7 ? 'urgent' as const : 'warning' as const,
-            }));
-            
-            alertsArray = [...expiredAlerts, ...expiringSoonAlerts];
-          }
-        }
-        
-        setAlerts(alertsArray);
+        console.log('✅ Alerts loaded successfully:', response.data);
+        setAlerts(response.data);
         
         // Schedule notification reminders for certifications
-        if (alertsArray.length > 0) {
+        if (response.data.length > 0) {
           try {
-            const certifications = alertsArray.map(alert => ({
+            const certifications = response.data.map(alert => ({
               id: alert.certificationId,
               name: alert.name,
               expiryDate: alert.expiryDate,
@@ -94,16 +59,17 @@ export const useCertificationAlerts = (): UseCertificationAlertsReturn => {
           }
         }
       } else {
-        // Handle case where no certifications are found or API returns empty data
+        console.warn('❌ Failed to load certification alerts:', response.message);
         setAlerts([]);
         if (!response.success) {
-          console.warn('Failed to load certification alerts:', response.message);
+          setError(response.message || 'Failed to load alerts');
         }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load alerts';
+      console.error('❌ Certification alerts error:', err);
       setError(errorMessage);
-      console.warn('Failed to load certification alerts:', errorMessage);
+      setAlerts([]);
     } finally {
       setIsLoading(false);
     }
