@@ -15,13 +15,13 @@ const getApiBaseUrl = (): string => {
   if (__DEV__) {
     if (Platform.OS === 'android') {
       // Android emulator uses 10.0.2.2 to reach host machine
-      return 'http://192.168.0.3:5002/api';
+      return 'http://192.168.1.8:5002/api';
     } else if (Platform.OS === 'ios') {
       // iOS simulator can use localhost, but physical device needs actual IP
-      return 'http://192.168.0.3:5002/api';  // Your computer's IP
+      return 'http://192.168.1.8:5002/api';  // Your computer's IP
     } else {
       // Web or other platforms - use your actual IP
-      return 'http://192.168.0.3:5002/api';  // Your computer's IP
+      return 'http://192.168.1.8:5002/api';  // Your computer's IP
     }
   }
 

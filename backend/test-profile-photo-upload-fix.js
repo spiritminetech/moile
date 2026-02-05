@@ -5,7 +5,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
 
-const API_BASE = 'http://192.168.0.3:5002/api';
+const API_BASE = 'http://192.168.1.8:5002/api';
 let authToken = null;
 
 // Test 1: Login to get auth token

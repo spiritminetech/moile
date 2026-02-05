@@ -88,22 +88,10 @@ const useRoleDetection = () => {
   }, [authState.user?.role, authState.company?.role]);
 
   const validateRoleAccess = useCallback((role: UserRole): boolean => {
-    // Validate that the user has the necessary permissions for the role
-    const rolePermissions: Record<UserRole, string[]> = {
-      Worker: ['attendance', 'tasks', 'reports'],
-      Supervisor: ['team_management', 'approvals', 'progress_reports'],
-      Driver: ['transport_tasks', 'vehicle_info', 'trip_updates'],
-    };
-
-    const requiredPermissions = rolePermissions[role] || [];
-    const userPermissions = authState.permissions || [];
-
-    // Check if user has at least one required permission for the role
-    // If user has wildcard permission (*), grant access
-    return requiredPermissions.some(permission => 
-      userPermissions.includes(permission) || userPermissions.includes('*')
-    ) || userPermissions.length === 0; // Allow access if no permissions are set (for development)
-  }, [authState.permissions]);
+    // Simplified role validation - just check if the user has the role
+    // The AuthContext already handles proper role-based feature access
+    return authState.user?.role === role || authState.company?.role === role;
+  }, [authState.user?.role, authState.company?.role]);
 
   const currentRole = detectUserRole();
   const hasValidAccess = currentRole ? validateRoleAccess(currentRole) : false;
@@ -136,128 +124,113 @@ const useAppStateHandler = () => {
   }, [restoreAuthState]);
 };
 
-// Enhanced navigation component with role-based routing
-const RoleBasedNavigationContent: React.FC<{ 
-  isAuthenticated: boolean; 
-  userRole: UserRole | null;
-  hasValidAccess: boolean;
-  isTransitioning: boolean;
-}> = ({ isAuthenticated, userRole, hasValidAccess, isTransitioning }) => {
-  
+// Helper function to get the appropriate screen based on navigation state
+const getRoleBasedScreen = (
+  isAuthenticated: boolean,
+  userRole: UserRole | null,
+  hasValidAccess: boolean,
+  isTransitioning: boolean
+) => {
   // Show loading during role transitions
   if (isTransitioning) {
-    return (
-      <Stack.Screen 
-        name="Transitioning" 
-        component={() => (
-          <View style={{ 
-            flex: 1, 
-            justifyContent: 'center', 
-            alignItems: 'center',
-            backgroundColor: '#f5f5f5'
-          }}>
-            <Text style={{ fontSize: 18, color: '#666', marginBottom: 10 }}>Updating interface...</Text>
-            <Text style={{ fontSize: 14, color: '#999' }}>Please wait while we load your role-specific features</Text>
-          </View>
-        )} 
-        options={{ headerShown: false }}
-      />
-    );
+    return {
+      name: "Transitioning",
+      component: () => (
+        <View style={{ 
+          flex: 1, 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          backgroundColor: '#f5f5f5'
+        }}>
+          <Text style={{ fontSize: 18, color: '#666', marginBottom: 10 }}>Updating interface...</Text>
+          <Text style={{ fontSize: 14, color: '#999' }}>Please wait while we load your role-specific features</Text>
+        </View>
+      ),
+      options: { headerShown: false }
+    };
   }
 
   // Not authenticated - show login
   if (!isAuthenticated) {
-    return (
-      <Stack.Screen 
-        name="Auth" 
-        component={LoginScreen} 
-        options={{ 
-          headerShown: false,
-          // Add test ID for testing
-          ...(process.env.NODE_ENV === 'test' && { testID: 'login-screen' })
-        }} 
-      />
-    );
+    return {
+      name: "Auth",
+      component: LoginScreen,
+      options: { 
+        headerShown: false,
+        // Add test ID for testing
+        ...(process.env.NODE_ENV === 'test' && { testID: 'login-screen' })
+      }
+    };
   }
 
   // Authenticated but no role or invalid access - show login with error
   if (!userRole || !hasValidAccess) {
     console.warn('User authenticated but missing valid role or access:', { userRole, hasValidAccess });
-    return (
-      <Stack.Screen 
-        name="Auth" 
-        component={LoginScreen} 
-        options={{ 
-          headerShown: false,
-          // Add test ID for testing
-          ...(process.env.NODE_ENV === 'test' && { testID: 'login-screen' })
-        }}
-        initialParams={{ 
-          error: userRole 
-            ? 'You do not have permission to access this application. Please contact your administrator.'
-            : 'Your account role could not be determined. Please contact your administrator.'
-        }}
-      />
-    );
+    return {
+      name: "Auth",
+      component: LoginScreen,
+      options: { 
+        headerShown: false,
+        // Add test ID for testing
+        ...(process.env.NODE_ENV === 'test' && { testID: 'login-screen' })
+      },
+      initialParams: { 
+        error: userRole 
+          ? 'You do not have permission to access this application. Please contact your administrator.'
+          : 'Your account role could not be determined. Please contact your administrator.'
+      }
+    };
   }
 
   // Role-based navigation with enhanced error handling
   switch (userRole) {
     case 'Worker':
-      return (
-        <Stack.Screen 
-          name="WorkerApp" 
-          component={WorkerNavigator} 
-          options={{ 
-            headerShown: false,
-            // Add test ID for testing
-            ...(process.env.NODE_ENV === 'test' && { testID: 'worker-navigator' })
-          }}
-        />
-      );
+      return {
+        name: "WorkerApp",
+        component: WorkerNavigator,
+        options: { 
+          headerShown: false,
+          // Add test ID for testing
+          ...(process.env.NODE_ENV === 'test' && { testID: 'worker-navigator' })
+        }
+      };
     
     case 'Supervisor':
-      return (
-        <Stack.Screen 
-          name="SupervisorApp" 
-          component={SupervisorNavigator} 
-          options={{ 
-            headerShown: false,
-            // Add test ID for testing
-            ...(process.env.NODE_ENV === 'test' && { testID: 'supervisor-navigator' })
-          }}
-        />
-      );
+      return {
+        name: "SupervisorApp",
+        component: SupervisorNavigator,
+        options: { 
+          headerShown: false,
+          // Add test ID for testing
+          ...(process.env.NODE_ENV === 'test' && { testID: 'supervisor-navigator' })
+        }
+      };
     
     case 'Driver':
-      return (
-        <Stack.Screen 
-          name="DriverApp" 
-          component={DriverNavigator} 
-          options={{ 
-            headerShown: false,
-            // Add test ID for testing
-            ...(process.env.NODE_ENV === 'test' && { testID: 'driver-navigator' })
-          }}
-        />
-      );
+      return {
+        name: "DriverApp",
+        component: DriverNavigator,
+        options: { 
+          headerShown: false,
+          // Add test ID for testing
+          ...(process.env.NODE_ENV === 'test' && { testID: 'driver-navigator' })
+        }
+      };
     
     default:
       console.error('Unknown user role:', userRole);
-      return (
-        <Stack.Screen 
-          name="Auth" 
-          component={LoginScreen} 
-          options={{ 
-            headerShown: false,
-            // Add test ID for testing
-            ...(process.env.NODE_ENV === 'test' && { testID: 'login-screen' })
-          }}
-          initialParams={{ 
-            error: `Unknown user role: ${userRole}. Please contact your administrator.`
-          }}
-        />
-      );
+      return {
+        name: "Auth",
+        component: LoginScreen,
+        options: { 
+          headerShown: false,
+          // Add test ID for testing
+          ...(process.env.NODE_ENV === 'test' && { testID: 'login-screen' })
+        },
+        initialParams: { 
+          error: `Unknown user role: ${userRole}. Please contact your administrator.`
+        }
+      };
   }
 };
 
@@ -366,12 +339,23 @@ const AppNavigator: React.FC<AppNavigatorProps> = ({ isAuthenticated, userRole }
           },
         }}
       >
-        <RoleBasedNavigationContent
-          isAuthenticated={isAuthenticated}
-          userRole={effectiveRole || null}
-          hasValidAccess={hasValidAccess}
-          isTransitioning={isTransitioning}
-        />
+        {(() => {
+          const screenConfig = getRoleBasedScreen(
+            isAuthenticated,
+            effectiveRole || null,
+            hasValidAccess,
+            isTransitioning
+          );
+          
+          return (
+            <Stack.Screen 
+              name={screenConfig.name}
+              component={screenConfig.component}
+              options={screenConfig.options}
+              initialParams={screenConfig.initialParams}
+            />
+          );
+        })()}
       </Stack.Navigator>
     </NavigationContainer>
   );
