@@ -44,6 +44,25 @@ const employeeSchema = new mongoose.Schema({
     },
     default: null
   },
+  // Driving License Fields (for drivers)
+  drivingLicenseNumber: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  licenseType: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  licenseExpiry: {
+    type: Date,
+    default: null
+  },
+  licensePhotoUrl: {
+    type: String,
+    default: null
+  },
   status: {
     type: String,
     enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED'],

@@ -15,6 +15,7 @@ import FleetTask from "../fleetTask/models/FleetTask.js";
 import FleetVehicle from "../fleetTask/submodules/fleetvehicle/FleetVehicle.js";
 import Project from "../project/models/Project.js";
 import FleetTaskPassenger from "../fleetTask/submodules/fleetTaskPassenger/FleetTaskPassenger.js";
+import TripIncident from "./models/TripIncident.js";
 
 // ==============================
 // Multer Configuration for Driver Photo Upload
@@ -44,6 +45,62 @@ export const upload = multer({
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
+
+// ==============================
+// Multer Configuration for Trip Photo Upload
+// ==============================
+const tripPhotoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "uploads/trips/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const taskId = req.params.taskId || "unknown";
+    cb(null, `trip-${taskId}-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+export const uploadTripPhotos = multer({
+  storage: tripPhotoStorage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+});
+
+// ==============================
+// Multer Configuration for License Photo Upload
+// ==============================
+const licensePhotoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "uploads/drivers/licenses/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const userId = req.user?.id || req.user?.userId || "unknown";
+    cb(null, `license-${userId}-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+export const uploadLicensePhoto = multer({
+  storage: licensePhotoStorage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+});
+
+// ==============================
+// Helper function to get next ID
+// ==============================
+const getNextId = async (Model) => {
+  const lastRecord = await Model.findOne().sort({ id: -1 }).limit(1);
+  return lastRecord ? lastRecord.id + 1 : 1;
+};
 
 // ==============================
 // DRIVER PROFILE APIs
@@ -819,6 +876,609 @@ export const getTripSummary = async (req, res) => {
       success: false,
       message: "Server error while fetching trip summary.",
       error: err.message,
+    });
+  }
+};
+
+
+// ==============================
+// DASHBOARD SUMMARY
+// ==============================
+export const getDashboardSummary = async (req, res) => {
+  try {
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`📊 Fetching dashboard summary for driver: ${driverId}`);
+
+    const now = new Date();
+    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+
+    // Get today's tasks
+    const todaysTasks = await FleetTask.find({
+      driverId,
+      companyId,
+      taskDate: {
+        $gte: startOfDay,
+        $lte: endOfDay
+      }
+    }).lean();
+
+    const totalTrips = todaysTasks.length;
+    const completedTrips = todaysTasks.filter(t => t.status === 'COMPLETED').length;
+    const ongoingTrips = todaysTasks.filter(t => t.status === 'ONGOING').length;
+    const pendingTrips = todaysTasks.filter(t => t.status === 'PENDING' || t.status === 'SCHEDULED').length;
+
+    // Get total passengers for today
+    const taskIds = todaysTasks.map(t => t.id);
+    const totalPassengers = await FleetTaskPassenger.countDocuments({
+      fleetTaskId: { $in: taskIds }
+    });
+
+    // Get current vehicle assignment
+    let currentVehicle = null;
+    const currentTask = todaysTasks.find(t => t.status === 'ONGOING' || t.status === 'PENDING' || t.status === 'SCHEDULED');
+    if (currentTask && currentTask.vehicleId) {
+      const vehicle = await FleetVehicle.findOne({ id: currentTask.vehicleId }).lean();
+      if (vehicle) {
+        currentVehicle = {
+          id: vehicle.id,
+          registrationNo: vehicle.registrationNo,
+          vehicleType: vehicle.vehicleType,
+          capacity: vehicle.capacity
+        };
+      }
+    }
+
+    // Get driver info
+    const driver = await Employee.findOne({ id: driverId }).lean();
+
+    const summary = {
+      driverId,
+      driverName: driver?.fullName || 'Unknown Driver',
+      driverPhoto: driver?.photoUrl || driver?.photo_url || null,
+      totalTrips,
+      completedTrips,
+      ongoingTrips,
+      pendingTrips,
+      totalPassengers,
+      currentVehicle,
+      date: startOfDay
+    };
+
+    res.json({
+      success: true,
+      message: 'Dashboard summary retrieved successfully',
+      summary
+    });
+
+  } catch (err) {
+    console.error("❌ Error fetching dashboard summary:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching dashboard summary",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// VEHICLE DETAILS
+// ==============================
+export const getVehicleDetails = async (req, res) => {
+  try {
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`🚗 Fetching vehicle details for driver: ${driverId}`);
+
+    const now = new Date();
+    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+
+    // Find today's tasks to get assigned vehicle
+    const todaysTasks = await FleetTask.find({
+      driverId,
+      companyId,
+      taskDate: {
+        $gte: startOfDay,
+        $lte: endOfDay
+      }
+    }).lean();
+
+    if (!todaysTasks.length) {
+      return res.json({
+        success: true,
+        message: 'No vehicle assigned for today',
+        vehicle: null
+      });
+    }
+
+    // Get the vehicle from the first task (assuming same vehicle for all tasks in a day)
+    const vehicleId = todaysTasks[0].vehicleId;
+    const vehicle = await FleetVehicle.findOne({ id: vehicleId }).lean();
+
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vehicle details not found'
+      });
+    }
+
+    const vehicleDetails = {
+      id: vehicle.id,
+      vehicleCode: vehicle.vehicleCode,
+      registrationNo: vehicle.registrationNo,
+      vehicleType: vehicle.vehicleType,
+      capacity: vehicle.capacity,
+      status: vehicle.status,
+      insuranceExpiry: vehicle.insuranceExpiry,
+      lastServiceDate: vehicle.lastServiceDate,
+      odometer: vehicle.odometer,
+      assignedTasks: todaysTasks.length
+    };
+
+    res.json({
+      success: true,
+      message: 'Vehicle details retrieved successfully',
+      vehicle: vehicleDetails
+    });
+
+  } catch (err) {
+    console.error("❌ Error fetching vehicle details:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching vehicle details",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// DELAY REPORT
+// ==============================
+export const reportDelay = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { delayReason, estimatedDelay, currentLocation } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`⏰ Reporting delay for task: ${taskId}, driver: ${driverId}`);
+
+    if (!delayReason || !estimatedDelay) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delay reason and estimated delay are required'
+      });
+    }
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    // Create incident record
+    const incidentId = await getNextId(TripIncident);
+    const incident = new TripIncident({
+      id: incidentId,
+      fleetTaskId: Number(taskId),
+      driverId,
+      companyId,
+      incidentType: 'DELAY',
+      description: delayReason,
+      delayReason,
+      estimatedDelay: Number(estimatedDelay),
+      location: currentLocation || {},
+      requiresAssistance: false,
+      status: 'REPORTED'
+    });
+
+    await incident.save();
+
+    res.json({
+      success: true,
+      message: 'Delay reported successfully',
+      incident: {
+        id: incident.id,
+        incidentType: incident.incidentType,
+        delayReason: incident.delayReason,
+        estimatedDelay: incident.estimatedDelay,
+        status: incident.status,
+        reportedAt: incident.reportedAt
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error reporting delay:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while reporting delay",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// BREAKDOWN REPORT
+// ==============================
+export const reportBreakdown = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { breakdownType, description, location, requiresAssistance } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`🔧 Reporting breakdown for task: ${taskId}, driver: ${driverId}`);
+
+    if (!breakdownType || !description) {
+      return res.status(400).json({
+        success: false,
+        message: 'Breakdown type and description are required'
+      });
+    }
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    // Create incident record
+    const incidentId = await getNextId(TripIncident);
+    const incident = new TripIncident({
+      id: incidentId,
+      fleetTaskId: Number(taskId),
+      driverId,
+      companyId,
+      incidentType: 'BREAKDOWN',
+      description,
+      breakdownType,
+      location: location || {},
+      requiresAssistance: requiresAssistance || false,
+      status: 'REPORTED'
+    });
+
+    await incident.save();
+
+    res.json({
+      success: true,
+      message: 'Breakdown reported successfully',
+      incident: {
+        id: incident.id,
+        incidentType: incident.incidentType,
+        breakdownType: incident.breakdownType,
+        description: incident.description,
+        requiresAssistance: incident.requiresAssistance,
+        status: incident.status,
+        reportedAt: incident.reportedAt
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error reporting breakdown:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while reporting breakdown",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// TRIP PHOTO UPLOAD
+// ==============================
+export const uploadTripPhoto = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`📸 Uploading trip photos for task: ${taskId}, driver: ${driverId}`);
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No photos uploaded'
+      });
+    }
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    const photoUrls = req.files.map(file => `/uploads/trips/${file.filename}`);
+
+    // Optionally store photo URLs in task or incident
+    // For now, just return the URLs
+    res.json({
+      success: true,
+      message: `${photoUrls.length} photo(s) uploaded successfully`,
+      photos: photoUrls
+    });
+
+  } catch (err) {
+    console.error("❌ Error uploading trip photos:", err);
+    // Clean up uploaded files on error
+    if (req.files) {
+      req.files.forEach(file => {
+        fs.unlink(file.path, () => {});
+      });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Server error while uploading photos",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// WORKER COUNT VALIDATION
+// ==============================
+export const validateWorkerCount = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { expectedCount, actualCount } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`✅ Validating worker count for task: ${taskId}`);
+
+    if (expectedCount === undefined || actualCount === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Expected count and actual count are required'
+      });
+    }
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    // Get actual passenger count from database
+    const dbPassengerCount = await FleetTaskPassenger.countDocuments({
+      fleetTaskId: Number(taskId)
+    });
+
+    const countMatch = (Number(actualCount) === dbPassengerCount);
+    const countDiscrepancy = Math.abs(Number(actualCount) - dbPassengerCount);
+
+    res.json({
+      success: true,
+      message: countMatch ? 'Worker count validated successfully' : 'Worker count mismatch detected',
+      validation: {
+        expectedCount: Number(expectedCount),
+        actualCount: Number(actualCount),
+        databaseCount: dbPassengerCount,
+        countMatch,
+        countDiscrepancy,
+        status: countMatch ? 'VALIDATED' : 'MISMATCH'
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error validating worker count:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while validating worker count",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// LOGOUT TRACKING
+// ==============================
+export const logoutDriver = async (req, res) => {
+  try {
+    const driverId = Number(req.user.id || req.user.userId);
+    
+    console.log(`👋 Driver logout: ${driverId}`);
+
+    // Optional: Store logout timestamp or session info
+    // For now, just acknowledge the logout
+    
+    res.json({
+      success: true,
+      message: 'Logout successful',
+      timestamp: new Date()
+    });
+
+  } catch (err) {
+    console.error("❌ Error during logout:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error during logout",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// DRIVING LICENSE MANAGEMENT
+// ==============================
+export const getLicenseDetails = async (req, res) => {
+  try {
+    const driverId = Number(req.user.id || req.user.userId);
+
+    console.log(`📄 Fetching license details for driver: ${driverId}`);
+
+    const employee = await Employee.findOne({ id: driverId }).lean();
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver details not found'
+      });
+    }
+
+    const licenseDetails = {
+      driverId: employee.id,
+      driverName: employee.fullName,
+      licenseNumber: employee.drivingLicenseNumber || null,
+      licenseType: employee.licenseType || null,
+      licenseExpiry: employee.licenseExpiry || null,
+      licensePhotoUrl: employee.licensePhotoUrl || null,
+      isExpired: employee.licenseExpiry ? new Date(employee.licenseExpiry) < new Date() : null
+    };
+
+    res.json({
+      success: true,
+      message: 'License details retrieved successfully',
+      license: licenseDetails
+    });
+
+  } catch (err) {
+    console.error("❌ Error fetching license details:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching license details",
+      error: err.message
+    });
+  }
+};
+
+export const updateLicenseDetails = async (req, res) => {
+  try {
+    const driverId = Number(req.user.id || req.user.userId);
+    const { licenseNumber, licenseType, licenseExpiry } = req.body;
+
+    console.log(`📝 Updating license details for driver: ${driverId}`);
+
+    if (!licenseNumber || !licenseType || !licenseExpiry) {
+      return res.status(400).json({
+        success: false,
+        message: 'License number, type, and expiry date are required'
+      });
+    }
+
+    const employee = await Employee.findOne({ id: driverId });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver details not found'
+      });
+    }
+
+    // Update license details
+    await Employee.updateOne(
+      { id: driverId },
+      {
+        $set: {
+          drivingLicenseNumber: licenseNumber,
+          licenseType: licenseType,
+          licenseExpiry: new Date(licenseExpiry)
+        }
+      }
+    );
+
+    const updatedEmployee = await Employee.findOne({ id: driverId }).lean();
+
+    res.json({
+      success: true,
+      message: 'License details updated successfully',
+      license: {
+        driverId: updatedEmployee.id,
+        licenseNumber: updatedEmployee.drivingLicenseNumber,
+        licenseType: updatedEmployee.licenseType,
+        licenseExpiry: updatedEmployee.licenseExpiry,
+        licensePhotoUrl: updatedEmployee.licensePhotoUrl
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error updating license details:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating license details",
+      error: err.message
+    });
+  }
+};
+
+export const uploadLicensePhotoHandler = async (req, res) => {
+  try {
+    const driverId = Number(req.user.id || req.user.userId);
+
+    console.log(`📸 Uploading license photo for driver: ${driverId}`);
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No license photo uploaded'
+      });
+    }
+
+    const licensePhotoUrl = `/uploads/drivers/licenses/${req.file.filename}`;
+
+    await Employee.updateOne(
+      { id: driverId },
+      { $set: { licensePhotoUrl } }
+    );
+
+    const employee = await Employee.findOne({ id: driverId }).lean();
+
+    res.json({
+      success: true,
+      message: 'License photo uploaded successfully',
+      license: {
+        driverId: employee.id,
+        licenseNumber: employee.drivingLicenseNumber,
+        licenseType: employee.licenseType,
+        licenseExpiry: employee.licenseExpiry,
+        licensePhotoUrl: employee.licensePhotoUrl
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error uploading license photo:", err);
+    if (req.file) {
+      fs.unlink(req.file.path, () => {});
+    }
+    res.status(500).json({
+      success: false,
+      message: "Server error while uploading license photo",
+      error: err.message
     });
   }
 };

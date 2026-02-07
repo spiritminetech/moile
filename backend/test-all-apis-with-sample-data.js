@@ -5,7 +5,7 @@ import axios from 'axios';
 // Load environment variables
 dotenv.config();
 
-const BASE_URL = process.env.BASE_URL || 'http://192.168.0.3:5002';
+const BASE_URL = process.env.BASE_URL || 'http://192.168.1.8:5002';
 const API_PREFIX = '/api';
 
 // Color codes for console output

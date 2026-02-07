@@ -6,7 +6,7 @@
 const axios = require('axios');
 
 // Configuration - UPDATE THESE VALUES
-const BASE_URL = 'http://192.168.0.3:5002/api'; // Update with your backend URL
+const BASE_URL = 'http://192.168.1.8:5002/api'; // Update with your backend URL
 const TEST_TOKEN = 'your-jwt-token-here'; // Update with valid JWT token
 
 // Test data

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://192.168.0.3:5002/api'; // Try the BASE_URL from .env
+const BASE_URL = 'http://192.168.1.8:5002/api'; // Try the BASE_URL from .env
 
 async function simpleTest() {
   try {
