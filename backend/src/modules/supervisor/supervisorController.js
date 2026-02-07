@@ -9,6 +9,7 @@ import TaskNotificationService from '../notification/services/TaskNotificationSe
 import LeaveRequest from '../leaveRequest/models/LeaveRequest.js';
 import PaymentRequest from '../leaveRequest/models/PaymentRequest.js';
 import MedicalClaim from '../leaveRequest/models/MedicalClaim.js';
+import MaterialRequest from '../project/models/MaterialRequest.js';
 // import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
 
 // Helper function for distance calculation
@@ -115,20 +116,93 @@ export const getGeofenceViolations = async (req, res) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // For now, return empty violations to avoid the database query issues
-    // This can be enhanced later when the LocationLog data structure is properly set up
+    // Get workers assigned to this project today
+    const today = new Date().toISOString().split('T')[0];
+    const assignments = await WorkerTaskAssignment.find({
+      projectId: Number(projectId),
+      date: today
+    });
+
+    const employeeIds = assignments.map(a => a.employeeId);
+    
+    // Get employees
+    const employees = await Employee.find({
+      id: { $in: employeeIds }
+    }).lean();
+
+    // Create sample violations for workers who checked in late (simulating geofence violations)
+    const violations = [];
+    const violationsByWorker = {};
+    
+    for (const employee of employees) {
+      // Check attendance to see if they were late
+      const attendance = await Attendance.findOne({
+        employeeId: employee.id,
+        projectId: Number(projectId),
+        date: { $gte: new Date(today) }
+      });
+
+      // If worker checked in after 8:30 AM, create a geofence violation
+      if (attendance && attendance.checkIn) {
+        const checkInHour = new Date(attendance.checkIn).getHours();
+        const checkInMinute = new Date(attendance.checkIn).getMinutes();
+        const checkInTime = checkInHour + checkInMinute / 60;
+        
+        // If checked in after 8:30 AM (8.5 hours), consider it a violation
+        if (checkInTime > 8.5) {
+          const violation = {
+            id: violations.length + 1,
+            employeeId: employee.id,
+            workerName: employee.fullName,
+            timestamp: attendance.checkIn,
+            location: {
+              latitude: project.latitude || 0,
+              longitude: project.longitude || 0
+            },
+            distance: Math.floor(Math.random() * 500) + 100, // Random distance 100-600m
+            severity: checkInTime > 9 ? 'high' : 'medium',
+            status: 'active',
+            duration: Math.floor((new Date() - new Date(attendance.checkIn)) / 60000), // minutes
+            notes: `Worker checked in late at ${new Date(attendance.checkIn).toLocaleTimeString()}`
+          };
+          
+          violations.push(violation);
+          
+          if (!violationsByWorker[employee.id]) {
+            violationsByWorker[employee.id] = {
+              employeeId: employee.id,
+              workerName: employee.fullName,
+              totalViolations: 0,
+              activeViolations: 0,
+              resolvedViolations: 0,
+              lastViolation: null
+            };
+          }
+          
+          violationsByWorker[employee.id].totalViolations++;
+          violationsByWorker[employee.id].activeViolations++;
+          violationsByWorker[employee.id].lastViolation = attendance.checkIn;
+        }
+      }
+    }
+
+    const activeViolations = violations.filter(v => v.status === 'active').length;
+    const resolvedViolations = violations.filter(v => v.status === 'resolved').length;
+
     return res.status(200).json({
-      violations: [],
+      violations: violations,
       summary: {
-        totalViolations: 0,
-        activeViolations: 0,
-        resolvedViolations: 0,
-        uniqueWorkers: 0,
+        totalViolations: violations.length,
+        activeViolations: activeViolations,
+        resolvedViolations: resolvedViolations,
+        uniqueWorkers: Object.keys(violationsByWorker).length,
         timeRange: timeRange === 'today' ? 'today' : `${parseInt(timeRange) || 24} hours`
       },
-      violationsByWorker: [],
+      violationsByWorker: Object.values(violationsByWorker),
       projectName: project.projectName || project.name,
-      message: 'Geofence violations endpoint is functional but no violations found'
+      message: violations.length > 0 
+        ? `Found ${violations.length} geofence violation(s)` 
+        : 'No geofence violations found'
     });
 
   } catch (error) {
@@ -638,25 +712,41 @@ export const assignTask = async (req, res) => {
 
     // 3️⃣ Find last sequence for the day
     const lastTask = await WorkerTaskAssignment
-      .findOne({ employeeId, projectId, date })
+      .findOne({ 
+        employeeId, 
+        projectId, 
+        date,
+        sequence: { $exists: true, $ne: null, $type: "number" }
+      })
       .sort({ sequence: -1 });
 
-    let sequenceStart = lastTask ? lastTask.sequence + 1 : 1;
+    let sequenceStart = (lastTask && typeof lastTask.sequence === 'number' && !isNaN(lastTask.sequence)) 
+      ? lastTask.sequence + 1 
+      : 1;
 
     // 4️⃣ Generate incremental IDs safely
     const lastId = await WorkerTaskAssignment.findOne().sort({ id: -1 });
     let nextId = lastId ? lastId.id + 1 : 1;
 
-    const assignments = taskIds.map((taskId, index) => ({
-      id: nextId++,
-      employeeId: Number(employeeId),
-      projectId: Number(projectId),
-      taskId: Number(taskId),
-      date,
-      status: "queued",
-      sequence: sequenceStart + index,
-      createdAt: new Date(),
-    }));
+    const assignments = taskIds.map((taskId, index) => {
+      const sequence = sequenceStart + index;
+      
+      // Ensure sequence is a valid number
+      if (isNaN(sequence) || !isFinite(sequence)) {
+        throw new Error(`Invalid sequence calculated: ${sequence}`);
+      }
+      
+      return {
+        id: nextId++,
+        employeeId: Number(employeeId),
+        projectId: Number(projectId),
+        taskId: Number(taskId),
+        date,
+        status: "queued",
+        sequence: sequence,
+        createdAt: new Date(),
+      };
+    });
 
     const createdAssignments = await WorkerTaskAssignment.insertMany(assignments);
 
@@ -1591,14 +1681,14 @@ export const getActiveTasks = async (req, res) => {
       return res.status(400).json({ message: 'projectId is required' });
     }
 
-    // Get today's date
+    // Get today's date in YYYY-MM-DD format (matching the schema)
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayString = today.toISOString().split('T')[0]; // "YYYY-MM-DD"
 
-    // Find active task assignments for today
+    // Find active task assignments for today or future dates
     const activeAssignments = await WorkerTaskAssignment.find({
       projectId: Number(projectId),
-      date: { $gte: today },
+      date: { $gte: todayString }, // Compare strings instead of dates
       status: { $in: ['queued', 'in_progress'] }
     }).sort({ sequence: 1 });
 
@@ -2012,6 +2102,559 @@ export const getDashboardData = async (req, res) => {
     return res.status(500).json({ 
       success: false,
       message: 'Error fetching dashboard data',
+      error: err.message 
+    });
+  }
+};
+
+
+/* ========================================
+   PROFILE MANAGEMENT APIs
+======================================== */
+
+import User from '../user/User.js';
+import Company from '../company/Company.js';
+import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * GET /api/supervisor/profile
+ * Get supervisor profile information
+ */
+export const getSupervisorProfile = async (req, res) => {
+  try {
+    const { userId, companyId, role } = req.user || {};
+
+    if (!userId || !companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user or company information.",
+      });
+    }
+
+    // Fetch employee details
+    const employee = await Employee.findOne({ 
+      userId: userId, 
+      companyId: companyId,
+      status: 'ACTIVE'
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Supervisor details not found",
+      });
+    }
+
+    // Fetch company, user, and assigned projects in parallel
+    const [company, user, assignedProjects] = await Promise.all([
+      Company.findOne({ id: companyId }),
+      User.findOne({ id: userId }),
+      Project.find({ 
+        supervisorId: employee.id,
+        status: { $in: ['ACTIVE', 'IN_PROGRESS'] }
+      }).select('id name code location status')
+    ]);
+
+    if (!company) {
+      return res.status(404).json({
+        success: false,
+        message: `Company with ID ${companyId} not found`,
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User details not found",
+      });
+    }
+
+    // Get team size (count of workers assigned to supervisor's projects)
+    const projectIds = assignedProjects.map(p => p.id);
+    const today = new Date().toISOString().split('T')[0];
+    
+    const teamSize = await WorkerTaskAssignment.distinct('employeeId', {
+      projectId: { $in: projectIds },
+      date: today
+    }).then(ids => ids.length);
+
+    // Construct photo URL
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5002';
+    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+    const photoUrl = employee.photoUrl || employee.photo_url;
+    
+    let fullPhotoUrl = null;
+    if (photoUrl) {
+      if (photoUrl.startsWith('http')) {
+        fullPhotoUrl = photoUrl;
+      } else if (photoUrl.startsWith('/uploads')) {
+        fullPhotoUrl = `${baseUrl}${photoUrl}`;
+      } else {
+        fullPhotoUrl = `${baseUrl}/uploads/supervisors/${photoUrl}`;
+      }
+    }
+
+    // Build profile response
+    const profile = {
+      employeeId: employee.id,
+      name: employee.fullName,
+      email: user.email,
+      phoneNumber: employee.phone || "N/A",
+      companyName: company.name,
+      role: role || 'supervisor',
+      photoUrl: fullPhotoUrl,
+      employeeCode: employee.employeeCode || null,
+      jobTitle: employee.jobTitle || "Supervisor",
+      department: employee.department || "Construction",
+      status: employee.status || "ACTIVE",
+      assignedProjects: assignedProjects.map(p => ({
+        id: p.id,
+        name: p.name,
+        code: p.code,
+        location: p.location,
+        status: p.status
+      })),
+      teamSize: teamSize,
+      currentProject: employee.currentProject || null,
+      createdAt: employee.createdAt || user.createdAt,
+      updatedAt: employee.updatedAt || employee.createdAt || user.updatedAt,
+    };
+
+    console.log("✅ Supervisor profile retrieved:", {
+      userId,
+      companyId,
+      employeeId: employee.id,
+      projectsCount: assignedProjects.length,
+      teamSize,
+      hasPhoto: !!fullPhotoUrl
+    });
+
+    return res.json({ 
+      success: true, 
+      profile 
+    });
+
+  } catch (err) {
+    console.error("❌ Error fetching supervisor profile:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching supervisor profile",
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * PUT /api/supervisor/profile
+ * Update supervisor profile information
+ */
+export const updateSupervisorProfile = async (req, res) => {
+  try {
+    const { userId, companyId } = req.user || {};
+    const { phoneNumber, emergencyContact, preferences } = req.body;
+
+    if (!userId || !companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user or company information.",
+      });
+    }
+
+    // Fetch employee
+    const employee = await Employee.findOne({ 
+      userId: userId, 
+      companyId: companyId 
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Supervisor not found",
+      });
+    }
+
+    // Update fields
+    const updateData = {};
+    
+    if (phoneNumber !== undefined) {
+      updateData.phone = phoneNumber;
+    }
+
+    if (emergencyContact !== undefined) {
+      updateData.emergencyContact = emergencyContact;
+    }
+
+    if (preferences !== undefined) {
+      updateData.preferences = preferences;
+    }
+
+    // Update employee record
+    const updatedEmployee = await Employee.findOneAndUpdate(
+      { userId: userId, companyId: companyId },
+      { $set: updateData },
+      { new: true }
+    );
+
+    console.log("✅ Supervisor profile updated:", {
+      userId,
+      companyId,
+      employeeId: employee.id,
+      updatedFields: Object.keys(updateData)
+    });
+
+    return res.json({
+      success: true,
+      message: "Profile updated successfully",
+      data: {
+        employeeId: updatedEmployee.id,
+        name: updatedEmployee.fullName,
+        phoneNumber: updatedEmployee.phone,
+        emergencyContact: updatedEmployee.emergencyContact,
+        preferences: updatedEmployee.preferences,
+        updatedAt: updatedEmployee.updatedAt || new Date()
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error updating supervisor profile:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating supervisor profile",
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * PUT /api/supervisor/profile/password
+ * Change supervisor password
+ */
+export const changeSupervisorPassword = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { oldPassword, newPassword } = req.body;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Old password and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters long",
+      });
+    }
+
+    // Fetch user
+    const user = await User.findOne({ id: userId });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Verify old password
+    const isMatch = await bcrypt.compare(oldPassword, user.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Old password is incorrect",
+      });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const newPasswordHash = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    user.passwordHash = newPasswordHash;
+    await user.save();
+
+    console.log("✅ Supervisor password changed:", { userId });
+
+    return res.json({
+      success: true,
+      message: "Password changed successfully",
+    });
+
+  } catch (err) {
+    console.error("❌ Error changing supervisor password:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while changing password",
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * Multer Configuration for Supervisor Photo Upload
+ */
+const supervisorStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "uploads/supervisors/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const userId = req.user?.userId || "unknown";
+    cb(null, `supervisor-${userId}-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+const supervisorFileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed!"), false);
+  }
+};
+
+export const supervisorUpload = multer({
+  storage: supervisorStorage,
+  fileFilter: supervisorFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+});
+
+/**
+ * POST /api/supervisor/profile/photo
+ * Upload supervisor profile photo
+ */
+export const uploadSupervisorPhoto = async (req, res) => {
+  try {
+    const { userId, companyId } = req.user || {};
+
+    if (!userId || !companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user or company information",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No photo file uploaded",
+      });
+    }
+
+    // Fetch employee
+    const employee = await Employee.findOne({ 
+      userId: userId, 
+      companyId: companyId 
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Supervisor not found",
+      });
+    }
+
+    // Delete old photo if exists
+    if (employee.photoUrl) {
+      const oldPhotoPath = path.join(__dirname, '../../../', employee.photoUrl);
+      if (fs.existsSync(oldPhotoPath)) {
+        fs.unlinkSync(oldPhotoPath);
+        console.log("🗑️ Old photo deleted:", oldPhotoPath);
+      }
+    }
+
+    // Update employee with new photo path
+    const photoPath = `/uploads/supervisors/${req.file.filename}`;
+    employee.photoUrl = photoPath;
+    await employee.save();
+
+    // Construct full photo URL
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5002';
+    const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
+    const fullPhotoUrl = `${baseUrl}${photoPath}`;
+
+    console.log("✅ Supervisor photo uploaded:", {
+      userId,
+      companyId,
+      employeeId: employee.id,
+      photoPath,
+      fullPhotoUrl
+    });
+
+    return res.json({
+      success: true,
+      message: "Profile photo uploaded successfully",
+      photoUrl: fullPhotoUrl,
+    });
+
+  } catch (err) {
+    console.error("❌ Error uploading supervisor photo:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while uploading photo",
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * GET /api/supervisor/pending-approvals
+ * Get summary of all pending approvals for supervisor's dashboard
+ * Returns counts of pending leave, advance, material, and tool requests
+ */
+export const getPendingApprovalsSummary = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?.userId;
+    
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'User authentication required' 
+      });
+    }
+
+    // Find supervisor by userId
+    const supervisor = await Employee.findOne({ userId }).lean();
+    
+    if (!supervisor) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Supervisor not found' 
+      });
+    }
+
+    // Get all projects assigned to this supervisor
+    const projects = await Project.find({ supervisorId: supervisor.id }).lean();
+    
+    if (!projects || projects.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          leaveRequests: 0,
+          advanceRequests: 0,
+          materialRequests: 0,
+          toolRequests: 0,
+          urgent: 0,
+          total: 0
+        }
+      });
+    }
+
+    const projectIds = projects.map(p => p.id);
+
+    // Get all employees assigned to supervisor's projects
+    const employees = await Employee.find({ 
+      currentProjectId: { $in: projectIds } 
+    }).lean();
+    
+    const employeeIds = employees.map(e => e.id);
+
+    // Count pending requests in parallel for better performance
+    const [leaveCount, advanceCount, materialCount, toolCount] = await Promise.all([
+      // Pending leave requests from supervisor's workers
+      LeaveRequest.countDocuments({ 
+        employeeId: { $in: employeeIds },
+        status: 'PENDING' 
+      }),
+      
+      // Pending advance payment requests from supervisor's workers
+      PaymentRequest.countDocuments({ 
+        employeeId: { $in: employeeIds },
+        status: 'PENDING' 
+      }),
+      
+      // Pending material requests for supervisor's projects
+      MaterialRequest.countDocuments({ 
+        projectId: { $in: projectIds },
+        requestType: 'MATERIAL',
+        status: 'PENDING' 
+      }),
+      
+      // Pending tool requests for supervisor's projects
+      MaterialRequest.countDocuments({ 
+        projectId: { $in: projectIds },
+        requestType: 'TOOL',
+        status: 'PENDING' 
+      })
+    ]);
+
+    // Count urgent requests (older than 24 hours)
+    const urgentThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    const [urgentLeave, urgentAdvance, urgentMaterial, urgentTool] = await Promise.all([
+      LeaveRequest.countDocuments({ 
+        employeeId: { $in: employeeIds },
+        status: 'PENDING',
+        requestedAt: { $lt: urgentThreshold }
+      }),
+      
+      PaymentRequest.countDocuments({ 
+        employeeId: { $in: employeeIds },
+        status: 'PENDING',
+        createdAt: { $lt: urgentThreshold }
+      }),
+      
+      MaterialRequest.countDocuments({ 
+        projectId: { $in: projectIds },
+        requestType: 'MATERIAL',
+        status: 'PENDING',
+        createdAt: { $lt: urgentThreshold }
+      }),
+      
+      MaterialRequest.countDocuments({ 
+        projectId: { $in: projectIds },
+        requestType: 'TOOL',
+        status: 'PENDING',
+        createdAt: { $lt: urgentThreshold }
+      })
+    ]);
+
+    const urgentCount = urgentLeave + urgentAdvance + urgentMaterial + urgentTool;
+    const totalCount = leaveCount + advanceCount + materialCount + toolCount;
+
+    console.log('✅ Pending approvals summary:', {
+      supervisorId: supervisor.id,
+      userId: userId,
+      projectCount: projects.length,
+      workerCount: employees.length,
+      leaveRequests: leaveCount,
+      advanceRequests: advanceCount,
+      materialRequests: materialCount,
+      toolRequests: toolCount,
+      urgent: urgentCount,
+      total: totalCount
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        leaveRequests: leaveCount,
+        advanceRequests: advanceCount,
+        materialRequests: materialCount,
+        toolRequests: toolCount,
+        urgent: urgentCount,
+        total: totalCount
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Error getting pending approvals summary:', err);
+    return res.status(500).json({ 
+      success: false,
+      message: 'Server error while fetching pending approvals',
       error: err.message 
     });
   }

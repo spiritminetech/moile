@@ -5,7 +5,10 @@ import {
   submitDailyProgress,
   uploadDailyProgressPhotos,
   getDailyProgressByDate,
-  getDailyProgressRange
+  getDailyProgressRange,
+  trackManpowerUsage,
+  logIssues,
+  trackMaterialConsumption
 } from "./supervisorDailyProgressController.js";
 
 
@@ -13,13 +16,9 @@ const router = express.Router();
 
 /**
  * Supervisor submits daily progress (FINAL)
- * 
  */
-
-
 router.post(
   "/daily-progress",
-
   submitDailyProgress
 );
 
@@ -28,9 +27,32 @@ router.post(
  */
 router.post(
   "/daily-progress/photos",
-
   upload.array("photos", 10),
   uploadDailyProgressPhotos
+);
+
+/**
+ * Track manpower usage (NEW)
+ */
+router.post(
+  "/daily-progress/manpower",
+  trackManpowerUsage
+);
+
+/**
+ * Log issues and safety observations (NEW)
+ */
+router.post(
+  "/daily-progress/issues",
+  logIssues
+);
+
+/**
+ * Track material consumption (NEW)
+ */
+router.post(
+  "/daily-progress/materials",
+  trackMaterialConsumption
 );
 
 /**
@@ -38,7 +60,6 @@ router.post(
  */
 router.get(
   "/daily-progress/:projectId/:date",
-
   getDailyProgressByDate
 );
 

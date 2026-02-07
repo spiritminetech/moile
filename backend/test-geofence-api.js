@@ -1,71 +1,61 @@
-// Test geofence validation API endpoint
+/**
+ * Test Geofence Violations API
+ */
 
-import fetch from 'node-fetch';
+import axios from 'axios';
 
-const API_BASE_URL = 'http://192.168.0.3:5002/api';
+const BASE_URL = 'http://192.168.0.3:5002/api';
 
 async function testGeofenceAPI() {
   try {
-    console.log('🧪 Testing Geofence Validation API');
-    console.log('='.repeat(40));
+    console.log('🔐 Logging in...');
     
-    // First, get auth token
-    console.log('🔐 Getting authentication token...');
-    const loginResponse = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: 'worker1@gmail.com',
-        password: 'password123'
-      })
+    // Step 1: Login
+    const loginResp = await axios.post(`${BASE_URL}/auth/login`, {
+      email: 'supervisor@gmail.com',
+      password: 'password123'
     });
     
-    const loginData = await loginResponse.json();
-    console.log('📥 Login response:', loginData);
-    
-    if (!loginData.success) {
-      throw new Error('Login failed: ' + loginData.message);
-    }
-    
-    const token = loginData.token || loginData.data?.token;
-    if (!token) {
-      throw new Error('No token in response: ' + JSON.stringify(loginData));
-    }
-    console.log('✅ Authentication token obtained');
-    
-    // Test geofence validation with Singapore coordinates
-    console.log('\n📍 Testing geofence validation...');
-    const geofenceResponse = await fetch(`${API_BASE_URL}/worker/attendance/validate-location`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        projectId: 1003,  // Use the worker's actual project
-        latitude: 1.3521,  // Singapore coordinates
-        longitude: 103.8198,
-        accuracy: 10
-      })
+    // Step 2: Select company
+    const selectResp = await axios.post(`${BASE_URL}/auth/select-company`, {
+      userId: loginResp.data.userId,
+      companyId: loginResp.data.companies[0].companyId
     });
     
-    const geofenceData = await geofenceResponse.json();
-    console.log('📥 Geofence API Response:', JSON.stringify(geofenceData, null, 2));
+    const token = selectResp.data.token;
+    console.log('✅ Logged in successfully\n');
     
-    if (geofenceData.valid) {
-      console.log('✅ SUCCESS: Geofence validation passed!');
-      console.log(`   Distance: ${geofenceData.distance}m`);
-      console.log(`   Inside geofence: ${geofenceData.insideGeofence}`);
-    } else {
-      console.log('❌ FAILED: Geofence validation failed');
-      console.log(`   Distance: ${geofenceData.distance}m`);
-      console.log(`   Message: ${geofenceData.message}`);
-    }
+    // Test Project 1
+    console.log('📍 Testing Geofence Violations - Project 1');
+    console.log('='.repeat(60));
+    const resp1 = await axios.get(
+      `${BASE_URL}/supervisor/geofence-violations?projectId=1`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     
+    console.log(JSON.stringify(resp1.data, null, 2));
+    console.log('\n📊 Summary:');
+    console.log(`   Total Violations: ${resp1.data.summary.totalViolations}`);
+    console.log(`   Active: ${resp1.data.summary.activeViolations}`);
+    console.log(`   Unique Workers: ${resp1.data.summary.uniqueWorkers}`);
+    
+    // Test Project 2
+    console.log('\n\n📍 Testing Geofence Violations - Project 2');
+    console.log('='.repeat(60));
+    const resp2 = await axios.get(
+      `${BASE_URL}/supervisor/geofence-violations?projectId=2`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    
+    console.log(JSON.stringify(resp2.data, null, 2));
+    console.log('\n📊 Summary:');
+    console.log(`   Total Violations: ${resp2.data.summary.totalViolations}`);
+    console.log(`   Active: ${resp2.data.summary.activeViolations}`);
+    console.log(`   Unique Workers: ${resp2.data.summary.uniqueWorkers}`);
+    
+    console.log('\n✅ Test complete!');
   } catch (error) {
-    console.error('❌ Error testing geofence API:', error.message);
+    console.error('❌ Error:', error.response?.data || error.message);
   }
 }
 
