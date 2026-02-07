@@ -641,6 +641,179 @@ export const logToolUsage = async (req, res) => {
 };
 
 /* ===============================
+   GET MATERIAL INVENTORY
+   GET /api/supervisor/materials/inventory
+================================ */
+export const getMaterialInventory = async (req, res) => {
+    try {
+        const { projectId, lowStock } = req.query;
+        const userId = req.user?.id || req.user?.userId;
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Supervisor not found' 
+            });
+        }
+
+        // Build query for projects
+        let projectQuery = {};
+        if (projectId) {
+            // Verify supervisor owns this project
+            const project = await Project.findOne({ id: parseInt(projectId) });
+            if (!project || project.supervisorId !== supervisor.id) {
+                return res.status(403).json({ 
+                    success: false,
+                    message: 'You do not have permission to view this project' 
+                });
+            }
+            projectQuery = { id: parseInt(projectId) };
+        } else {
+            // Get all supervisor's projects
+            projectQuery = { supervisorId: supervisor.id };
+        }
+
+        const projects = await Project.find(projectQuery).lean();
+        const projectIds = projects.map(p => p.id);
+
+        // Get materials and tools for these projects
+        const [materials, tools] = await Promise.all([
+            Material.find({ projectId: { $in: projectIds } }).lean(),
+            Tool.find({ projectId: { $in: projectIds } }).lean()
+        ]);
+
+        // Build inventory data
+        const inventory = [];
+        const alerts = [];
+
+        // Process materials
+        materials.forEach(material => {
+            const project = projects.find(p => p.id === material.projectId);
+            const isLowStock = material.quantity < (material.minQuantity || 10);
+            
+            const item = {
+                id: material.id,
+                type: 'MATERIAL',
+                name: material.name,
+                category: material.category || 'other',
+                quantity: material.quantity,
+                unit: material.unit || 'pieces',
+                allocated: material.allocated || 0,
+                available: material.quantity - (material.allocated || 0),
+                status: material.status,
+                projectId: material.projectId,
+                projectName: project?.projectName || 'Unknown',
+                location: material.location,
+                minQuantity: material.minQuantity || 10,
+                isLowStock: isLowStock,
+                lastUpdated: material.updatedAt
+            };
+
+            // Filter by lowStock if requested
+            if (!lowStock || (lowStock === 'true' && isLowStock)) {
+                inventory.push(item);
+            }
+
+            // Add to alerts if low stock
+            if (isLowStock) {
+                alerts.push({
+                    type: 'LOW_STOCK',
+                    itemType: 'MATERIAL',
+                    itemId: material.id,
+                    itemName: material.name,
+                    projectName: project?.projectName || 'Unknown',
+                    currentQuantity: material.quantity,
+                    minQuantity: material.minQuantity || 10,
+                    message: `Low stock alert: ${material.name} has only ${material.quantity} ${material.unit} remaining`
+                });
+            }
+        });
+
+        // Process tools
+        tools.forEach(tool => {
+            const project = projects.find(p => p.id === tool.projectId);
+            const isLowStock = tool.quantity < (tool.minQuantity || 2);
+            
+            const item = {
+                id: tool.id,
+                type: 'TOOL',
+                name: tool.name,
+                category: tool.category || 'other',
+                quantity: tool.quantity,
+                unit: 'pieces',
+                allocated: tool.allocated ? 1 : 0,
+                available: tool.allocated ? 0 : tool.quantity,
+                status: tool.status,
+                condition: tool.condition,
+                projectId: tool.projectId,
+                projectName: project?.projectName || 'Unknown',
+                location: tool.location,
+                serialNumber: tool.serialNumber,
+                minQuantity: tool.minQuantity || 2,
+                isLowStock: isLowStock,
+                lastMaintenanceDate: tool.lastMaintenanceDate,
+                nextMaintenanceDate: tool.nextMaintenanceDate,
+                lastUpdated: tool.updatedAt
+            };
+
+            // Filter by lowStock if requested
+            if (!lowStock || (lowStock === 'true' && isLowStock)) {
+                inventory.push(item);
+            }
+
+            // Add to alerts if low stock or needs maintenance
+            if (isLowStock) {
+                alerts.push({
+                    type: 'LOW_STOCK',
+                    itemType: 'TOOL',
+                    itemId: tool.id,
+                    itemName: tool.name,
+                    projectName: project?.projectName || 'Unknown',
+                    currentQuantity: tool.quantity,
+                    minQuantity: tool.minQuantity || 2,
+                    message: `Low stock alert: ${tool.name} has only ${tool.quantity} units remaining`
+                });
+            }
+
+            if (tool.status === 'maintenance' || tool.condition === 'needs_repair') {
+                alerts.push({
+                    type: 'MAINTENANCE_REQUIRED',
+                    itemType: 'TOOL',
+                    itemId: tool.id,
+                    itemName: tool.name,
+                    projectName: project?.projectName || 'Unknown',
+                    condition: tool.condition,
+                    message: `Maintenance required: ${tool.name} needs repair or maintenance`
+                });
+            }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                inventory: inventory,
+                alerts: alerts,
+                summary: {
+                    totalMaterials: materials.length,
+                    totalTools: tools.length,
+                    lowStockItems: alerts.filter(a => a.type === 'LOW_STOCK').length,
+                    maintenanceRequired: alerts.filter(a => a.type === 'MAINTENANCE_REQUIRED').length
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error getting material inventory:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};
+
+/* ===============================
    GET MATERIAL RETURNS HISTORY
    GET /api/supervisor/material-returns
 ================================ */

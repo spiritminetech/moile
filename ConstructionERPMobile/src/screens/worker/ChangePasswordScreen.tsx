@@ -1,4 +1,4 @@
-// Change Password Screen - Allow workers to change their password
+// Change Password Screen - Allow workers and supervisors to change their password
 // Requirements: 8.1, 8.2
 
 import React, { useState } from 'react';
@@ -10,7 +10,9 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
+import { useAuth } from '../../store/context/AuthContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
+import { supervisorApiService } from '../../services/api/SupervisorApiService';
 import ConstructionInput from '../../components/common/ConstructionInput';
 import ConstructionButton from '../../components/common/ConstructionButton';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
@@ -18,14 +20,23 @@ import { validatePasswordChange } from '../../utils/validation';
 
 interface ChangePasswordScreenProps {
   navigation: any;
+  route?: {
+    params?: {
+      userRole?: 'worker' | 'supervisor' | 'driver';
+    };
+  };
 }
 
-const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ navigation }) => {
+const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ navigation, route }) => {
+  const { state: authState } = useAuth();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{[key: string]: string}>({});
+
+  // Determine user role from route params or auth state
+  const userRole = route?.params?.userRole || authState.user?.role || 'worker';
 
   const validateForm = (): boolean => {
     const validation = validatePasswordChange(oldPassword, newPassword, confirmPassword);
@@ -59,10 +70,23 @@ const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ navigation 
     try {
       setIsLoading(true);
 
-      const response = await workerApiService.changePassword({
-        oldPassword,
-        newPassword,
-      });
+      console.log('🔐 Changing password for user role:', userRole);
+
+      // Call the appropriate API based on user role
+      let response;
+      if (userRole === 'supervisor') {
+        console.log('📡 Calling supervisor password change API');
+        response = await supervisorApiService.changePassword({
+          oldPassword,
+          newPassword,
+        });
+      } else {
+        console.log('📡 Calling worker password change API');
+        response = await workerApiService.changePassword({
+          oldPassword,
+          newPassword,
+        });
+      }
 
       if (response.success) {
         Alert.alert(

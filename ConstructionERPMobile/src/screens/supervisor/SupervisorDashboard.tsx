@@ -45,6 +45,9 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
       const projectsResponse = await supervisorApiService.getSupervisorProjects();
       
       if (projectsResponse.success && projectsResponse.data) {
+        // Get pending approvals summary (parallel with projects)
+        const approvalsPromise = supervisorApiService.getPendingApprovalsSummary();
+        
         // Transform projects data to match dashboard format
         const projects = await Promise.all(
           projectsResponse.data.map(async (project: any) => {
@@ -52,6 +55,24 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
             const attendanceResponse = await supervisorApiService.getAttendanceMonitoring({
               projectId: project.id.toString(),
               date: new Date().toISOString().split('T')[0]
+            });
+
+            // Get workers assigned (workforce count)
+            const workersResponse = await supervisorApiService.getWorkersAssigned({
+              projectId: project.id.toString(),
+              date: new Date().toISOString().split('T')[0]
+            });
+
+            // Get late/absent workers alerts
+            const lateAbsentResponse = await supervisorApiService.getLateAbsentWorkers({
+              projectId: project.id.toString(),
+              date: new Date().toISOString().split('T')[0]
+            });
+
+            // Get geofence violations
+            const geofenceResponse = await supervisorApiService.getGeofenceViolations({
+              projectId: project.id.toString(),
+              timeRange: 'today'
             });
 
             // Get task progress data
@@ -66,9 +87,14 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
 
             let workforceCount = 0;
 
+            // Use workers-assigned endpoint for workforce count
+            if (workersResponse.success && workersResponse.data?.workers) {
+              workforceCount = workersResponse.data.workers.length;
+            }
+
+            // Use attendance monitoring for attendance summary
             if (attendanceResponse.success && attendanceResponse.data?.workers) {
               const workers = attendanceResponse.data.workers;
-              workforceCount = workers.length;
               
               attendanceSummary = {
                 present: workers.filter((w: any) => w.status === 'CHECKED_IN').length,
@@ -76,6 +102,51 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
                 late: workers.filter((w: any) => w.isLate).length,
                 total: workers.length
               };
+            }
+
+            // Combine alerts from late/absent workers and geofence violations
+            const projectAlerts = [];
+            
+            if (lateAbsentResponse.success && lateAbsentResponse.data) {
+              const { lateWorkers = [], absentWorkers = [] } = lateAbsentResponse.data;
+              
+              // Add late worker alerts
+              lateWorkers.forEach((worker: any) => {
+                projectAlerts.push({
+                  id: `late-${worker.employeeId}-${project.id}`,
+                  type: 'attendance',
+                  priority: 'medium',
+                  message: `${worker.workerName} is late (${worker.minutesLate} min)`,
+                  timestamp: new Date().toISOString(),
+                  projectId: project.id
+                });
+              });
+
+              // Add absent worker alerts
+              absentWorkers.forEach((worker: any) => {
+                projectAlerts.push({
+                  id: `absent-${worker.employeeId}-${project.id}`,
+                  type: 'attendance',
+                  priority: 'high',
+                  message: `${worker.workerName} is absent`,
+                  timestamp: new Date().toISOString(),
+                  projectId: project.id
+                });
+              });
+            }
+
+            // Add geofence violation alerts
+            if (geofenceResponse.success && geofenceResponse.data?.violations) {
+              geofenceResponse.data.violations.forEach((violation: any) => {
+                projectAlerts.push({
+                  id: `geofence-${violation.id}`,
+                  type: 'geofence',
+                  priority: violation.severity.toLowerCase(),
+                  message: `${violation.workerName} outside geofence (${violation.distance}m away)`,
+                  timestamp: violation.violationTime,
+                  projectId: project.id
+                });
+              });
             }
 
             // Calculate progress summary (mock for now, TODO: implement real calculation)
@@ -93,21 +164,41 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
               workforceCount,
               attendanceSummary,
               progressSummary,
-              alerts: [] // TODO: Get alerts from backend
+              alerts: projectAlerts
             };
           })
         );
 
+        // Wait for pending approvals summary
+        const approvalsResponse = await approvalsPromise;
+        
+        let pendingApprovals = {
+          leaveRequests: 0,
+          materialRequests: 0,
+          toolRequests: 0,
+          urgent: 0,
+          total: 0
+        };
+
+        // Update pending approvals from API response
+        if (approvalsResponse.success && approvalsResponse.data?.summary) {
+          const summary = approvalsResponse.data.summary;
+          pendingApprovals = {
+            leaveRequests: summary.byType.leave || 0,
+            materialRequests: summary.byType.material || 0,
+            toolRequests: summary.byType.tool || 0,
+            urgent: summary.urgentCount || 0,
+            total: summary.totalPending || 0
+          };
+        }
+
+        // Collect all alerts from all projects
+        const allAlerts = projects.flatMap(p => p.alerts || []);
+
         const dashboardData: SupervisorDashboardResponse = {
           projects,
-          pendingApprovals: {
-            leaveRequests: 0,
-            materialRequests: 0,
-            toolRequests: 0,
-            urgent: 0,
-            total: 0
-          },
-          alerts: []
+          pendingApprovals,
+          alerts: allAlerts
         };
 
         setDashboardData(dashboardData);

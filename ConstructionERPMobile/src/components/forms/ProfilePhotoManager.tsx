@@ -14,18 +14,21 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { workerApiService } from '../../services/api/WorkerApiService';
+import { supervisorApiService } from '../../services/api/SupervisorApiService';
 import LoadingOverlay from '../common/LoadingOverlay';
 
 interface ProfilePhotoManagerProps {
   currentPhotoUrl?: string;
   onPhotoUpdated: (photoUrl: string) => void;
   disabled?: boolean;
+  userRole?: 'worker' | 'supervisor' | 'driver'; // Add userRole prop
 }
 
 const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
   currentPhotoUrl,
   onPhotoUpdated,
   disabled = false,
+  userRole = 'worker', // Default to worker for backward compatibility
 }) => {
   const [isUploading, setIsUploading] = useState(false);
 
@@ -143,10 +146,19 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
       console.log('📤 Uploading photo:', {
         uri: asset.uri,
         type: asset.mimeType,
-        size: asset.fileSize
+        size: asset.fileSize,
+        userRole: userRole
       });
 
-      const response = await workerApiService.uploadProfilePhoto(file);
+      // Call the appropriate API based on user role
+      let response;
+      if (userRole === 'supervisor') {
+        console.log('📡 Calling supervisor API for photo upload');
+        response = await supervisorApiService.uploadProfilePhoto(file);
+      } else {
+        console.log('📡 Calling worker API for photo upload');
+        response = await workerApiService.uploadProfilePhoto(file);
+      }
 
       console.log('📥 Upload response:', {
         success: response.success,

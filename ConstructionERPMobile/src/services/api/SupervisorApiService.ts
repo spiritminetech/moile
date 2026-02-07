@@ -26,6 +26,23 @@ export class SupervisorApiService {
   }
 
   /**
+   * Get assigned sites (alias for projects) - mobile app compatibility
+   */
+  async getAssignedSites(): Promise<ApiResponse<any[]>> {
+    return apiClient.get('/supervisor/assigned-sites');
+  }
+
+  /**
+   * Get team list (alias for workers-assigned) - mobile app compatibility
+   */
+  async getTeamList(projectId: number, date?: string): Promise<ApiResponse<any[]>> {
+    const params = new URLSearchParams();
+    params.append('projectId', projectId.toString());
+    if (date) params.append('date', date);
+    return apiClient.get(`/supervisor/team-list?${params.toString()}`);
+  }
+
+  /**
    * Get checked-in workers for a project - uses existing endpoint
    */
   async getCheckedInWorkers(projectId: number): Promise<ApiResponse<any[]>> {
@@ -47,14 +64,8 @@ export class SupervisorApiService {
   }
 
   /**
-   * Get worker tasks for a specific date - uses existing endpoint
-   */
-  async getWorkerTasks(params: { employeeId: number; date: string }): Promise<ApiResponse<any>> {
-    return apiClient.get('/supervisor/worker-tasks', { params });
-  }
-
-  /**
    * Assign task to worker - uses existing endpoint
+   * Body: { employeeId, projectId, taskIds, date }
    */
   async assignTask(taskData: {
     employeeId: number;
@@ -67,6 +78,7 @@ export class SupervisorApiService {
 
   /**
    * Update task assignment - uses existing endpoint
+   * Body: { assignmentId, changes }
    */
   async updateTaskAssignment(updateData: {
     assignmentId: number;
@@ -76,10 +88,16 @@ export class SupervisorApiService {
   }
 
   /**
-   * Remove queued task - uses existing endpoint
+   * Update daily targets - uses existing endpoint
+   * Body: { assignmentUpdates: [{ assignmentId, dailyTarget }] }
    */
-  async removeQueuedTask(data: { assignmentId: number }): Promise<ApiResponse<any>> {
-    return apiClient.delete('/supervisor/remove-queued-task', { data });
+  async updateDailyTargets(data: {
+    assignmentUpdates: Array<{
+      assignmentId: number;
+      dailyTarget: any;
+    }>;
+  }): Promise<ApiResponse<any>> {
+    return apiClient.put('/supervisor/daily-targets', data);
   }
 
   /**
@@ -198,6 +216,57 @@ export class SupervisorApiService {
   }
 
   /**
+   * Get workers assigned to a project - uses existing endpoint
+   * Returns today's workforce count and worker details
+   * GET /api/supervisor/workers-assigned
+   */
+  async getWorkersAssigned(params: {
+    projectId: string;
+    date?: string;
+    search?: string;
+  }): Promise<ApiResponse<{
+    workers: Array<{
+      employeeId: number;
+      workerName: string;
+      role: string;
+      checkIn: string;
+      checkOut: string;
+      status: string;
+    }>;
+  }>> {
+    return apiClient.get('/supervisor/workers-assigned', { params });
+  }
+
+  /**
+   * Get pending approvals summary for dashboard
+   * Returns counts of pending leave, advance, material, and tool requests
+   * GET /api/supervisor/pending-approvals
+   */
+  async getPendingApprovalsSummary(): Promise<ApiResponse<{
+    approvals: any[];
+    summary: {
+      totalPending: number;
+      urgentCount: number;
+      overdueCount: number;
+      byType: {
+        leave: number;
+        material: number;
+        tool: number;
+        reimbursement: number;
+        advance_payment: number;
+      };
+    };
+    pagination: {
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    };
+  }>> {
+    return apiClient.get('/supervisor/pending-approvals');
+  }
+
+  /**
    * Send overtime instructions - uses existing endpoint
    */
   async sendOvertimeInstructions(data: {
@@ -208,19 +277,11 @@ export class SupervisorApiService {
     return apiClient.post('/supervisor/overtime-instructions', data);
   }
 
-  /**
-   * Update daily targets - uses existing endpoint
-   */
-  async updateDailyTargets(data: {
-    assignmentUpdates: Array<{
-      assignmentId: number;
-      dailyTarget: any;
-    }>;
-  }): Promise<ApiResponse<any>> {
-    return apiClient.put('/supervisor/daily-targets', data);
-  }
-
-  // Keep existing comprehensive methods for future use
+  // ========================================
+  // COMPREHENSIVE METHODS FOR FUTURE USE
+  // ========================================
+  // These methods are kept for future implementation
+  // but are not currently used by the mobile app
   
   /**
    * Get supervisor dashboard data with team overview and key metrics
@@ -278,6 +339,147 @@ export class SupervisorApiService {
   }
 
   /**
+   * Get supervisor profile data
+   */
+  async getSupervisorProfile(): Promise<ApiResponse<{
+    user: {
+      id: number;
+      name: string;
+      email: string;
+      phone: string;
+      profileImage?: string;
+      employeeId: string;
+      role: string;
+    };
+    supervisorInfo: {
+      approvalLevel: 'basic' | 'advanced' | 'senior';
+      specializations: string[];
+      yearsOfExperience: number;
+      department: string;
+      joinDate: string;
+    };
+    teamAssignments: Array<{
+      projectId: number;
+      projectName: string;
+      projectCode: string;
+      location: string;
+      teamSize: number;
+      startDate: string;
+      status: 'active' | 'completed' | 'on_hold';
+      role: 'lead_supervisor' | 'assistant_supervisor' | 'site_supervisor';
+    }>;
+    projectResponsibilities: Array<{
+      projectId: number;
+      projectName: string;
+      responsibilities: string[];
+      budget: number;
+      currency: string;
+      completionPercentage: number;
+    }>;
+    certifications: Array<{
+      id: number;
+      name: string;
+      issuer: string;
+      issueDate: string;
+      expiryDate: string;
+      certificateNumber: string;
+      status: 'active' | 'expired' | 'expiring_soon';
+      category: 'safety' | 'technical' | 'management' | 'regulatory';
+    }>;
+    performanceMetrics: {
+      projectsCompleted: number;
+      averageProjectRating: number;
+      teamSatisfactionScore: number;
+      safetyRecord: {
+        incidentFreeMonths: number;
+        safetyTrainingsCompleted: number;
+        safetyAuditsScore: number;
+      };
+      approvalMetrics: {
+        averageApprovalTime: number;
+        approvalAccuracy: number;
+        totalApprovalsProcessed: number;
+      };
+      teamPerformance: {
+        averageTaskCompletion: number;
+        teamProductivity: number;
+        workerRetentionRate: number;
+      };
+    };
+    achievements: Array<{
+      id: number;
+      title: string;
+      description: string;
+      dateAchieved: string;
+      category: 'safety' | 'productivity' | 'quality' | 'leadership' | 'innovation';
+      icon: string;
+    }>;
+  }>> {
+    return apiClient.get('/supervisor/profile');
+  }
+
+  /**
+   * Update supervisor profile
+   */
+  async updateSupervisorProfile(profileData: {
+    phoneNumber?: string;
+    emergencyContact?: {
+      name: string;
+      relationship: string;
+      phone: string;
+    };
+    preferences?: any;
+  }): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return apiClient.put('/supervisor/profile', profileData);
+  }
+
+  /**
+   * Change supervisor password
+   */
+  async changeSupervisorPassword(passwordData: {
+    oldPassword: string;
+    newPassword: string;
+  }): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return apiClient.put('/supervisor/profile/password', passwordData);
+  }
+
+  /**
+   * Upload supervisor profile photo
+   */
+  async uploadProfilePhoto(photo: File): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+    photoUrl?: string;
+  }>> {
+    try {
+      console.log('📤 Uploading supervisor profile photo...');
+      
+      const formData = new FormData();
+      formData.append('photo', photo);
+      
+      const response = await apiClient.uploadFile('/supervisor/profile/photo', formData);
+      
+      // Handle the response structure from backend
+      console.log('📥 Supervisor photo upload response:', {
+        success: response.success,
+        hasData: !!response.data,
+        hasPhotoUrl: !!(response.data?.photoUrl || response.photoUrl)
+      });
+      
+      return response;
+    } catch (error) {
+      console.error('❌ uploadProfilePhoto error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Approve or reject manual attendance corrections
    */
   async approveAttendanceCorrection(correctionId: number, decision: {
@@ -293,110 +495,9 @@ export class SupervisorApiService {
     return apiClient.post(`/supervisor/attendance/corrections/${correctionId}/approve`, decision);
   }
 
-  /**
-   * Get all task assignments with filtering and status
-   */
-  async getTaskAssignments(params?: {
-    projectId?: number;
-    workerId?: number;
-    status?: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-    priority?: 'low' | 'normal' | 'high' | 'urgent';
-    dateFrom?: string;
-    dateTo?: string;
-  }): Promise<ApiResponse<{
-    assignments: Array<{
-      assignmentId: number;
-      taskId: number;
-      taskName: string;
-      workerId: number;
-      workerName: string;
-      status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-      priority: 'low' | 'normal' | 'high' | 'urgent';
-      progress: number;
-      assignedAt: string;
-      startedAt: string | null;
-      completedAt: string | null;
-      estimatedHours: number;
-      actualHours: number | null;
-      dependencies: number[];
-      canStart: boolean;
-    }>;
-    summary: {
-      totalTasks: number;
-      pendingTasks: number;
-      inProgressTasks: number;
-      completedTasks: number;
-      overdueTasks: number;
-    };
-  }>> {
-    return apiClient.get('/supervisor/tasks/assignments', { params });
-  }
-
-  /**
-   * Monitor task progress across all assigned workers
-   */
-  async getTaskProgress(params?: {
-    projectId?: number;
-    timeframe?: 'today' | 'week' | 'month';
-  }): Promise<ApiResponse<{
-    progressData: Array<{
-      taskId: number;
-      taskName: string;
-      workerId: number;
-      workerName: string;
-      progress: number;
-      lastUpdated: string;
-      estimatedCompletion: string;
-      issues: Array<{
-        type: 'delay' | 'quality' | 'resource' | 'safety';
-        description: string;
-        severity: 'low' | 'medium' | 'high' | 'critical';
-        reportedAt: string;
-      }>;
-    }>;
-    overallMetrics: {
-      averageProgress: number;
-      onScheduleTasks: number;
-      delayedTasks: number;
-      completionRate: number;
-      productivityIndex: number;
-    };
-  }>> {
-    return apiClient.get('/supervisor/tasks/progress', { params });
-  }
-
-  /**
-   * Reassign task to different worker
-   */
-  async reassignTask(assignmentId: number, reassignmentData: {
-    newWorkerId: number;
-    reason: string;
-    priority?: 'low' | 'normal' | 'high' | 'urgent';
-    instructions?: string;
-  }): Promise<ApiResponse<{
-    newAssignmentId: number;
-    oldAssignmentId: number;
-    newWorkerId: number;
-    reassignedAt: string;
-    message: string;
-  }>> {
-    return apiClient.post(`/supervisor/tasks/assignments/${assignmentId}/reassign`, reassignmentData);
-  }
-
-  /**
-   * Update task priority and instructions
-   */
-  async updateTaskPriority(assignmentId: number, updateData: {
-    priority: 'low' | 'normal' | 'high' | 'urgent';
-    instructions?: string;
-    estimatedHours?: number;
-  }): Promise<ApiResponse<{
-    assignmentId: number;
-    updatedAt: string;
-    message: string;
-  }>> {
-    return apiClient.put(`/supervisor/tasks/assignments/${assignmentId}/priority`, updateData);
-  }
+  // ========================================
+  // PROGRESS REPORTING APIs
+  // ========================================
 
   /**
    * Create daily progress report
@@ -441,44 +542,6 @@ export class SupervisorApiService {
   }
 
   /**
-   * Upload photos for progress report
-   */
-  async uploadProgressReportPhotos(
-    reportId: string,
-    photosData: {
-      photos: File[];
-      category: 'progress' | 'issue' | 'completion';
-      description: string;
-      taskId?: number;
-    }
-  ): Promise<ApiResponse<{
-    uploadedPhotos: Array<{
-      photoId: string;
-      filename: string;
-      url: string;
-      category: 'progress' | 'issue' | 'completion';
-      uploadedAt: string;
-    }>;
-    totalPhotos: number;
-  }>> {
-    const formData = new FormData();
-    
-    // Add photos to form data
-    photosData.photos.forEach((photo, index) => {
-      formData.append('photos', photo);
-    });
-    
-    // Add other fields
-    formData.append('category', photosData.category);
-    formData.append('description', photosData.description);
-    if (photosData.taskId) {
-      formData.append('taskId', photosData.taskId.toString());
-    }
-
-    return apiClient.uploadFile(`/supervisor/reports/${reportId}/photos`, formData);
-  }
-
-  /**
    * Submit progress report for approval
    */
   async submitProgressReport(
@@ -518,12 +581,9 @@ export class SupervisorApiService {
     return apiClient.get('/supervisor/reports/progress', { params });
   }
 
-  /**
-   * Get specific progress report details
-   */
-  async getProgressReport(reportId: string): Promise<ApiResponse<SupervisorReport>> {
-    return apiClient.get(`/supervisor/reports/progress/${reportId}`);
-  }
+  // ========================================
+  // APPROVAL WORKFLOW APIs
+  // ========================================
 
   /**
    * Get pending approvals for supervisor review
@@ -846,135 +906,9 @@ export class SupervisorApiService {
     return apiClient.post('/supervisor/materials/allocate', allocationData);
   }
 
-  // Progress Reporting and Documentation APIs - Requirements: 5.1
-
-  /**
-   * Create daily progress report
-   */
-  async createProgressReport(reportData: {
-    date: string;
-    projectId: number;
-    summary: string;
-    manpowerUtilization: {
-      totalWorkers: number;
-      activeWorkers: number;
-      productivity: number;
-      efficiency: number;
-    };
-    progressMetrics: {
-      overallProgress: number;
-      milestonesCompleted: number;
-      tasksCompleted: number;
-      hoursWorked: number;
-    };
-    issues: Array<{
-      type: 'safety' | 'quality' | 'delay' | 'resource';
-      description: string;
-      severity: 'low' | 'medium' | 'high' | 'critical';
-      status: 'open' | 'in_progress' | 'resolved';
-    }>;
-    materialConsumption: Array<{
-      materialId: number;
-      name: string;
-      consumed: number;
-      remaining: number;
-      unit: string;
-    }>;
-  }): Promise<ApiResponse<{
-    reportId: string;
-    date: string;
-    status: 'draft';
-    createdAt: string;
-    message: string;
-  }>> {
-    return apiClient.post('/supervisor/reports/progress', reportData);
-  }
-
-  /**
-   * Upload photos for progress report
-   */
-  async uploadProgressReportPhotos(
-    reportId: string,
-    photosData: {
-      photos: File[];
-      category: 'progress' | 'issue' | 'completion';
-      description: string;
-      taskId?: number;
-    }
-  ): Promise<ApiResponse<{
-    uploadedPhotos: Array<{
-      photoId: string;
-      filename: string;
-      url: string;
-      category: 'progress' | 'issue' | 'completion';
-      uploadedAt: string;
-    }>;
-    totalPhotos: number;
-  }>> {
-    const formData = new FormData();
-    
-    // Add photos to form data
-    photosData.photos.forEach((photo, index) => {
-      formData.append('photos', photo);
-    });
-    
-    // Add other fields
-    formData.append('category', photosData.category);
-    formData.append('description', photosData.description);
-    if (photosData.taskId) {
-      formData.append('taskId', photosData.taskId.toString());
-    }
-
-    return apiClient.uploadFile(`/supervisor/reports/${reportId}/photos`, formData);
-  }
-
-  /**
-   * Submit progress report for approval
-   */
-  async submitProgressReport(
-    reportId: string,
-    submitData: {
-      finalNotes: string;
-      managerNotification: boolean;
-    }
-  ): Promise<ApiResponse<{
-    reportId: string;
-    status: 'submitted';
-    submittedAt: string;
-    managerNotified: boolean;
-    message: string;
-  }>> {
-    return apiClient.post(`/supervisor/reports/${reportId}/submit`, submitData);
-  }
-
-  /**
-   * Get progress reports with filtering
-   */
-  async getProgressReports(params?: {
-    projectId?: number;
-    date?: string;
-    status?: 'draft' | 'submitted' | 'approved';
-    limit?: number;
-    offset?: number;
-  }): Promise<ApiResponse<{
-    reports: SupervisorReport[];
-    pagination: {
-      total: number;
-      limit: number;
-      offset: number;
-      hasMore: boolean;
-    };
-  }>> {
-    return apiClient.get('/supervisor/reports/progress', { params });
-  }
-
-  /**
-   * Get specific progress report details
-   */
-  async getProgressReport(reportId: string): Promise<ApiResponse<SupervisorReport>> {
-    return apiClient.get(`/supervisor/reports/progress/${reportId}`);
-  }
-  // Approval Workflow and Request Management APIs - Requirements: 6.1
+  // ========================================
+  // APPROVAL WORKFLOW APIs
+  // ========================================
 
   /**
    * Get pending approvals for supervisor review

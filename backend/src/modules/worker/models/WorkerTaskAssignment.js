@@ -102,6 +102,10 @@ const WorkerTaskAssignmentSchema = new mongoose.Schema({
   collection: 'workerTaskAssignment',
   timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' }
 });
-//WorkerTaskAssignmentSchema.index({ employeeId: 1, date: 1 }, { unique: true });
+
+// Add indexes for better query performance
+WorkerTaskAssignmentSchema.index({ projectId: 1, date: 1 }); // For team size queries
+WorkerTaskAssignmentSchema.index({ employeeId: 1, date: 1 }); // For worker queries
+WorkerTaskAssignmentSchema.index({ supervisorId: 1 }); // For supervisor queries
 
 export default mongoose.model('WorkerTaskAssignment', WorkerTaskAssignmentSchema);

@@ -128,14 +128,14 @@ const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
       <View style={styles.projectsContainer}>
         <Text style={styles.projectsTitle}>Project Breakdown</Text>
         <ScrollView style={styles.projectsList} showsVerticalScrollIndicator={false}>
-          {projects.map((project) => {
+          {projects.map((project, index) => {
             const projectAttendanceRate = (project.attendanceSummary?.total || 0) > 0 
               ? Math.round(((project.attendanceSummary?.present || 0) / (project.attendanceSummary?.total || 1)) * 100)
               : 0;
             
             return (
               <TouchableOpacity
-                key={project.id}
+                key={`attendance-project-${project.id}-${index}`}
                 style={styles.projectItem}
                 onPress={() => onViewAttendanceDetails?.(project.id)}
                 activeOpacity={0.7}

@@ -2152,14 +2152,21 @@ export const getSupervisorProfile = async (req, res) => {
       });
     }
 
-    // Fetch company, user, and assigned projects in parallel
-    const [company, user, assignedProjects] = await Promise.all([
+    // Fetch all data in parallel for better performance
+    const today = new Date().toISOString().split('T')[0];
+    
+    const [company, user, assignedProjects, projectIds] = await Promise.all([
       Company.findOne({ id: companyId }),
       User.findOne({ id: userId }),
       Project.find({ 
         supervisorId: employee.id,
         status: { $in: ['ACTIVE', 'IN_PROGRESS'] }
-      }).select('id name code location status')
+      }).select('id name code location status'),
+      // Get project IDs for team size calculation
+      Project.find({ 
+        supervisorId: employee.id,
+        status: { $in: ['ACTIVE', 'IN_PROGRESS'] }
+      }).select('id').then(projects => projects.map(p => p.id))
     ]);
 
     if (!company) {
@@ -2177,13 +2184,12 @@ export const getSupervisorProfile = async (req, res) => {
     }
 
     // Get team size (count of workers assigned to supervisor's projects)
-    const projectIds = assignedProjects.map(p => p.id);
-    const today = new Date().toISOString().split('T')[0];
-    
-    const teamSize = await WorkerTaskAssignment.distinct('employeeId', {
-      projectId: { $in: projectIds },
-      date: today
-    }).then(ids => ids.length);
+    const teamSize = projectIds.length > 0 
+      ? await WorkerTaskAssignment.distinct('employeeId', {
+          projectId: { $in: projectIds },
+          date: today
+        }).then(ids => ids.length)
+      : 0;
 
     // Construct photo URL
     const protocol = req.protocol || 'http';
@@ -2238,8 +2244,8 @@ export const getSupervisorProfile = async (req, res) => {
     });
 
     return res.json({ 
-      success: true, 
-      profile 
+      success: true,
+      data: profile  // Wrap profile in 'data' property to match API response format
     });
 
   } catch (err) {
@@ -2543,12 +2549,25 @@ export const getPendingApprovalsSummary = async (req, res) => {
       return res.json({
         success: true,
         data: {
-          leaveRequests: 0,
-          advanceRequests: 0,
-          materialRequests: 0,
-          toolRequests: 0,
-          urgent: 0,
-          total: 0
+          approvals: [], // Empty array when no projects
+          summary: {
+            totalPending: 0,
+            urgentCount: 0,
+            overdueCount: 0,
+            byType: {
+              leave: 0,
+              material: 0,
+              tool: 0,
+              reimbursement: 0,
+              advance_payment: 0
+            }
+          },
+          pagination: {
+            total: 0,
+            limit: 50,
+            offset: 0,
+            hasMore: false
+          }
         }
       });
     }
@@ -2641,12 +2660,25 @@ export const getPendingApprovalsSummary = async (req, res) => {
     return res.json({
       success: true,
       data: {
-        leaveRequests: leaveCount,
-        advanceRequests: advanceCount,
-        materialRequests: materialCount,
-        toolRequests: toolCount,
-        urgent: urgentCount,
-        total: totalCount
+        approvals: [], // Empty array when no approvals
+        summary: {
+          totalPending: totalCount,
+          urgentCount: urgentCount,
+          overdueCount: 0, // Can be calculated if needed
+          byType: {
+            leave: leaveCount,
+            material: materialCount,
+            tool: toolCount,
+            reimbursement: 0, // Add if you have this type
+            advance_payment: advanceCount
+          }
+        },
+        pagination: {
+          total: 0,
+          limit: 50,
+          offset: 0,
+          hasMore: false
+        }
       }
     });
 

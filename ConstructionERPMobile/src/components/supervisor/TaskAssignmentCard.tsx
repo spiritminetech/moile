@@ -104,7 +104,7 @@ const TaskAssignmentCard: React.FC<TaskAssignmentCardProps> = ({
       <View style={styles.projectsContainer}>
         <Text style={styles.projectsTitle}>Project Tasks</Text>
         <ScrollView style={styles.projectsList} showsVerticalScrollIndicator={false}>
-          {projects.map((project) => {
+          {projects.map((project, index) => {
             const projectProgress = (project.progressSummary?.totalTasks || 0) > 0 
               ? Math.round(((project.progressSummary?.completedTasks || 0) / (project.progressSummary?.totalTasks || 1)) * 100)
               : 0;
@@ -115,7 +115,7 @@ const TaskAssignmentCard: React.FC<TaskAssignmentCardProps> = ({
 
             return (
               <TouchableOpacity
-                key={project.id}
+                key={`task-project-${project.id}-${index}`}
                 style={styles.projectCard}
                 onPress={() => onViewTaskDetails?.(project.id)}
                 activeOpacity={0.7}

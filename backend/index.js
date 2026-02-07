@@ -199,7 +199,7 @@ mongoose.connect(appConfig.database.uri, {
   });
 
 // Start server
-app.listen(appConfig.server.port, () => {
+app.listen(appConfig.server.port, '0.0.0.0', () => {
   console.log('🚀 ERP System Backend Started');
   console.log('================================');
   appConfig.log(`🌍 Environment: ${appConfig.server.environment}`);

@@ -1,3 +1,6 @@
+// API Logging - Shows all API calls in console
+import './src/config/axiosInterceptors';
+
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

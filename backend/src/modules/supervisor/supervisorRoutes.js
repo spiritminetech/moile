@@ -1,6 +1,33 @@
 import express from 'express';
-import { getAssignedWorkers,removeQueuedTask, exportReport, refreshAttendance, getSupervisorProjects,getCheckedInWorkers,getProjectTasks,getWorkerTasks ,assignTask,completeTask,getWorkerTasksForDay ,getActiveTasks, updateTaskAssignment, sendOvertimeInstructions, updateDailyTargets, getLateAbsentWorkers, sendAttendanceAlert, getGeofenceViolations, getManualAttendanceWorkers, submitManualAttendanceOverride, getAttendanceMonitoring, getDashboardData, getSupervisorProfile, updateSupervisorProfile, changeSupervisorPassword, uploadSupervisorPhoto, supervisorUpload, getPendingApprovalsSummary} from './supervisorController.js';
-import {getTodayWorkerSubmissions,reviewWorkerProgress} from "../supervisor/submodules/supervisorReviewController.js";
+import { 
+  getAssignedWorkers, 
+  getSupervisorProjects,
+  getCheckedInWorkers,
+  getProjectTasks,
+  assignTask,
+  completeTask,
+  getWorkerTasksForDay,
+  getActiveTasks, 
+  updateTaskAssignment,
+  sendOvertimeInstructions,
+  updateDailyTargets, 
+  getLateAbsentWorkers,
+  sendAttendanceAlert,
+  getGeofenceViolations,
+  getManualAttendanceWorkers,
+  submitManualAttendanceOverride, 
+  getAttendanceMonitoring,
+  exportReport,
+  refreshAttendance,
+  getDashboardData,
+  getSupervisorProfile, 
+  updateSupervisorProfile,
+  changeSupervisorPassword,
+  uploadSupervisorPhoto, 
+  supervisorUpload, 
+  getPendingApprovalsSummary
+} from './supervisorController.js';
+import {getTodayWorkerSubmissions,reviewWorkerProgress} from "./submodules/supervisorReviewController.js";
 import {
   getPendingLeaveRequests,
   approveLeaveRequest,
@@ -18,10 +45,12 @@ import {
   returnMaterials,
   getToolUsageLog,
   logToolUsage,
-  getMaterialReturns
+  getMaterialReturns,
+  getMaterialInventory
 } from './supervisorMaterialsToolsController.js';
-const router = express.Router();
 import { verifyToken } from '../../middleware/authMiddleware.js';
+
+const router = express.Router();
 
 // Dashboard endpoint
 router.get('/dashboard', getDashboardData);
@@ -29,8 +58,10 @@ router.get('/dashboard', getDashboardData);
 /**
  * Route to get pending approvals summary for dashboard
  * GET /api/supervisor/pending-approvals
+ * GET /api/supervisor/approvals/pending (alias for mobile app compatibility)
  */
 router.get('/pending-approvals', verifyToken, getPendingApprovalsSummary);
+router.get('/approvals/pending', verifyToken, getPendingApprovalsSummary);
 
 
 
@@ -41,28 +72,45 @@ router.get('/checked-in-workers/:projectId', getCheckedInWorkers);
 // Get tasks for a project
 router.get('/projects/:projectId/tasks', getProjectTasks);
 
-
-
+// Get supervisor projects
 router.get('/projects', getSupervisorProjects);
 
+/**
+ * ========================================
+ * TASK MANAGEMENT - 4 ESSENTIAL APIs ONLY
+ * ========================================
+ */
+
+/**
+ * 1. Get active tasks for a project
+ * GET /api/supervisor/active-tasks/:projectId
+ * Returns: Task completion status with worker details
+ */
 router.get('/active-tasks/:projectId', getActiveTasks);
-router.get("/worker-tasks", getWorkerTasks);
-router.delete("/remove-queued-task", removeQueuedTask);
 
+/**
+ * 2. Assign tasks to workers
+ * POST /api/supervisor/assign-task
+ * Body: { employeeId, projectId, taskIds, date }
+ */
+router.post('/assign-task', verifyToken, assignTask);
 
-
-
-// Assign task to worker
-router.post('/assign-task',verifyToken, assignTask);
-
-// Update task assignment (modification/reassignment)
+/**
+ * 3. Update task assignment (reassign workers, modify details)
+ * PUT /api/supervisor/update-assignment
+ * Body: { assignmentId, changes }
+ */
 router.put('/update-assignment', verifyToken, updateTaskAssignment);
+
+/**
+ * 4. Update daily targets for assignments
+ * PUT /api/supervisor/daily-targets
+ * Body: { assignmentUpdates: [{ assignmentId, dailyTarget }] }
+ */
+router.put('/daily-targets', verifyToken, updateDailyTargets);
 
 // Send overtime instructions to workers
 router.post('/overtime-instructions', verifyToken, sendOvertimeInstructions);
-
-// Update daily targets for multiple assignments
-router.put('/daily-targets', verifyToken, updateDailyTargets);
 
 router.post("/complete",  completeTask);
 router.get("/worker/daily",  getWorkerTasksForDay);
@@ -204,6 +252,13 @@ router.post('/escalate-issue/:issueId', verifyToken, escalateIssue);
  * MATERIALS & TOOLS MANAGEMENT
  * ========================================
  */
+
+/**
+ * Route to get material inventory for supervisor's projects
+ * GET /api/supervisor/materials/inventory
+ * Query: { projectId?: number, lowStock?: boolean }
+ */
+router.get('/materials/inventory', verifyToken, getMaterialInventory);
 
 /**
  * Route to request materials or tools for a project

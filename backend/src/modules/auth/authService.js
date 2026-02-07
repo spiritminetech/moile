@@ -28,34 +28,8 @@ export const login = async (email, password, deviceInfo = {}) => {
 
   if (!mappings.length) throw new Error('No company access');
 
-  if (mappings.length === 1) {
-    return issueToken(user, mappings[0], true, deviceInfo);
-  }
-
-  const companies = [];
-
-  for (const m of mappings) {
-    const company = await Company.findOne({ id: m.companyId, isActive: true });
-    const role = await Role.findOne({ id: m.roleId });
-
-    console.log("role",role);
-
-    if (!company || !role) continue;
-
-    companies.push({
-      companyId: company.id,
-      companyName: company.name,
-      role: role.name
-    });
-  }
-
-  if (!companies.length) throw new Error('No active company access');
-
-  return {
-    autoSelected: false,
-    companies,
-    userId: user.id // Store userId for company selection
-  };
+  // Always auto-select the first company mapping
+  return issueToken(user, mappings[0], true, deviceInfo);
 };
 
 /**

@@ -165,7 +165,7 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
       <View style={styles.projectsContainer}>
         <Text style={styles.projectsTitle}>Project Progress</Text>
         <ScrollView style={styles.projectsList} showsVerticalScrollIndicator={false}>
-          {projects.map((project) => {
+          {projects.map((project, index) => {
             const projectProgress = (project.progressSummary?.totalTasks || 0) > 0 
               ? Math.round(((project.progressSummary?.completedTasks || 0) / (project.progressSummary?.totalTasks || 1)) * 100)
               : 0;
@@ -174,7 +174,7 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
 
             return (
               <TouchableOpacity
-                key={project.id}
+                key={`project-${project.id}-${index}`}
                 style={styles.projectCard}
                 onPress={() => onViewProgressDetails?.(project.id)}
                 activeOpacity={0.7}

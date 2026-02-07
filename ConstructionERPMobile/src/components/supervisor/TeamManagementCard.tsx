@@ -76,9 +76,9 @@ const TeamManagementCard: React.FC<TeamManagementCardProps> = ({
         contentContainerStyle={styles.projectsContent}
         showsVerticalScrollIndicator={false}
       >
-        {projects.map((project) => (
+        {projects.map((project, index) => (
           <TouchableOpacity
-            key={project.id}
+            key={`project-${project.id}-${index}`}
             style={styles.projectCard}
             onPress={() => onViewTeamDetails?.(project.id)}
             activeOpacity={0.7}

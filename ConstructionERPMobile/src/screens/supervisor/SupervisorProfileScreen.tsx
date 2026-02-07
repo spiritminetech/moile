@@ -1,7 +1,7 @@
 // Supervisor Profile Screen - Display supervisor-specific profile information
 // Requirements: 15.1, 15.2, 15.3, 15.4, 15.5
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Image,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
@@ -114,10 +115,42 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  
+  // Track if initial load has been attempted
+  const hasLoadedRef = React.useRef(false);
+  // Track if currently loading to prevent race conditions
+  const isLoadingRef = React.useRef(false);
+  
+  // Cache duration: 5 minutes
+  const CACHE_DURATION_MS = 5 * 60 * 1000;
 
   // Load supervisor profile data
-  const loadProfileData = useCallback(async (showRefreshIndicator = false) => {
+  const loadProfileData = useCallback(async (showRefreshIndicator = false, forceRefresh = false) => {
+    console.log('📞 loadProfileData called', { 
+      isLoadingRef: isLoadingRef.current,
+      forceRefresh,
+      hasProfile: !!profileData 
+    });
+    
+    // Prevent duplicate calls using ref
+    if (isLoadingRef.current) {
+      console.log('⏸️ Skipping profile load - already loading (ref check)');
+      return;
+    }
+    
+    // Check cache validity - skip API call if data is fresh
+    if (!forceRefresh && profileData && lastRefresh) {
+      const timeSinceLastRefresh = Date.now() - lastRefresh.getTime();
+      if (timeSinceLastRefresh < CACHE_DURATION_MS) {
+        console.log('✅ Using cached profile data (age:', Math.round(timeSinceLastRefresh / 1000), 'seconds)');
+        return;
+      }
+    }
+    
     try {
+      console.log('🔄 Starting profile data load...');
+      isLoadingRef.current = true; // Set ref immediately
+      
       if (showRefreshIndicator) {
         setIsRefreshing(true);
       } else {
@@ -125,162 +158,129 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
       }
       setError(null);
 
-      // TODO: Replace with actual API call when implemented
-      // For now, using mock data based on the interface
-      const mockProfileData: SupervisorProfileData = {
-        user: {
-          id: authState.user?.id || 1,
-          name: authState.user?.name || 'John Supervisor',
-          email: authState.user?.email || 'john.supervisor@construction.com',
-          phone: authState.user?.phone || '+1-555-0123',
-          profileImage: authState.user?.profileImage,
-          employeeId: authState.user?.employeeId || 'SUP001',
-          role: 'Site Supervisor',
-        },
-        supervisorInfo: {
-          approvalLevel: 'advanced',
-          specializations: ['Concrete Work', 'Steel Structure', 'Safety Management'],
-          yearsOfExperience: 8,
-          department: 'Construction Operations',
-          joinDate: '2018-03-15',
-        },
-        teamAssignments: [
-          {
-            projectId: 1,
-            projectName: 'Downtown Office Complex',
-            projectCode: 'DOC-2024-001',
-            location: 'Downtown District',
-            teamSize: 15,
-            startDate: '2024-01-15',
-            status: 'active',
-            role: 'lead_supervisor',
+      // Call the real API to get supervisor profile data
+      console.log('📊 Fetching supervisor profile from API...');
+      const response = await supervisorApiService.getSupervisorProfile();
+      console.log('📥 Profile API response:', { 
+        success: response.success, 
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : []
+      });
+      
+      // Backend returns { success: true, data: {...} }
+      // API client passes it through as-is since it already has 'success' property
+      if (response.success && response.data) {
+        const apiProfile = response.data;
+        
+        // Map the API response to the local state structure
+        const profileData: SupervisorProfileData = {
+          user: apiProfile.user || {
+            id: apiProfile.employeeId,
+            name: apiProfile.name,
+            email: apiProfile.email,
+            phone: apiProfile.phoneNumber,
+            profileImage: apiProfile.photoUrl,
+            employeeId: apiProfile.employeeCode || apiProfile.employeeId?.toString(),
+            role: apiProfile.role,
           },
-          {
-            projectId: 2,
-            projectName: 'Residential Tower Phase 2',
-            projectCode: 'RTP2-2024-002',
-            location: 'North District',
-            teamSize: 8,
-            startDate: '2024-02-01',
-            status: 'active',
+          supervisorInfo: apiProfile.supervisorInfo || {
+            approvalLevel: 'basic',
+            specializations: [],
+            yearsOfExperience: 0,
+            department: apiProfile.department || 'Construction',
+            joinDate: apiProfile.createdAt || new Date().toISOString(),
+          },
+          teamAssignments: apiProfile.teamAssignments || apiProfile.assignedProjects?.map((p: any) => ({
+            projectId: p.id,
+            projectName: p.name,
+            projectCode: p.code,
+            location: p.location,
+            teamSize: apiProfile.teamSize || 0,
+            startDate: apiProfile.createdAt || new Date().toISOString(),
+            status: p.status?.toLowerCase() || 'active',
             role: 'site_supervisor',
+          })) || [],
+          projectResponsibilities: apiProfile.projectResponsibilities || [],
+          certifications: apiProfile.certifications || [],
+          performanceMetrics: apiProfile.performanceMetrics || {
+            projectsCompleted: 0,
+            averageProjectRating: 0,
+            teamSatisfactionScore: 0,
+            safetyRecord: {
+              incidentFreeMonths: 0,
+              safetyTrainingsCompleted: 0,
+              safetyAuditsScore: 0,
+            },
+            approvalMetrics: {
+              averageApprovalTime: 0,
+              approvalAccuracy: 0,
+              totalApprovalsProcessed: 0,
+            },
+            teamPerformance: {
+              averageTaskCompletion: 0,
+              teamProductivity: 0,
+              workerRetentionRate: 0,
+            },
           },
-        ],
-        projectResponsibilities: [
-          {
-            projectId: 1,
-            projectName: 'Downtown Office Complex',
-            responsibilities: [
-              'Team coordination and task assignment',
-              'Quality control and safety oversight',
-              'Progress reporting and documentation',
-              'Material and resource management',
-            ],
-            budget: 2500000,
-            currency: 'USD',
-            completionPercentage: 65,
-          },
-        ],
-        certifications: [
-          {
-            id: 1,
-            name: 'OSHA 30-Hour Construction Safety',
-            issuer: 'OSHA',
-            issueDate: '2023-01-15',
-            expiryDate: '2026-01-15',
-            certificateNumber: 'OSHA-30-2023-001',
-            status: 'active',
-            category: 'safety',
-          },
-          {
-            id: 2,
-            name: 'Project Management Professional (PMP)',
-            issuer: 'PMI',
-            issueDate: '2022-06-20',
-            expiryDate: '2025-06-20',
-            certificateNumber: 'PMP-2022-456',
-            status: 'active',
-            category: 'management',
-          },
-          {
-            id: 3,
-            name: 'First Aid/CPR Certification',
-            issuer: 'Red Cross',
-            issueDate: '2023-08-10',
-            expiryDate: '2025-08-10',
-            certificateNumber: 'RC-FA-2023-789',
-            status: 'expiring_soon',
-            category: 'safety',
-          },
-        ],
-        performanceMetrics: {
-          projectsCompleted: 12,
-          averageProjectRating: 4.7,
-          teamSatisfactionScore: 4.5,
-          safetyRecord: {
-            incidentFreeMonths: 18,
-            safetyTrainingsCompleted: 24,
-            safetyAuditsScore: 96,
-          },
-          approvalMetrics: {
-            averageApprovalTime: 2.5,
-            approvalAccuracy: 98,
-            totalApprovalsProcessed: 342,
-          },
-          teamPerformance: {
-            averageTaskCompletion: 94,
-            teamProductivity: 87,
-            workerRetentionRate: 92,
-          },
-        },
-        achievements: [
-          {
-            id: 1,
-            title: 'Safety Excellence Award',
-            description: '18 months incident-free record',
-            dateAchieved: '2024-01-15',
-            category: 'safety',
-            icon: '🏆',
-          },
-          {
-            id: 2,
-            title: 'Team Leadership Recognition',
-            description: 'Highest team satisfaction score in division',
-            dateAchieved: '2023-12-01',
-            category: 'leadership',
-            icon: '👥',
-          },
-          {
-            id: 3,
-            title: 'Quality Champion',
-            description: 'Zero quality defects in Q3 2023',
-            dateAchieved: '2023-09-30',
-            category: 'quality',
-            icon: '⭐',
-          },
-        ],
-      };
+          achievements: apiProfile.achievements || [],
+        };
 
-      setProfileData(mockProfileData);
-      setLastRefresh(new Date());
+        console.log('✅ Profile data loaded successfully');
+        setProfileData(profileData);
+        setLastRefresh(new Date());
+      } else {
+        // If API fails, show error
+        const errorMessage = response.message || 'Failed to load profile data';
+        console.error('❌ Profile API error:', response);
+        setError(errorMessage);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load profile data';
+      console.error('❌ Profile data loading error:', err);
       setError(errorMessage);
-      console.error('Profile data loading error:', err);
     } finally {
+      console.log('🏁 Profile load complete, setting loading states to false');
+      isLoadingRef.current = false; // Clear ref
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [authState.user]);
+  }, [profileData, lastRefresh, CACHE_DURATION_MS]);
 
-  // Initial data load
+  // Initial data load - only run once on mount
   useEffect(() => {
-    loadProfileData();
-  }, [loadProfileData]);
+    if (!hasLoadedRef.current) {
+      console.log('🎬 SupervisorProfileScreen mounted - initiating profile load');
+      hasLoadedRef.current = true;
+      loadProfileData();
+    }
+  }, []);
+
+  // Reload when screen comes into focus (user navigates back)
+  useFocusEffect(
+    useCallback(() => {
+      console.log('👁️ SupervisorProfileScreen focused');
+      
+      // If stuck in loading state without data, reset it
+      if (isLoading && !profileData && !isLoadingRef.current) {
+        console.log('⚠️ Detected stuck loading state, resetting...');
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+      
+      // Only reload if we have stale data or no data
+      if (!profileData || (lastRefresh && Date.now() - lastRefresh.getTime() > CACHE_DURATION_MS)) {
+        console.log('🔄 Reloading profile data on focus');
+        // Small delay to ensure state is updated
+        setTimeout(() => {
+          loadProfileData();
+        }, 100);
+      }
+    }, [profileData, lastRefresh, CACHE_DURATION_MS, isLoading, loadProfileData])
+  );
 
   // Pull-to-refresh handler
   const handleRefresh = useCallback(async () => {
-    await loadProfileData(true);
+    await loadProfileData(true, true); // Force refresh on pull-to-refresh
   }, [loadProfileData]);
 
   // Handle photo update
@@ -391,6 +391,7 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
         <ProfilePhotoManager
           currentPhotoUrl={profileData.user.profileImage}
           onPhotoUpdated={handlePhotoUpdated}
+          userRole="supervisor"
         />
         
         <View style={styles.profileInfo}>
@@ -435,7 +436,7 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
 
         <TouchableOpacity
           style={styles.changePasswordButton}
-          onPress={() => navigation?.navigate('ChangePassword')}
+          onPress={() => navigation?.navigate('ChangePassword', { userRole: 'supervisor' })}
         >
           <Text style={styles.changePasswordText}>🔒 Change Password</Text>
           <Text style={styles.changePasswordSubtext}>Update your account password</Text>
@@ -795,6 +796,23 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
     );
   }
 
+  // Show loading skeleton on initial load
+  if (isLoading && !profileData) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <Text style={styles.title}>Supervisor Profile</Text>
+          </View>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={ConstructionTheme.colors.primary} />
+          <Text style={styles.loadingText}>Loading profile...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -886,6 +904,17 @@ const styles = StyleSheet.create({
   errorContainer: {
     flex: 1,
     padding: ConstructionTheme.spacing.md,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: ConstructionTheme.spacing.xl,
+  },
+  loadingText: {
+    marginTop: ConstructionTheme.spacing.md,
+    fontSize: 16,
+    color: ConstructionTheme.colors.textSecondary,
   },
   section: {
     marginHorizontal: ConstructionTheme.spacing.md,

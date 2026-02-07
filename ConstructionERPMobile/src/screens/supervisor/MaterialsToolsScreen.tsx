@@ -115,12 +115,6 @@ const MaterialsToolsScreen: React.FC = () => {
   const [toolFilter, setToolFilter] = useState<'all' | 'allocated' | 'overdue' | 'damaged'>('all');
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
 
-  // Load data on mount
-  useEffect(() => {
-    loadMaterialsAndTools();
-    loadInventoryData();
-  }, [loadMaterialsAndTools]);
-
   // Load inventory data
   const loadInventoryData = useCallback(async () => {
     try {
@@ -137,6 +131,12 @@ const MaterialsToolsScreen: React.FC = () => {
       console.error('Error loading inventory data:', error);
     }
   }, [state.assignedProjects, showLowStockOnly]);
+
+  // Load data on mount
+  useEffect(() => {
+    loadMaterialsAndTools();
+    loadInventoryData();
+  }, [loadMaterialsAndTools, loadInventoryData]);
 
   // Refresh handler
   const handleRefresh = useCallback(async () => {
