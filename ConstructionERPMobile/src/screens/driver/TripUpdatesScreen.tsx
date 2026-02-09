@@ -20,7 +20,10 @@ import { useOffline } from '../../store/context/OfflineContext';
 import { driverApiService } from '../../services/api/DriverApiService';
 import { 
   TransportTask, 
-  GeoLocation 
+  GeoLocation,
+  VehicleRequest,
+  GracePeriodApplication,
+  ModuleIntegration
 } from '../../types';
 
 // Import driver-specific components
@@ -113,20 +116,18 @@ const TripUpdatesScreen: React.FC = () => {
         setTransportTasks(response.data);
         
         // Auto-select first active task if none selected
-        if (!selectedTask) {
-          const activeTask = response.data.find(task => 
-            task.status !== 'completed'
-          );
-          if (activeTask) {
-            setSelectedTask(activeTask);
+        setSelectedTask(prevSelected => {
+          if (!prevSelected) {
+            const activeTask = response.data.find(task => 
+              task.status !== 'completed'
+            );
+            return activeTask || null;
+          } else {
+            // Update selected task with latest data
+            const updatedTask = response.data.find(task => task.taskId === prevSelected.taskId);
+            return updatedTask || prevSelected;
           }
-        } else {
-          // Update selected task with latest data
-          const updatedTask = response.data.find(task => task.taskId === selectedTask.taskId);
-          if (updatedTask) {
-            setSelectedTask(updatedTask);
-          }
-        }
+        });
         
         console.log('✅ Transport tasks loaded:', response.data.length);
       }
@@ -140,7 +141,7 @@ const TripUpdatesScreen: React.FC = () => {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [selectedTask]);
+  }, []); // Remove selectedTask from dependencies
 
   // Load supervisor contacts
   const loadSupervisorContacts = useCallback(async () => {
@@ -184,7 +185,8 @@ const TripUpdatesScreen: React.FC = () => {
   useEffect(() => {
     loadTransportTasks();
     loadSupervisorContacts();
-  }, [loadTransportTasks, loadSupervisorContacts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   // Handle refresh
   const handleRefresh = useCallback(() => {
@@ -235,7 +237,7 @@ const TripUpdatesScreen: React.FC = () => {
     }
   }, [selectedTask, transportTasks, handleRefresh]);
 
-  // Handle delay report
+  // Enhanced delay report with grace period
   const handleDelayReport = useCallback(async (delayData: DelayReport) => {
     try {
       console.log('⏰ Reporting delay:', delayData);
@@ -248,9 +250,20 @@ const TripUpdatesScreen: React.FC = () => {
       });
 
       if (response.success) {
+        const gracePeriodInfo = response.data.gracePeriodApplication;
+        let alertMessage = `Delay of ${delayData.estimatedDelay} minutes has been reported. Supervisors have been notified.`;
+        
+        if (gracePeriodInfo) {
+          if (gracePeriodInfo.autoApproved) {
+            alertMessage += `\n\nGrace period of ${gracePeriodInfo.gracePeriodMinutes} minutes has been automatically applied to ${gracePeriodInfo.attendanceImpact.affectedWorkers.length} workers.`;
+          } else {
+            alertMessage += `\n\nGrace period of ${gracePeriodInfo.gracePeriodMinutes} minutes is pending supervisor approval.`;
+          }
+        }
+
         Alert.alert(
           'Delay Reported',
-          `Delay of ${delayData.estimatedDelay} minutes has been reported. Supervisors have been notified.`,
+          alertMessage,
           [
             {
               text: 'OK',
@@ -275,6 +288,72 @@ const TripUpdatesScreen: React.FC = () => {
     } catch (error: any) {
       console.error('❌ Delay report error:', error);
       Alert.alert('Error', error.message || 'Failed to report delay');
+    }
+  }, []);
+
+  // Handle vehicle request
+  const handleVehicleRequest = useCallback(async (vehicleRequest: VehicleRequest) => {
+    try {
+      console.log('🚗 Requesting vehicle:', vehicleRequest);
+
+      const response = await driverApiService.requestAlternateVehicle(
+        vehicleRequest.taskId,
+        vehicleRequest
+      );
+
+      if (response.success) {
+        const urgencyText = vehicleRequest.urgency === 'critical' ? 'Emergency' : 'Vehicle';
+        Alert.alert(
+          `${urgencyText} Request Submitted`,
+          `Request ID: ${response.data.requestId}\nEstimated Response: ${response.data.estimatedResponse}${response.data.emergencyContact ? `\nEmergency Contact: ${response.data.emergencyContact}` : ''}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Update local task data with vehicle request
+                if (selectedTask && selectedTask.taskId === vehicleRequest.taskId) {
+                  setSelectedTask({
+                    ...selectedTask,
+                    vehicleRequest: {
+                      ...vehicleRequest,
+                      requestId: response.data.requestId,
+                      status: 'pending'
+                    }
+                  });
+                }
+                handleRefresh();
+              },
+            },
+          ]
+        );
+      }
+    } catch (error: any) {
+      console.error('❌ Vehicle request error:', error);
+      Alert.alert('Error', error.message || 'Failed to request vehicle');
+    }
+  }, [selectedTask, handleRefresh]);
+
+  // Handle grace period application
+  const handleGracePeriodApplication = useCallback(async (gracePeriod: GracePeriodApplication) => {
+    try {
+      console.log('⏱️ Applying grace period:', gracePeriod);
+
+      const response = await driverApiService.applyGracePeriod(gracePeriod.taskId, {
+        delayMinutes: gracePeriod.delayMinutes,
+        delayReason: gracePeriod.delayReason,
+        affectedWorkers: gracePeriod.attendanceImpact.affectedWorkers,
+        justification: `Driver reported ${gracePeriod.delayReason} causing ${gracePeriod.delayMinutes} minute delay`
+      });
+
+      if (response.success) {
+        Alert.alert(
+          'Grace Period Applied',
+          `Grace period of ${response.data.gracePeriodApplication.gracePeriodMinutes} minutes has been ${response.data.gracePeriodApplication.autoApproved ? 'automatically applied' : 'submitted for approval'}.${response.data.attendanceUpdated ? '\nAttendance records have been updated.' : ''}`,
+        );
+      }
+    } catch (error: any) {
+      console.error('❌ Grace period application error:', error);
+      Alert.alert('Error', error.message || 'Failed to apply grace period');
     }
   }, []);
 
@@ -547,6 +626,8 @@ const TripUpdatesScreen: React.FC = () => {
             onDelayReport={handleDelayReport}
             onBreakdownReport={handleBreakdownReport}
             onPhotoUpload={handlePhotoUpload}
+            onVehicleRequest={handleVehicleRequest}
+            onGracePeriodApplication={handleGracePeriodApplication}
             isLoading={isUpdatingStatus}
           />
         ) : (

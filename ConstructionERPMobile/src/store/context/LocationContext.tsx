@@ -119,18 +119,31 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
         try {
           const location = await locationService.getCurrentLocation();
           dispatch({ type: 'SET_LOCATION', payload: location });
+          console.log('✅ Location initialized successfully');
         } catch (error) {
-          dispatch({ 
-            type: 'SET_LOCATION_ERROR', 
-            payload: error instanceof Error ? error.message : 'Failed to get location' 
-          });
+          const errorMessage = error instanceof Error ? error.message : 'Failed to get location';
+          console.warn('⚠️ Location initialization warning:', errorMessage);
+          // Don't set error state for permission issues - fallback will be used
+          if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
+            dispatch({ 
+              type: 'SET_LOCATION_ERROR', 
+              payload: errorMessage
+            });
+          }
         }
+      } else {
+        console.warn('⚠️ Location services not fully available, fallback will be used when needed');
       }
     } catch (error) {
-      dispatch({ 
-        type: 'SET_LOCATION_ERROR', 
-        payload: error instanceof Error ? error.message : 'Failed to initialize location services' 
-      });
+      const errorMessage = error instanceof Error ? error.message : 'Failed to initialize location services';
+      console.warn('⚠️ Location services initialization warning:', errorMessage);
+      // Don't set error state for permission issues - fallback will be used
+      if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
+        dispatch({ 
+          type: 'SET_LOCATION_ERROR', 
+          payload: errorMessage
+        });
+      }
     }
   };
 

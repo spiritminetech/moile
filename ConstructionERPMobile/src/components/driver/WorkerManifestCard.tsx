@@ -1,14 +1,13 @@
 // WorkerManifestCard Component - Display worker manifest for passenger management
 // Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Alert,
-  ScrollView,
 } from 'react-native';
 import { TransportTask } from '../../types';
 import { ConstructionButton, ConstructionCard } from '../common';
@@ -19,7 +18,6 @@ interface WorkerManifestCardProps {
   onCheckInWorker: (workerId: number, locationId: number) => void;
   onCheckOutWorker: (workerId: number, locationId: number) => void;
   onCallWorker: (phone: string, name: string) => void;
-  isOffline: boolean;
 }
 
 const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
@@ -27,19 +25,11 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
   onCheckInWorker,
   onCheckOutWorker,
   onCallWorker,
-  isOffline,
 }) => {
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+
   // Handle worker check-in
   const handleCheckIn = (workerId: number, locationId: number, workerName: string) => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot check in workers while offline. Please connect to internet.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     Alert.alert(
       'Check In Worker',
       `Confirm check-in for ${workerName}?`,
@@ -52,15 +42,6 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
 
   // Handle worker check-out
   const handleCheckOut = (workerId: number, locationId: number, workerName: string) => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot check out workers while offline. Please connect to internet.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     Alert.alert(
       'Check Out Worker',
       `Confirm check-out for ${workerName}?`,
@@ -71,29 +52,30 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
     );
   };
 
-  // Handle call worker
-  const handleCallWorker = (phone: string, name: string) => {
-    Alert.alert(
-      'Call Worker',
-      `Call ${name} at ${phone}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Call', onPress: () => onCallWorker(phone, name) },
-      ]
-    );
-  };
-
   // Format time
   const formatTime = (timeString: string): string => {
-    const date = new Date(timeString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true 
-    });
+    if (!timeString) return 'Not set';
+    
+    try {
+      const date = new Date(timeString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return 'Not set';
+      }
+      
+      return date.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true 
+      });
+    } catch (error) {
+      console.error('Error formatting time:', error);
+      return 'Not set';
+    }
   };
 
-  // Render worker item
+  // Render basic worker item (requirements only)
   const renderWorkerItem = (
     worker: {
       workerId: number;
@@ -101,22 +83,28 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
       phone: string;
       checkedIn: boolean;
       checkInTime?: string;
+      trade: string;
+      supervisorName: string;
     },
-    locationId: number,
-    locationName: string
+    locationId: number
   ) => {
     return (
       <View key={`${locationId}-${worker.workerId}`} style={styles.workerItem}>
         <View style={styles.workerHeader}>
           <View style={styles.workerInfo}>
             <Text style={styles.workerName}>{worker.name}</Text>
-            <Text style={styles.workerPhone}>{worker.phone}</Text>
-            {worker.checkInTime && (
+            <Text style={styles.workerDetails}>Trade: {worker.trade}</Text>
+            <Text style={styles.supervisorInfo}>Supervisor: {worker.supervisorName}</Text>
+            {worker.phone && (
+              <Text style={styles.workerPhone}>{worker.phone}</Text>
+            )}
+            {worker.checkedIn && worker.checkInTime && (
               <Text style={styles.checkInTime}>
                 Checked in: {formatTime(worker.checkInTime)}
               </Text>
             )}
           </View>
+          
           <View style={styles.workerStatus}>
             <View style={[
               styles.statusIndicator,
@@ -131,33 +119,44 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
 
         <View style={styles.workerActions}>
           {!worker.checkedIn ? (
-            <ConstructionButton
-              title="Check In"
-              onPress={() => handleCheckIn(worker.workerId, locationId, worker.name)}
-              variant="success"
-              size="small"
-              disabled={isOffline}
-              icon="✅"
-              style={styles.actionButton}
-            />
+            <>
+              <ConstructionButton
+                title="Check In"
+                onPress={() => handleCheckIn(worker.workerId, locationId, worker.name)}
+                variant="primary"
+                size="small"
+                style={styles.actionButton}
+              />
+              {worker.phone && (
+                <ConstructionButton
+                  title="Call"
+                  onPress={() => onCallWorker(worker.phone, worker.name)}
+                  variant="outlined"
+                  size="small"
+                  style={styles.actionButton}
+                />
+              )}
+            </>
           ) : (
-            <ConstructionButton
-              title="Check Out"
-              onPress={() => handleCheckOut(worker.workerId, locationId, worker.name)}
-              variant="warning"
-              size="small"
-              disabled={isOffline}
-              icon="❌"
-              style={styles.actionButton}
-            />
+            <>
+              <ConstructionButton
+                title="Check Out"
+                onPress={() => handleCheckOut(worker.workerId, locationId, worker.name)}
+                variant="secondary"
+                size="small"
+                style={styles.actionButton}
+              />
+              {worker.phone && (
+                <ConstructionButton
+                  title="Call"
+                  onPress={() => onCallWorker(worker.phone, worker.name)}
+                  variant="outlined"
+                  size="small"
+                  style={styles.actionButton}
+                />
+              )}
+            </>
           )}
-          
-          <TouchableOpacity
-            onPress={() => handleCallWorker(worker.phone, worker.name)}
-            style={styles.callButton}
-          >
-            <Text style={styles.callButtonText}>📞 Call</Text>
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -174,6 +173,8 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
       phone: string;
       checkedIn: boolean;
       checkInTime?: string;
+      trade: string;
+      supervisorName: string;
     }>;
     estimatedPickupTime: string;
     actualPickupTime?: string;
@@ -184,7 +185,12 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
 
     return (
       <View key={location.locationId} style={styles.locationSection}>
-        <View style={styles.locationHeader}>
+        <TouchableOpacity 
+          style={styles.locationHeader}
+          onPress={() => setSelectedLocationId(
+            selectedLocationId === location.locationId ? null : location.locationId
+          )}
+        >
           <View style={styles.locationInfo}>
             <Text style={styles.locationName}>{location.name}</Text>
             <Text style={styles.locationAddress}>{location.address}</Text>
@@ -203,8 +209,11 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
             {isCompleted && (
               <Text style={styles.completedBadge}>✅ Done</Text>
             )}
+            <Text style={styles.expandIcon}>
+              {selectedLocationId === location.locationId ? '▼' : '▶'}
+            </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.progressBar}>
           <View 
@@ -215,14 +224,15 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
           />
         </View>
 
-        <ScrollView 
-          style={styles.workersContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          {location.workerManifest.map(worker => 
-            renderWorkerItem(worker, location.locationId, location.name)
-          )}
-        </ScrollView>
+        {selectedLocationId === location.locationId && (
+          <View style={styles.locationDetails}>
+            <View style={styles.workersContainer}>
+              {location.workerManifest.map((worker: any) => 
+                renderWorkerItem(worker, location.locationId)
+              )}
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -297,19 +307,9 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
       {renderSummaryStats()}
 
       {/* Pickup locations */}
-      <ScrollView 
-        style={styles.locationsContainer}
-        showsVerticalScrollIndicator={false}
-      >
+      <View style={styles.locationsContainer}>
         {task.pickupLocations.map(location => renderLocationSection(location))}
-      </ScrollView>
-
-      {/* Offline indicator */}
-      {isOffline && (
-        <View style={styles.offlineIndicator}>
-          <Text style={styles.offlineText}>⚠️ Worker check-in requires internet connection</Text>
-        </View>
-      )}
+      </View>
     </ConstructionCard>
   );
 };
@@ -317,7 +317,6 @@ const WorkerManifestCard: React.FC<WorkerManifestCardProps> = ({
 const styles = StyleSheet.create({
   container: {
     marginBottom: ConstructionTheme.spacing.md,
-    maxHeight: 600, // Limit height to prevent excessive scrolling
   },
   cardTitle: {
     ...ConstructionTheme.typography.headlineSmall,
@@ -370,7 +369,7 @@ const styles = StyleSheet.create({
     marginHorizontal: ConstructionTheme.spacing.md,
   },
   locationsContainer: {
-    maxHeight: 400,
+    marginBottom: ConstructionTheme.spacing.sm,
   },
   locationSection: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -422,6 +421,11 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.success,
     fontWeight: '600',
   },
+  expandIcon: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginTop: 4,
+  },
   progressBar: {
     height: 6,
     backgroundColor: ConstructionTheme.colors.outline,
@@ -434,14 +438,17 @@ const styles = StyleSheet.create({
     backgroundColor: ConstructionTheme.colors.success,
     borderRadius: 3,
   },
+  locationDetails: {
+    marginTop: ConstructionTheme.spacing.md,
+  },
   workersContainer: {
-    maxHeight: 200,
+    marginBottom: ConstructionTheme.spacing.sm,
   },
   workerItem: {
     backgroundColor: ConstructionTheme.colors.surface,
     borderRadius: ConstructionTheme.borderRadius.sm,
     padding: ConstructionTheme.spacing.md,
-    marginBottom: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.md,
     borderWidth: 1,
     borderColor: ConstructionTheme.colors.outline,
   },
@@ -460,6 +467,16 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onSurface,
     fontWeight: '600',
     marginBottom: 4,
+  },
+  workerDetails: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: 2,
+  },
+  supervisorInfo: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.secondary,
+    marginBottom: 2,
   },
   workerPhone: {
     ...ConstructionTheme.typography.bodyMedium,
@@ -495,33 +512,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-  },
-  callButton: {
-    backgroundColor: ConstructionTheme.colors.info + '20',
-    paddingHorizontal: ConstructionTheme.spacing.md,
-    paddingVertical: ConstructionTheme.spacing.sm,
-    borderRadius: ConstructionTheme.borderRadius.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
     minWidth: 80,
-  },
-  callButtonText: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: ConstructionTheme.colors.info,
-    fontWeight: '600',
-  },
-  offlineIndicator: {
-    marginTop: ConstructionTheme.spacing.md,
-    padding: ConstructionTheme.spacing.sm,
-    backgroundColor: ConstructionTheme.colors.warning + '20',
-    borderRadius: ConstructionTheme.borderRadius.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: ConstructionTheme.colors.warning,
-  },
-  offlineText: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: '#E65100',
-    fontWeight: '500',
   },
 });
 

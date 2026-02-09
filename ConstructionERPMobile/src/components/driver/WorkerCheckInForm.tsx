@@ -47,16 +47,87 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
   const [checkInNotes, setCheckInNotes] = useState<{ [key: number]: string }>({});
   const [isCompletingPickup, setIsCompletingPickup] = useState(false);
 
-  // Get the selected pickup location
-  const selectedLocation = transportTask.pickupLocations.find(
-    loc => loc.locationId === selectedLocationId
-  );
+  // Determine if this is a dropoff location
+  const isDropoff = selectedLocationId === -1;
+
+  // Debug logging
+  console.log('🔍 WorkerCheckInForm Debug:', {
+    selectedLocationId,
+    isDropoff,
+    hasTask: !!transportTask,
+    pickupLocationsCount: transportTask?.pickupLocations?.length || 0,
+    hasDropoff: !!transportTask?.dropoffLocation,
+  });
+
+  // Get the selected location (pickup or dropoff)
+  const selectedLocation = isDropoff
+    ? (transportTask.dropoffLocation ? {
+        locationId: -1,
+        name: transportTask.dropoffLocation.name || 'Drop-off Location',
+        address: transportTask.dropoffLocation.address || '',
+        coordinates: transportTask.dropoffLocation.coordinates || { latitude: 0, longitude: 0 },
+        workerManifest: transportTask.pickupLocations?.flatMap(loc => loc.workerManifest || []) || [],
+        estimatedPickupTime: transportTask.dropoffLocation.estimatedArrival || '',
+        actualPickupTime: transportTask.dropoffLocation.actualArrival,
+      } : null)
+    : transportTask.pickupLocations.find(
+        loc => loc.locationId === selectedLocationId
+      );
+
+  console.log('🔍 Selected Location:', {
+    found: !!selectedLocation,
+    locationId: selectedLocation?.locationId,
+    name: selectedLocation?.name,
+    workersCount: selectedLocation?.workerManifest?.length || 0,
+  });
 
   if (!selectedLocation) {
     return (
       <ConstructionCard title="Worker Check-In" variant="error">
         <Text style={styles.errorText}>
-          ⚠️ Selected pickup location not found
+          ⚠️ Selected location not found
+        </Text>
+        <Text style={styles.errorText}>
+          Location ID: {selectedLocationId}
+        </Text>
+        <Text style={styles.errorText}>
+          Is Dropoff: {isDropoff ? 'Yes' : 'No'}
+        </Text>
+        <Text style={styles.errorText}>
+          Has dropoff location: {transportTask.dropoffLocation ? 'Yes' : 'No'}
+        </Text>
+        <Text style={styles.errorText}>
+          Pickup locations count: {transportTask.pickupLocations?.length || 0}
+        </Text>
+        {transportTask.pickupLocations && transportTask.pickupLocations.length > 0 && (
+          <View>
+            <Text style={styles.errorText}>Available location IDs:</Text>
+            {transportTask.pickupLocations.map(loc => (
+              <Text key={loc.locationId} style={styles.errorText}>
+                - {loc.locationId}: {loc.name}
+              </Text>
+            ))}
+          </View>
+        )}
+      </ConstructionCard>
+    );
+  }
+
+  // Check if worker manifest is empty
+  if (!selectedLocation.workerManifest || selectedLocation.workerManifest.length === 0) {
+    return (
+      <ConstructionCard title="Worker Check-In" variant="error">
+        <Text style={styles.errorText}>
+          ⚠️ No workers found for this location
+        </Text>
+        <Text style={styles.errorText}>
+          Location: {selectedLocation.name}
+        </Text>
+        <Text style={styles.errorText}>
+          Location ID: {selectedLocation.locationId}
+        </Text>
+        <Text style={styles.errorText}>
+          Worker manifest is empty. Please ensure workers are assigned to this task.
         </Text>
       </ConstructionCard>
     );
@@ -102,29 +173,6 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
     }
   };
 
-  // Handle worker check-out
-  const handleWorkerCheckOut = async (workerId: number) => {
-    Alert.alert(
-      'Check Out Worker',
-      'Are you sure you want to check out this worker?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Check Out',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await onWorkerCheckOut(workerId);
-              Alert.alert('Success', 'Worker checked out successfully');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to check out worker. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   // Handle bulk check-in
   const handleBulkCheckIn = async () => {
     if (selectedWorkers.size === 0) {
@@ -167,29 +215,79 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
     );
   };
 
-  // Handle complete pickup
+  // Handle complete pickup or dropoff
   const handleCompletePickup = () => {
-    const uncheckedWorkers = selectedLocation.workerManifest.filter(w => !w.checkedIn);
+    if (!selectedLocation) {
+      Alert.alert('Error', 'Location not found. Please try again.');
+      setIsCompletingPickup(false);
+      return;
+    }
+
+    const uncheckedWorkers = selectedLocation.workerManifest?.filter(w => !w.checkedIn) || [];
     
-    if (uncheckedWorkers.length > 0) {
+    if (uncheckedWorkers.length > 0 && !isDropoff) {
       Alert.alert(
         'Incomplete Pickup',
         `${uncheckedWorkers.length} workers are not checked in. Complete pickup anyway?`,
         [
-          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => setIsCompletingPickup(false)
+          },
           {
             text: 'Complete Anyway',
             style: 'destructive',
-            onPress: () => {
+            onPress: async () => {
               setIsCompletingPickup(true);
-              onCompletePickup(selectedLocationId);
+              try {
+                await onCompletePickup(selectedLocationId);
+              } catch (error) {
+                console.error('Complete pickup error:', error);
+                setIsCompletingPickup(false);
+                Alert.alert('Error', 'Failed to complete pickup');
+              }
+            },
+          },
+        ]
+      );
+    } else if (uncheckedWorkers.length > 0 && isDropoff) {
+      Alert.alert(
+        'Incomplete Drop-off',
+        `${uncheckedWorkers.length} workers are not checked in. Complete drop-off anyway?`,
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => setIsCompletingPickup(false)
+          },
+          {
+            text: 'Complete Anyway',
+            style: 'destructive',
+            onPress: async () => {
+              setIsCompletingPickup(true);
+              try {
+                await onCompletePickup(selectedLocationId);
+              } catch (error) {
+                console.error('Complete drop-off error:', error);
+                setIsCompletingPickup(false);
+                Alert.alert('Error', 'Failed to complete drop-off');
+              }
             },
           },
         ]
       );
     } else {
       setIsCompletingPickup(true);
-      onCompletePickup(selectedLocationId);
+      (async () => {
+        try {
+          await onCompletePickup(selectedLocationId);
+        } catch (error) {
+          console.error('Complete error:', error);
+          setIsCompletingPickup(false);
+          Alert.alert('Error', 'Failed to complete');
+        }
+      })();
     }
   };
 
@@ -201,22 +299,30 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
     }));
   };
 
-  const checkedInCount = selectedLocation.workerManifest.filter(w => w.checkedIn).length;
-  const totalWorkers = selectedLocation.workerManifest.length;
+  const checkedInCount = selectedLocation.workerManifest?.filter(w => w.checkedIn).length || 0;
+  const totalWorkers = selectedLocation.workerManifest?.length || 0;
 
   return (
-    <ConstructionCard title={`Worker Check-In - ${selectedLocation.name}`} variant="elevated">
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ConstructionCard 
+      title={isDropoff ? `Drop-off - ${selectedLocation.name}` : `Worker Check-In - ${selectedLocation.name}`} 
+      variant="elevated"
+      style={styles.cardContainer}
+    >
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
         {/* Location Info */}
         <View style={styles.locationInfo}>
           <Text style={styles.locationName}>{selectedLocation.name}</Text>
           <Text style={styles.locationAddress}>{selectedLocation.address}</Text>
           <Text style={styles.pickupTime}>
-            📅 Pickup Time: {selectedLocation.estimatedPickupTime}
+            {isDropoff ? '📅 ETA: ' : '📅 Pickup Time: '}{selectedLocation.estimatedPickupTime}
           </Text>
           <View style={styles.progressInfo}>
             <Text style={styles.progressText}>
-              Progress: {checkedInCount}/{totalWorkers} workers checked in
+              Progress: {checkedInCount}/{totalWorkers} workers {isDropoff ? 'on board' : 'checked in'}
             </Text>
             <View style={styles.progressBar}>
               <View 
@@ -248,7 +354,8 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
         {/* Worker List */}
         <View style={styles.workerList}>
           <Text style={styles.sectionTitle}>👥 Worker Manifest</Text>
-          {selectedLocation.workerManifest.map((worker) => (
+          {selectedLocation.workerManifest && selectedLocation.workerManifest.length > 0 ? (
+            selectedLocation.workerManifest.map((worker) => (
             <ConstructionCard
               key={worker.workerId}
               variant={worker.checkedIn ? 'success' : 'outlined'}
@@ -291,15 +398,7 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
 
               {/* Action buttons */}
               <View style={styles.workerActions}>
-                {worker.checkedIn ? (
-                  <ConstructionButton
-                    title="❌ Check Out"
-                    onPress={() => handleWorkerCheckOut(worker.workerId)}
-                    variant="warning"
-                    size="small"
-                    loading={isLoading}
-                  />
-                ) : (
+                {!worker.checkedIn && (
                   <ConstructionButton
                     title="✅ Check In"
                     onPress={() => handleWorkerCheckIn(worker.workerId)}
@@ -310,23 +409,9 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
                 )}
               </View>
             </ConstructionCard>
-          ))}
-        </View>
-
-        {/* Complete Pickup Button */}
-        <View style={styles.completeSection}>
-          <ConstructionButton
-            title={`🚌 Complete Pickup (${checkedInCount}/${totalWorkers})`}
-            onPress={handleCompletePickup}
-            variant={checkedInCount === totalWorkers ? "success" : "warning"}
-            size="large"
-            fullWidth
-            loading={isCompletingPickup}
-          />
-          {checkedInCount < totalWorkers && (
-            <Text style={styles.warningText}>
-              ⚠️ {totalWorkers - checkedInCount} workers not checked in
-            </Text>
+          ))
+          ) : (
+            <Text style={styles.errorText}>No workers in manifest</Text>
           )}
         </View>
       </ScrollView>
@@ -335,8 +420,15 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
 };
 
 const styles = StyleSheet.create({
+  cardContainer: {
+    flex: 1,
+    marginBottom: ConstructionTheme.spacing.md,
+  },
   container: {
-    maxHeight: 600,
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: ConstructionTheme.spacing.xl * 2,
   },
   locationInfo: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -436,16 +528,6 @@ const styles = StyleSheet.create({
   workerActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-  },
-  completeSection: {
-    marginBottom: ConstructionTheme.spacing.lg,
-  },
-  warningText: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: ConstructionTheme.colors.warning,
-    textAlign: 'center',
-    marginTop: ConstructionTheme.spacing.sm,
-    fontWeight: 'bold',
   },
   errorText: {
     ...ConstructionTheme.typography.bodyLarge,

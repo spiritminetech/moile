@@ -22,6 +22,9 @@ interface RouteNavigationProps {
   onNavigationStart: (locationId: number) => void;
   onRouteOptimization: () => void;
   onEmergencyReroute: () => void;
+  onCompletePickup?: (locationId: number) => void;
+  onCompleteDropoff?: () => void;
+  onUpdateTaskStatus?: (status: TransportTask['status']) => void;
 }
 
 const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
@@ -30,6 +33,9 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
   onNavigationStart,
   onRouteOptimization,
   onEmergencyReroute,
+  onCompletePickup,
+  onCompleteDropoff,
+  onUpdateTaskStatus,
 }) => {
   const [selectedLocation, setSelectedLocation] = useState<number | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -140,8 +146,12 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
   };
 
   return (
-    <ConstructionCard title="Route Navigation" variant="elevated">
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.wrapper}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
         {/* Route Overview */}
         <View style={styles.routeOverview}>
           <Text style={styles.routeTitle}>Route: {transportTask.route}</Text>
@@ -229,7 +239,10 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
         {/* Drop-off Location */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🏗️ Drop-off Location</Text>
-          <ConstructionCard variant="outlined" style={styles.locationCard}>
+          <ConstructionCard 
+            variant={selectedLocation === -1 ? 'success' : 'outlined'} 
+            style={styles.locationCard}
+          >
             <View style={styles.locationHeader}>
               <Text style={styles.locationName}>
                 {transportTask.dropoffLocation.name}
@@ -249,49 +262,122 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
                 {transportTask.dropoffLocation.actualArrival && 
                   ` (Actual: ${transportTask.dropoffLocation.actualArrival})`}
               </Text>
+              <Text style={styles.workerInfo}>
+                👥 {transportTask.totalWorkers} workers
+                ({transportTask.checkedInWorkers} checked in)
+              </Text>
             </View>
 
             <View style={styles.locationActions}>
               <ConstructionButton
-                title="🧭 Navigate to Site"
+                title="🧭 Navigate"
                 onPress={() => openExternalNavigation({
                   latitude: transportTask.dropoffLocation.coordinates.latitude,
                   longitude: transportTask.dropoffLocation.coordinates.longitude,
                   name: transportTask.dropoffLocation.name,
                 })}
-                variant="success"
-                size="medium"
-                fullWidth
+                variant="primary"
+                size="small"
+                style={styles.actionButton}
+              />
+              <ConstructionButton
+                title={selectedLocation === -1 ? "✅ Selected" : "📍 Select"}
+                onPress={() => handleNavigationStart(-1)}
+                variant={selectedLocation === -1 ? "success" : "outline"}
+                size="small"
+                style={styles.actionButton}
               />
             </View>
           </ConstructionCard>
         </View>
 
-        {/* Current Status */}
-        <View style={styles.statusSection}>
-          <Text style={styles.sectionTitle}>📊 Current Status</Text>
-          <View style={styles.statusInfo}>
-            <Text style={styles.statusText}>
-              Status: <Text style={styles.statusValue}>{transportTask.status.replace('_', ' ').toUpperCase()}</Text>
-            </Text>
-            {currentLocation && (
+        {/* Current Status - Only show if NOT completed */}
+        {transportTask.status !== 'completed' && (
+          <View style={styles.statusSection}>
+            <Text style={styles.sectionTitle}>📊 Current Status</Text>
+            <View style={styles.statusInfo}>
               <Text style={styles.statusText}>
-                📍 Current Location: {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)}
+                Status: <Text style={styles.statusValue}>{transportTask.status.replace('_', ' ').toUpperCase()}</Text>
               </Text>
+              {currentLocation && (
+                <Text style={styles.statusText}>
+                  📍 Current Location: {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)}
+                </Text>
+              )}
+              <Text style={styles.statusText}>
+                🎯 GPS Accuracy: {currentLocation?.accuracy ? `${Math.round(currentLocation.accuracy)}m` : 'Unknown'}
+              </Text>
+            </View>
+
+            {/* Status Update Buttons */}
+            {onUpdateTaskStatus && (
+              <View style={styles.statusActions}>
+                {transportTask.status === 'pending' && (
+                  <ConstructionButton
+                    title="🚀 Start Trip - En Route to Pickup"
+                    onPress={() => onUpdateTaskStatus('en_route_pickup')}
+                    variant="primary"
+                    size="large"
+                    fullWidth
+                  />
+                )}
+                {transportTask.status === 'en_route_pickup' && (
+                  <ConstructionButton
+                    title="📍 Arrived at Pickup Location"
+                    onPress={() => onUpdateTaskStatus('pickup_complete')}
+                    variant="secondary"
+                    size="large"
+                    fullWidth
+                  />
+                )}
+                {transportTask.status === 'pickup_complete' && (
+                  <ConstructionButton
+                    title="🚛 En Route to Drop-off"
+                    onPress={() => onUpdateTaskStatus('en_route_dropoff')}
+                    variant="primary"
+                    size="large"
+                    fullWidth
+                  />
+                )}
+                {transportTask.status === 'en_route_dropoff' && (
+                  <ConstructionButton
+                    title="🏗️ Arrived at Drop-off Site"
+                    onPress={() => onUpdateTaskStatus('completed')}
+                    variant="success"
+                    size="large"
+                    fullWidth
+                  />
+                )}
+              </View>
             )}
-            <Text style={styles.statusText}>
-              🎯 GPS Accuracy: {currentLocation?.accuracy ? `${Math.round(currentLocation.accuracy)}m` : 'Unknown'}
-            </Text>
           </View>
-        </View>
+        )}
+
+        {/* Show completed badge if task is completed */}
+        {transportTask.status === 'completed' && (
+          <View style={styles.statusSection}>
+            <View style={styles.completedBadge}>
+              <Text style={styles.completedText}>✅ Trip Completed</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Bottom spacing for scroll */}
+        <View style={styles.bottomSpacing} />
       </ScrollView>
-    </ConstructionCard>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+  },
   container: {
-    maxHeight: 600,
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: ConstructionTheme.spacing.xl * 3,
   },
   routeOverview: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -337,13 +423,15 @@ const styles = StyleSheet.create({
   locationHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: ConstructionTheme.spacing.sm,
+    flexWrap: 'wrap',
   },
   locationName: {
     ...ConstructionTheme.typography.titleMedium,
     color: ConstructionTheme.colors.onSurface,
     flex: 1,
+    flexShrink: 1,
   },
   locationDistance: {
     ...ConstructionTheme.typography.labelLarge,
@@ -354,6 +442,7 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurfaceVariant,
     marginBottom: ConstructionTheme.spacing.sm,
+    flexWrap: 'wrap',
   },
   locationInfo: {
     marginBottom: ConstructionTheme.spacing.md,
@@ -378,19 +467,22 @@ const styles = StyleSheet.create({
   statusSection: {
     marginBottom: ConstructionTheme.spacing.lg,
   },
-  statusInfo: {
-    padding: ConstructionTheme.spacing.md,
-    backgroundColor: ConstructionTheme.colors.surfaceVariant,
-    borderRadius: ConstructionTheme.borderRadius.md,
+  completedBadgeSmall: {
+    backgroundColor: ConstructionTheme.colors.successContainer,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: ConstructionTheme.spacing.xs,
   },
-  statusText: {
-    ...ConstructionTheme.typography.bodyMedium,
-    color: ConstructionTheme.colors.onSurfaceVariant,
-    marginBottom: ConstructionTheme.spacing.xs,
-  },
-  statusValue: {
+  completedBadgeText: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onSuccessContainer,
     fontWeight: 'bold',
-    color: ConstructionTheme.colors.primary,
+  },
+  bottomSpacing: {
+    height: ConstructionTheme.spacing.xl * 2,
   },
 });
 

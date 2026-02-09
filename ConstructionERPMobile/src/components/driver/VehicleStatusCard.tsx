@@ -6,104 +6,23 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { VehicleInfo } from '../../types';
-import { ConstructionButton, ConstructionCard } from '../common';
+import { ConstructionCard } from '../common';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
 interface VehicleStatusCardProps {
   vehicle: VehicleInfo | null;
-  onLogFuel: () => void;
-  onReportIssue: () => void;
-  onViewMaintenance: () => void;
-  isOffline: boolean;
 }
 
 const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({
   vehicle,
-  onLogFuel,
-  onReportIssue,
-  onViewMaintenance,
-  isOffline,
 }) => {
   // Get fuel level color
   const getFuelLevelColor = (level: number): string => {
     if (level >= 50) return ConstructionTheme.colors.success;
     if (level >= 25) return ConstructionTheme.colors.warning;
     return ConstructionTheme.colors.error;
-  };
-
-  // Get maintenance status color
-  const getMaintenanceStatusColor = (status: 'upcoming' | 'due' | 'overdue'): string => {
-    switch (status) {
-      case 'upcoming':
-        return ConstructionTheme.colors.info;
-      case 'due':
-        return ConstructionTheme.colors.warning;
-      case 'overdue':
-        return ConstructionTheme.colors.error;
-      default:
-        return ConstructionTheme.colors.neutral;
-    }
-  };
-
-  // Get maintenance status text
-  const getMaintenanceStatusText = (status: 'upcoming' | 'due' | 'overdue'): string => {
-    switch (status) {
-      case 'upcoming':
-        return 'Upcoming';
-      case 'due':
-        return 'Due Now';
-      case 'overdue':
-        return 'Overdue';
-      default:
-        return 'Unknown';
-    }
-  };
-
-  // Handle fuel logging
-  const handleLogFuel = () => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot log fuel while offline. Please connect to internet.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    onLogFuel();
-  };
-
-  // Handle issue reporting
-  const handleReportIssue = () => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot report issues while offline. Please connect to internet.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    onReportIssue();
-  };
-
-  // Handle view maintenance
-  const handleViewMaintenance = () => {
-    onViewMaintenance();
-  };
-
-  // Format date
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
   };
 
   // Render fuel level indicator
@@ -143,85 +62,6 @@ const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({
     );
   };
 
-  // Render maintenance alerts
-  const renderMaintenanceAlerts = () => {
-    if (!vehicle || !vehicle.maintenanceSchedule || vehicle.maintenanceSchedule.length === 0) {
-      return (
-        <View style={styles.maintenanceSection}>
-          <Text style={styles.sectionTitle}>🔧 Maintenance</Text>
-          <Text style={styles.noMaintenanceText}>No scheduled maintenance</Text>
-        </View>
-      );
-    }
-
-    // Get the most urgent maintenance item
-    const urgentMaintenance = vehicle.maintenanceSchedule
-      .filter(item => item.status !== 'upcoming')
-      .sort((a, b) => {
-        if (a.status === 'overdue' && b.status !== 'overdue') return -1;
-        if (b.status === 'overdue' && a.status !== 'overdue') return 1;
-        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
-      })[0];
-
-    const upcomingCount = vehicle.maintenanceSchedule.filter(item => item.status === 'upcoming').length;
-    const dueCount = vehicle.maintenanceSchedule.filter(item => item.status === 'due').length;
-    const overdueCount = vehicle.maintenanceSchedule.filter(item => item.status === 'overdue').length;
-
-    return (
-      <View style={styles.maintenanceSection}>
-        <Text style={styles.sectionTitle}>🔧 Maintenance</Text>
-        
-        {urgentMaintenance && (
-          <View style={[
-            styles.urgentMaintenanceContainer,
-            { borderLeftColor: getMaintenanceStatusColor(urgentMaintenance.status) }
-          ]}>
-            <View style={styles.urgentMaintenanceHeader}>
-              <Text style={styles.urgentMaintenanceType}>
-                {urgentMaintenance.type.replace('_', ' ').toUpperCase()}
-              </Text>
-              <View style={[
-                styles.maintenanceStatusBadge,
-                { backgroundColor: getMaintenanceStatusColor(urgentMaintenance.status) }
-              ]}>
-                <Text style={styles.maintenanceStatusText}>
-                  {getMaintenanceStatusText(urgentMaintenance.status)}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.urgentMaintenanceDate}>
-              Due: {formatDate(urgentMaintenance.dueDate)}
-            </Text>
-            {urgentMaintenance.dueMileage && (
-              <Text style={styles.urgentMaintenanceMileage}>
-                Due at: {urgentMaintenance.dueMileage.toLocaleString()} km
-              </Text>
-            )}
-          </View>
-        )}
-
-        <View style={styles.maintenanceSummary}>
-          <View style={styles.maintenanceSummaryItem}>
-            <Text style={styles.maintenanceSummaryValue}>{upcomingCount}</Text>
-            <Text style={styles.maintenanceSummaryLabel}>Upcoming</Text>
-          </View>
-          <View style={styles.maintenanceSummaryItem}>
-            <Text style={[styles.maintenanceSummaryValue, { color: ConstructionTheme.colors.warning }]}>
-              {dueCount}
-            </Text>
-            <Text style={styles.maintenanceSummaryLabel}>Due</Text>
-          </View>
-          <View style={styles.maintenanceSummaryItem}>
-            <Text style={[styles.maintenanceSummaryValue, { color: ConstructionTheme.colors.error }]}>
-              {overdueCount}
-            </Text>
-            <Text style={styles.maintenanceSummaryLabel}>Overdue</Text>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
   // Render vehicle info
   const renderVehicleInfo = () => {
     if (!vehicle) return null;
@@ -234,50 +74,19 @@ const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({
         </View>
         <View style={styles.vehicleInfoRow}>
           <Text style={styles.vehicleInfoLabel}>Model:</Text>
-          <Text style={styles.vehicleInfoValue}>{vehicle.model} ({vehicle.year})</Text>
+          <Text style={styles.vehicleInfoValue}>
+            {vehicle.model || 'Unknown'}
+            {vehicle.year ? ` (${vehicle.year})` : ''}
+          </Text>
         </View>
         <View style={styles.vehicleInfoRow}>
           <Text style={styles.vehicleInfoLabel}>Capacity:</Text>
           <Text style={styles.vehicleInfoValue}>{vehicle.capacity} passengers</Text>
         </View>
         <View style={styles.vehicleInfoRow}>
-          <Text style={styles.vehicleInfoLabel}>Mileage:</Text>
-          <Text style={styles.vehicleInfoValue}>{vehicle.currentMileage.toLocaleString()} km</Text>
+          <Text style={styles.vehicleInfoLabel}>Fuel Type:</Text>
+          <Text style={styles.vehicleInfoValue}>{vehicle.fuelType || 'Diesel'}</Text>
         </View>
-      </View>
-    );
-  };
-
-  // Render action buttons
-  const renderActionButtons = () => {
-    return (
-      <View style={styles.actionsContainer}>
-        <ConstructionButton
-          title="Log Fuel"
-          onPress={handleLogFuel}
-          variant="primary"
-          size="medium"
-          disabled={isOffline}
-          icon="⛽"
-          style={styles.actionButton}
-        />
-        <ConstructionButton
-          title="Report Issue"
-          onPress={handleReportIssue}
-          variant="warning"
-          size="medium"
-          disabled={isOffline}
-          icon="⚠️"
-          style={styles.actionButton}
-        />
-        <ConstructionButton
-          title="Maintenance"
-          onPress={handleViewMaintenance}
-          variant="neutral"
-          size="medium"
-          icon="🔧"
-          style={styles.actionButton}
-        />
       </View>
     );
   };
@@ -308,19 +117,6 @@ const VehicleStatusCard: React.FC<VehicleStatusCardProps> = ({
 
       {/* Fuel level */}
       {renderFuelLevel()}
-
-      {/* Maintenance alerts */}
-      {renderMaintenanceAlerts()}
-
-      {/* Action buttons */}
-      {renderActionButtons()}
-
-      {/* Offline indicator */}
-      {isOffline && (
-        <View style={styles.offlineIndicator}>
-          <Text style={styles.offlineText}>⚠️ Vehicle logging requires internet connection</Text>
-        </View>
-      )}
     </ConstructionCard>
   );
 };
@@ -500,19 +296,6 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minWidth: 100,
-  },
-  offlineIndicator: {
-    marginTop: ConstructionTheme.spacing.md,
-    padding: ConstructionTheme.spacing.sm,
-    backgroundColor: ConstructionTheme.colors.warning + '20',
-    borderRadius: ConstructionTheme.borderRadius.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: ConstructionTheme.colors.warning,
-  },
-  offlineText: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: '#E65100',
-    fontWeight: '500',
   },
 });
 

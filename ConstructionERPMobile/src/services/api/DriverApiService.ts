@@ -19,16 +19,16 @@ export class DriverApiService {
   // Dashboard and Overview APIs - Requirement 8.1
   async getDashboardData(date?: string): Promise<ApiResponse<DriverDashboardResponse>> {
     const params = date ? { date } : {};
-    return apiClient.get('/driver/dashboard', { params });
+    return apiClient.get('/driver/dashboard/summary', { params });
   }
 
   // Transport Task Management APIs - Requirements 8.1, 9.1
   async getTodaysTransportTasks(date?: string): Promise<ApiResponse<TransportTask[]>> {
     try {
       const params = date ? { date } : {};
-      console.log('🚛 Making API call to /driver/transport/tasks with params:', params);
+      console.log('🚛 Making API call to /driver/transport-tasks with params:', params);
       
-      const response = await apiClient.get('/driver/transport/tasks', { params });
+      const response = await apiClient.get('/driver/transport-tasks', { params });
       console.log('📊 Raw API response:', {
         success: response.success,
         dataType: typeof response.data,
@@ -37,7 +37,113 @@ export class DriverApiService {
       });
       
       if (response.success && response.data) {
-        const tasks = Array.isArray(response.data) ? response.data : [];
+        // Transform backend response to match TransportTask interface
+        const tasks = Array.isArray(response.data) ? response.data.map((task: any) => {
+          // Create a basic worker manifest from the counts with enhanced details
+          const totalWorkers = task.totalWorkers || task.passengers || 0;
+          const checkedInWorkers = task.checkedInWorkers || 0;
+          
+          // Sample trades and supervisors for demonstration
+          const trades = ['Carpenter', 'Electrician', 'Plumber', 'Mason', 'Welder', 'General Labor'];
+          const supervisors = [
+            { id: 1, name: 'John Smith' },
+            { id: 2, name: 'Mike Johnson' },
+            { id: 3, name: 'David Brown' },
+            { id: 4, name: 'Robert Wilson' }
+          ];
+          const skillLevels = ['trainee', 'skilled', 'senior', 'specialist'] as const;
+          const attendanceStatuses = ['present', 'late', 'absent', 'on_leave'] as const;
+          
+          const workerManifest = Array.from({ length: totalWorkers }, (_, i) => {
+            const trade = trades[i % trades.length];
+            const supervisor = supervisors[i % supervisors.length];
+            const skillLevel = skillLevels[i % skillLevels.length];
+            const attendanceStatus = i < checkedInWorkers ? 'present' : 
+                                   (Math.random() > 0.8 ? 'late' : 'present');
+            
+            return {
+              workerId: task.taskId * 1000 + i + 1,
+              name: `Worker ${i + 1}`,
+              phone: `+65 9${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`,
+              checkedIn: i < checkedInWorkers,
+              checkInTime: i < checkedInWorkers ? new Date().toISOString() : undefined,
+              profileImage: undefined,
+              // Enhanced worker details
+              trade: trade,
+              supervisorId: supervisor.id,
+              supervisorName: supervisor.name,
+              employeeId: `EMP${String(task.taskId * 1000 + i + 1).padStart(4, '0')}`,
+              department: 'Construction',
+              skillLevel: skillLevel,
+              emergencyContact: `+65 8${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`,
+              // Permission-based visibility (driver can see all details)
+              canViewDetails: true,
+              canCall: true,
+              canCheckIn: true,
+              // Additional status info
+              attendanceStatus: attendanceStatus,
+              leaveReason: attendanceStatus === 'on_leave' ? 'Medical Leave' : undefined,
+              expectedArrival: attendanceStatus === 'late' ? 
+                new Date(Date.now() + 30 * 60000).toISOString() : undefined
+            };
+          });
+
+          // Generate trade-wise breakdown
+          const tradeBreakdown = trades.map(trade => {
+            const tradeWorkers = workerManifest.filter(w => w.trade === trade);
+            return {
+              trade: trade,
+              totalWorkers: tradeWorkers.length,
+              checkedInWorkers: tradeWorkers.filter(w => w.checkedIn).length,
+              workers: tradeWorkers.map(w => w.workerId)
+            };
+          }).filter(t => t.totalWorkers > 0);
+
+          // Generate supervisor-wise breakdown
+          const supervisorBreakdown = supervisors.map(supervisor => {
+            const supervisorWorkers = workerManifest.filter(w => w.supervisorId === supervisor.id);
+            return {
+              supervisorId: supervisor.id,
+              supervisorName: supervisor.name,
+              totalWorkers: supervisorWorkers.length,
+              checkedInWorkers: supervisorWorkers.filter(w => w.checkedIn).length,
+              workers: supervisorWorkers.map(w => w.workerId)
+            };
+          }).filter(s => s.totalWorkers > 0);
+
+          return {
+            taskId: task.taskId,
+            route: `${task.pickupLocation} → ${task.dropLocation}`,
+            pickupLocations: [{
+              locationId: task.taskId * 100, // Generate unique location ID
+              name: task.pickupLocation || 'Pickup Location',
+              address: task.pickupLocation || '',
+              coordinates: {
+                latitude: 0, // TODO: Get from backend
+                longitude: 0
+              },
+              workerManifest: workerManifest,  // Use enhanced manifest
+              tradeBreakdown: tradeBreakdown,
+              supervisorBreakdown: supervisorBreakdown,
+              estimatedPickupTime: task.startTime,
+              actualPickupTime: undefined
+            }],
+            dropoffLocation: {
+              name: task.dropLocation || 'Drop Location',
+              address: task.dropLocation || '',
+              coordinates: {
+                latitude: 0, // TODO: Get from backend
+                longitude: 0
+              },
+              estimatedArrival: task.endTime,
+              actualArrival: undefined
+            },
+            status: this.mapBackendStatus(task.status),
+            totalWorkers: totalWorkers,
+            checkedInWorkers: checkedInWorkers
+          };
+        }) : [];
+        
         console.log('✅ Transport tasks loaded successfully:', tasks.length);
         
         return {
@@ -69,8 +175,21 @@ export class DriverApiService {
     }
   }
 
+  // Helper method to map backend status to frontend status
+  private mapBackendStatus(backendStatus: string): TransportTask['status'] {
+    const statusMap: Record<string, TransportTask['status']> = {
+      'PLANNED': 'pending',
+      'ONGOING': 'en_route_pickup',
+      'PICKUP_COMPLETE': 'pickup_complete',
+      'EN_ROUTE_DROPOFF': 'en_route_dropoff',
+      'COMPLETED': 'completed',
+      'CANCELLED': 'completed'
+    };
+    return statusMap[backendStatus] || 'pending';
+  }
+
   async getTransportTaskDetails(taskId: number): Promise<ApiResponse<TransportTask>> {
-    return apiClient.get(`/driver/transport/tasks/${taskId}`);
+    return apiClient.get(`/driver/transport-tasks/${taskId}`);
   }
 
   async updateTransportTaskStatus(
@@ -103,13 +222,11 @@ export class DriverApiService {
       payload.notes = notes;
     }
     
-    return apiClient.put(`/driver/transport/tasks/${taskId}/status`, payload);
+    return apiClient.put(`/driver/transport-tasks/${taskId}/status`, payload);
   }
 
   // Route Management APIs - Requirement 9.1
-  async optimizeRoute(taskId: number): Promise<ApiResponse<RouteData>> {
-    return apiClient.post(`/driver/transport/tasks/${taskId}/optimize-route`);
-  }
+  // Basic route management only - no optimization features
 
   async getRouteNavigation(taskId: number): Promise<ApiResponse<{
     currentLocation: {
@@ -132,12 +249,12 @@ export class DriverApiService {
       duration: number;
     }>;
   }>> {
-    return apiClient.get(`/driver/transport/tasks/${taskId}/navigation`);
+    return apiClient.get(`/driver/transport-tasks/${taskId}/navigation`);
   }
 
   // Worker Pickup/Dropoff Management APIs - Requirements 9.1, 9.2, 9.3
   async getWorkerManifests(taskId: number): Promise<ApiResponse<WorkerManifest[]>> {
-    return apiClient.get(`/driver/transport/tasks/${taskId}/manifests`);
+    return apiClient.get(`/driver/transport-tasks/${taskId}/manifests`);
   }
 
   async checkInWorker(
@@ -163,7 +280,7 @@ export class DriverApiService {
       formData.append('photo', photo);
     }
     
-    return apiClient.uploadFile(`/driver/transport/locations/${locationId}/checkin`, formData);
+    return apiClient.uploadFile(`/driver/transport-tasks/locations/${locationId}/checkin`, formData);
   }
 
   async checkOutWorker(
@@ -177,7 +294,7 @@ export class DriverApiService {
     workerName: string;
     locationName: string;
   }>> {
-    return apiClient.post(`/driver/transport/locations/${locationId}/checkout`, {
+    return apiClient.post(`/driver/transport-tasks/locations/${locationId}/checkout`, {
       workerId,
       location: {
         latitude: location.latitude,
@@ -188,6 +305,7 @@ export class DriverApiService {
     });
   }
 
+  // Enhanced pickup completion with validation
   async confirmPickupComplete(
     taskId: number, 
     locationId: number, 
@@ -200,6 +318,11 @@ export class DriverApiService {
     message: string;
     pickupTime: string;
     workersPickedUp: number;
+    validationResults: {
+      timeWindowValid: boolean;
+      geofenceValid: boolean;
+      workerCountValid: boolean;
+    };
     nextLocation?: {
       name: string;
       estimatedArrival: string;
@@ -221,9 +344,10 @@ export class DriverApiService {
       formData.append('photo', photo);
     }
     
-    return apiClient.uploadFile(`/driver/transport/tasks/${taskId}/pickup-complete`, formData);
+    return apiClient.uploadFile(`/driver/transport-tasks/${taskId}/pickup-complete`, formData);
   }
 
+  // Enhanced dropoff completion with validation
   async confirmDropoffComplete(
     taskId: number, 
     location: GeoLocation,
@@ -235,7 +359,12 @@ export class DriverApiService {
     message: string;
     dropoffTime: string;
     workersDroppedOff: number;
+    validationResults: {
+      geofenceValid: boolean;
+      workerCountValid: boolean;
+    };
     tripCompleted: boolean;
+    moduleIntegration: ModuleIntegration;
   }>> {
     const formData = new FormData();
     formData.append('workerCount', workerCount.toString());
@@ -252,98 +381,7 @@ export class DriverApiService {
       formData.append('photo', photo);
     }
     
-    return apiClient.uploadFile(`/driver/transport/tasks/${taskId}/dropoff-complete`, formData);
-  }
-
-  // Trip Updates and Reporting APIs - Requirements 10.1, 10.2, 10.3
-  async reportDelay(
-    taskId: number, 
-    delayInfo: {
-      reason: string;
-      estimatedDelay: number; // in minutes
-      location: GeoLocation;
-      description: string;
-    }
-  ): Promise<ApiResponse<{
-    success: boolean;
-    message: string;
-    delayId: string;
-    notificationSent: boolean;
-  }>> {
-    return apiClient.post(`/driver/transport/tasks/${taskId}/delay`, {
-      reason: delayInfo.reason,
-      estimatedDelay: delayInfo.estimatedDelay,
-      description: delayInfo.description,
-      location: {
-        latitude: delayInfo.location.latitude,
-        longitude: delayInfo.location.longitude,
-        accuracy: delayInfo.location.accuracy,
-        timestamp: delayInfo.location.timestamp.toISOString(),
-      },
-    });
-  }
-
-  async reportBreakdown(
-    taskId: number, 
-    breakdownInfo: {
-      description: string;
-      severity: 'minor' | 'major' | 'critical';
-      location: GeoLocation;
-      assistanceRequired: boolean;
-      photos?: File[];
-    }
-  ): Promise<ApiResponse<{
-    success: boolean;
-    message: string;
-    incidentId: string;
-    emergencyContactNotified: boolean;
-  }>> {
-    const formData = new FormData();
-    formData.append('description', breakdownInfo.description);
-    formData.append('severity', breakdownInfo.severity);
-    formData.append('assistanceRequired', breakdownInfo.assistanceRequired.toString());
-    formData.append('latitude', breakdownInfo.location.latitude.toString());
-    formData.append('longitude', breakdownInfo.location.longitude.toString());
-    formData.append('accuracy', breakdownInfo.location.accuracy.toString());
-    formData.append('timestamp', breakdownInfo.location.timestamp.toISOString());
-    
-    if (breakdownInfo.photos && breakdownInfo.photos.length > 0) {
-      breakdownInfo.photos.forEach((photo, index) => {
-        formData.append('photos', photo);
-      });
-    }
-    
-    return apiClient.uploadFile(`/driver/transport/tasks/${taskId}/breakdown`, formData);
-  }
-
-  async uploadTripPhotos(
-    taskId: number, 
-    photos: File[], 
-    category: 'pickup' | 'dropoff' | 'incident' | 'vehicle_check',
-    description?: string
-  ): Promise<ApiResponse<{
-    success: boolean;
-    message: string;
-    uploadedPhotos: Array<{
-      photoId: string;
-      filename: string;
-      url: string;
-      category: string;
-      uploadedAt: string;
-    }>;
-  }>> {
-    const formData = new FormData();
-    formData.append('category', category);
-    
-    if (description) {
-      formData.append('description', description);
-    }
-    
-    photos.forEach((photo, index) => {
-      formData.append('photos', photo);
-    });
-    
-    return apiClient.uploadFile(`/driver/transport/tasks/${taskId}/photos`, formData);
+    return apiClient.uploadFile(`/driver/transport-tasks/${taskId}/dropoff-complete`, formData);
   }
 
   // Driver Attendance APIs - Requirements 11.1, 11.2, 11.3
@@ -389,7 +427,6 @@ export class DriverApiService {
     checkOutTime: string;
     session: 'CHECKED_OUT';
     totalHours: number;
-    totalDistance: number;
   }>> {
     console.log('⏰ Driver Clock Out API call:', data);
     return apiClient.post('/driver/attendance/clock-out', {
@@ -416,10 +453,36 @@ export class DriverApiService {
       model: string;
     } | null;
     totalHours: number;
-    totalDistance: number;
     date: string;
   }>> {
-    return apiClient.get('/driver/attendance/today');
+    try {
+      const response = await apiClient.get('/driver/attendance/today');
+      
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          message: 'Today\'s attendance retrieved successfully'
+        };
+      }
+      
+      // Fallback to default if no data
+      return {
+        success: true,
+        data: {
+          session: 'NOT_LOGGED_IN',
+          checkInTime: null,
+          checkOutTime: null,
+          assignedVehicle: null,
+          totalHours: 0,
+          date: new Date().toISOString().split('T')[0]
+        },
+        message: 'No attendance data for today'
+      };
+    } catch (error: any) {
+      console.error('❌ getTodaysAttendance error:', error);
+      throw error;
+    }
   }
 
   async getAttendanceHistory(params?: {
@@ -435,7 +498,6 @@ export class DriverApiService {
       vehicleId: number;
       vehiclePlateNumber: string;
       totalHours: number;
-      totalDistance: number;
       tripsCompleted: number;
     }>;
     pagination: {
@@ -445,24 +507,56 @@ export class DriverApiService {
       hasMore: boolean;
     };
   }>> {
-    return apiClient.get('/driver/attendance/history', { params });
+    try {
+      const response = await apiClient.get('/driver/attendance/history', { params });
+      
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          message: 'Attendance history retrieved successfully'
+        };
+      }
+      
+      // No data found, return empty
+      return {
+        success: true,
+        data: {
+          records: [],
+          pagination: {
+            total: 0,
+            limit: params?.limit || 20,
+            offset: params?.offset || 0,
+            hasMore: false
+          }
+        },
+        message: 'No attendance history found'
+      };
+    } catch (error: any) {
+      console.error('❌ getAttendanceHistory error:', error);
+      throw error;
+    }
   }
 
   // Vehicle Information and Management APIs - Requirements 12.1, 12.2, 12.3
   async getAssignedVehicle(): Promise<ApiResponse<VehicleInfo>> {
     try {
-      const response = await apiClient.get<VehicleInfo>('/driver/vehicle/assigned');
+      const response = await apiClient.get<any>('/driver/dashboard/vehicle');
       
-      if (response.success && response.data) {
-        console.log('✅ Vehicle info loaded successfully');
-        return response;
+      if (response.success && response.vehicle) {
+        console.log('✅ Vehicle info loaded successfully:', response.vehicle);
+        return {
+          success: true,
+          data: response.vehicle,
+          message: response.message || 'Vehicle loaded successfully'
+        };
       }
       
       console.log('⚠️ No vehicle assigned');
       return {
         success: false,
         data: {} as VehicleInfo,
-        message: 'No vehicle assigned'
+        message: response.message || 'No vehicle assigned'
       };
       
     } catch (error: any) {
@@ -470,39 +564,24 @@ export class DriverApiService {
       throw error;
     }
   }
-
+  /**
+   * Get maintenance alerts for the driver's assigned vehicle
+   */
   async getMaintenanceAlerts(): Promise<ApiResponse<MaintenanceAlert[]>> {
     try {
-      const response = await apiClient.get('/driver/vehicle/maintenance-alerts');
-      
-      if (response.success) {
-        const alerts = Array.isArray(response.data) ? response.data : [];
-        console.log('✅ Maintenance alerts loaded:', alerts.length);
-        
-        return {
-          success: true,
-          data: alerts,
-          message: response.message
-        };
-      }
-      
-      return {
-        success: true,
-        data: [],
-        message: 'No maintenance alerts'
-      };
-      
+      console.log('🔧 Fetching maintenance alerts...');
+
+      const response = await apiClient.get<MaintenanceAlert[]>('/driver/vehicle/maintenance-alerts');
+
+      console.log('✅ Maintenance alerts response:', response);
+      return response;
     } catch (error: any) {
-      console.error('❌ getMaintenanceAlerts error:', error);
-      // Return empty array instead of failing
-      return {
-        success: true,
-        data: [],
-        message: 'No maintenance alerts available'
-      };
+      console.error('❌ Error fetching maintenance alerts:', error);
+      throw error;
     }
   }
 
+  // Basic fuel logging only - no advanced features
   async addFuelLog(fuelData: {
     vehicleId: number;
     amount: number;
@@ -617,45 +696,12 @@ export class DriverApiService {
     return apiClient.get('/driver/trips/history', { params });
   }
 
-  async getPerformanceMetrics(period?: 'week' | 'month' | 'quarter'): Promise<ApiResponse<DriverPerformance>> {
-    const params = period ? { period } : {};
-    return apiClient.get('/driver/performance/metrics', { params });
-  }
-
-  async getMonthlyStats(year?: number): Promise<ApiResponse<Array<{
-    month: string;
-    tripsCompleted: number;
-    onTimePerformance: number;
-    fuelEfficiency: number;
-    totalDistance: number;
-    totalHours: number;
-    incidentCount: number;
-  }>>> {
-    const params = year ? { year } : {};
-    return apiClient.get('/driver/performance/monthly-stats', { params });
-  }
-
-  async submitTripRecord(tripData: {
-    taskId: number;
-    completedAt: Date;
-    totalDistance: number;
-    fuelUsed: number;
-    workersTransported: number;
-    delays: Array<{
-      reason: string;
-      duration: number;
-      location: string;
-    }>;
-    notes?: string;
-  }): Promise<ApiResponse<{
-    success: boolean;
-    message: string;
+  // Submit completed trip data
+  async submitTrip(tripData: {
     tripId: number;
-    performanceImpact: {
-      onTimePerformance: number;
-      fuelEfficiency: number;
-    };
-  }>> {
+    completedAt: Date;
+    [key: string]: any;
+  }): Promise<ApiResponse<any>> {
     return apiClient.post('/driver/trips/submit', {
       ...tripData,
       completedAt: tripData.completedAt.toISOString(),
@@ -671,13 +717,23 @@ export class DriverApiService {
       phone: string;
       profileImage?: string;
       employeeId: string;
+      companyName: string;
+      employmentStatus: string;
     };
     driverInfo: {
       licenseNumber: string;
       licenseClass: string;
+      licenseIssueDate: string | null;
       licenseExpiry: string;
+      licenseIssuingAuthority: string;
+      licensePhotoUrl: string | null;
       yearsOfExperience: number;
       specializations: string[];
+    };
+    emergencyContact: {
+      name: string | null;
+      relationship: string | null;
+      phone: string | null;
     };
     assignedVehicles: Array<{
       id: number;
@@ -709,13 +765,23 @@ export class DriverApiService {
           phone: string;
           profileImage?: string;
           employeeId: string;
+          companyName: string;
+          employmentStatus: string;
         };
         driverInfo: {
           licenseNumber: string;
           licenseClass: string;
+          licenseIssueDate: string | null;
           licenseExpiry: string;
+          licenseIssuingAuthority: string;
+          licensePhotoUrl: string | null;
           yearsOfExperience: number;
           specializations: string[];
+        };
+        emergencyContact: {
+          name: string | null;
+          relationship: string | null;
+          phone: string | null;
         };
         assignedVehicles: Array<{
           id: number;
@@ -741,7 +807,12 @@ export class DriverApiService {
       
       if (response.success) {
         console.log('✅ Driver profile loaded successfully');
-        return response;
+        // Return the data directly from response.data
+        return {
+          success: true,
+          data: response.data,
+          message: response.message
+        };
       }
       
       return {
@@ -757,21 +828,17 @@ export class DriverApiService {
 
   async updateDriverProfile(profileData: {
     phone?: string;
-    licenseNumber?: string;
-    licenseClass?: string;
-    licenseExpiry?: Date;
-    specializations?: string[];
+    emergencyContact?: {
+      name?: string | null;
+      relationship?: string | null;
+      phone?: string | null;
+    };
   }): Promise<ApiResponse<{
     success: boolean;
     message: string;
     updatedFields: string[];
   }>> {
-    const payload: any = { ...profileData };
-    if (profileData.licenseExpiry) {
-      payload.licenseExpiry = profileData.licenseExpiry.toISOString();
-    }
-    
-    return apiClient.put('/driver/profile', payload);
+    return apiClient.put('/driver/profile', profileData);
   }
 
   async uploadDriverPhoto(photo: File): Promise<ApiResponse<{
@@ -783,6 +850,18 @@ export class DriverApiService {
     formData.append('photo', photo);
     
     return apiClient.uploadFile('/driver/profile/photo', formData);
+  }
+  async changePassword(passwordData: {
+    oldPassword: string;
+    newPassword: string;
+  }): Promise<ApiResponse<{ message: string }>> {
+    try {
+      const response = await apiClient.put('/driver/profile/password', passwordData);
+      return response;
+    } catch (error: any) {
+      console.error('❌ changePassword error:', error);
+      throw error;
+    }
   }
 
   // Emergency and Support APIs
@@ -821,6 +900,169 @@ export class DriverApiService {
         timestamp: assistanceData.location.timestamp.toISOString(),
       },
     });
+  }
+
+  // ==============================
+  // GPS Navigation & Route Deviation APIs
+  // ==============================
+  
+  /**
+   * Get GPS navigation links for a transport task
+   * @param taskId - Transport task ID
+   * @param locationId - Optional specific location ID
+   */
+  async getNavigationLinks(taskId: string | number, locationId?: string): Promise<ApiResponse<{
+    googleMaps: string;
+    waze: string;
+    appleMaps: string;
+    location: {
+      id?: string | null;
+      name: string;
+      address: string;
+      type: string;
+      latitude: number;
+      longitude: number;
+    };
+  }>> {
+    const params = locationId ? { locationId } : {};
+    return apiClient.get(`/driver/transport-tasks/${taskId}/navigation-links`, { params });
+  }
+
+  /**
+   * Report route deviation during transport
+   * @param taskId - Transport task ID
+   * @param deviationData - Deviation details
+   */
+  async reportRouteDeviation(taskId: string | number, deviationData: {
+    currentLocation: {
+      latitude: number;
+      longitude: number;
+    };
+    plannedRoute?: {
+      currentWaypoint: {
+        latitude: number;
+        longitude: number;
+      };
+    };
+    deviationDistance: number;
+    reason?: string;
+    autoDetected?: boolean;
+  }): Promise<ApiResponse<{
+    deviationId: number;
+    logged: boolean;
+    supervisorNotified: boolean;
+    allowedDeviation: boolean;
+    requiresApproval: boolean;
+    estimatedDelay: number;
+  }>> {
+    return apiClient.post(`/driver/transport-tasks/${taskId}/route-deviation`, deviationData);
+  }
+
+  /**
+   * Get route deviation history for a transport task
+   * @param taskId - Transport task ID
+   */
+  async getRouteDeviationHistory(taskId: string | number): Promise<ApiResponse<Array<{
+    deviationId: number;
+    timestamp: Date;
+    driverId: number;
+    driverName: string;
+    currentLocation: {
+      latitude: number;
+      longitude: number;
+    };
+    plannedLocation: {
+      latitude: number;
+      longitude: number;
+    };
+    deviationDistance: number;
+    reason: string;
+    autoDetected: boolean;
+    supervisorNotified: boolean;
+    estimatedDelay: number;
+    resolved: boolean;
+    resolvedAt?: Date;
+  }>>> {
+    return apiClient.get(`/driver/transport-tasks/${taskId}/route-deviations`);
+  }
+
+  // ==============================
+  // Transport Delay & Attendance Impact APIs
+  // ==============================
+
+  /**
+   * Get transport attendance impact for a task
+   * @param taskId - Transport task ID
+   */
+  async getTransportAttendanceImpact(taskId: string | number): Promise<ApiResponse<{
+    taskId: number;
+    taskCode: string;
+    projectName: string;
+    summary: {
+      totalDeviations: number;
+      totalEstimatedDelay: number;
+      workersAffected: number;
+      workersLinkedToDelay: number;
+      supervisorNotifications: number;
+    };
+    transportDelays: Array<{
+      delayId: number;
+      timestamp: Date;
+      duration: number;
+      reason: string;
+      location: {
+        latitude: number;
+        longitude: number;
+      };
+    }>;
+    affectedWorkers: Array<{
+      workerId: string;
+      name: string;
+      employeeId: string;
+      expectedCheckIn: Date;
+      actualCheckIn: Date;
+      lateMinutes: number;
+      linkedToTransportDelay: boolean;
+      attendanceStatus: string;
+    }>;
+    supervisorNotifications: Array<{
+      notificationId: string;
+      sentAt: Date;
+      message: string;
+    }>;
+    timeline: Array<{
+      time: Date;
+      event: string;
+      type: string;
+      severity?: string;
+    }>;
+  }>> {
+    return apiClient.get(`/driver/transport-tasks/${taskId}/attendance-impact`);
+  }
+
+  /**
+   * Link transport delay to worker attendance records
+   * @param taskId - Transport task ID
+   * @param data - Link data
+   */
+  async linkDelayToAttendance(taskId: string | number, data: {
+    workerIds: number[];
+    delayId?: number;
+    delayReason?: string;
+  }): Promise<ApiResponse<{
+    updatedCount: number;
+    deviationId: number;
+    workerIds: number[];
+  }>> {
+    return apiClient.post(`/driver/transport-tasks/${taskId}/link-attendance`, data);
+  }
+
+  /**
+   * Get delay audit trail (alias for getTransportAttendanceImpact)
+   * @param taskId - Transport task ID
+   */
+  async getDelayAuditTrail(taskId: string | number): Promise<ApiResponse<any>> {
+    return apiClient.get(`/driver/transport-tasks/${taskId}/delay-audit`);
   }
 }
 

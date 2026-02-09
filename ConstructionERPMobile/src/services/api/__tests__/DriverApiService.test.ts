@@ -217,7 +217,7 @@ describe('DriverApiService', () => {
 
       const result = await driverApiService.getAssignedVehicle();
 
-      expect(mockedApiClient.get).toHaveBeenCalledWith('/driver/vehicle/assigned');
+      expect(mockedApiClient.get).toHaveBeenCalledWith('/driver/vehicle');
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockVehicle);
     });

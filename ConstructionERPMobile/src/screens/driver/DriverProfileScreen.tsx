@@ -36,13 +36,23 @@ interface DriverProfileData {
     phone: string;
     profileImage?: string;
     employeeId: string;
+    companyName: string;
+    employmentStatus: string;
   };
   driverInfo: {
     licenseNumber: string;
     licenseClass: string;
+    licenseIssueDate: string | null;
     licenseExpiry: string;
+    licenseIssuingAuthority: string;
+    licensePhotoUrl: string | null;
     yearsOfExperience: number;
     specializations: string[];
+  };
+  emergencyContact: {
+    name: string | null;
+    relationship: string | null;
+    phone: string | null;
   };
   assignedVehicles: Array<{
     id: number;
@@ -200,6 +210,127 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
     );
   };
 
+  // Handle edit phone
+  const handleEditPhone = () => {
+    Alert.prompt(
+      'Update Phone Number',
+      'Enter your new phone number',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async (newPhone) => {
+            if (newPhone && newPhone.trim()) {
+              try {
+                const response = await driverApiService.updateDriverProfile({
+                  phone: newPhone.trim()
+                });
+                
+                if (response.success) {
+                  Alert.alert('Success', 'Phone number updated successfully');
+                  loadProfileData(); // Reload profile
+                } else {
+                  Alert.alert('Error', response.message || 'Failed to update phone number');
+                }
+              } catch (error: any) {
+                Alert.alert('Error', error.message || 'Failed to update phone number');
+              }
+            }
+          }
+        }
+      ],
+      'plain-text',
+      profileData?.user.phone || ''
+    );
+  };
+
+  // Handle edit emergency contact
+  const handleEditEmergencyContact = () => {
+    // For simplicity, we'll use a series of prompts
+    // In production, you'd want a proper modal form
+    Alert.alert(
+      'Update Emergency Contact',
+      'This will open a form to update emergency contact details',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: () => {
+            // Navigate to emergency contact edit screen
+            // For now, show a simple prompt
+            Alert.prompt(
+              'Emergency Contact Name',
+              'Enter emergency contact name',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Next',
+                  onPress: async (name) => {
+                    Alert.prompt(
+                      'Emergency Contact Phone',
+                      'Enter emergency contact phone',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Update',
+                          onPress: async (phone) => {
+                            try {
+                              const response = await driverApiService.updateDriverProfile({
+                                emergencyContact: {
+                                  name: name?.trim() || null,
+                                  relationship: profileData?.emergencyContact?.relationship || null,
+                                  phone: phone?.trim() || null
+                                }
+                              });
+                              
+                              if (response.success) {
+                                Alert.alert('Success', 'Emergency contact updated successfully');
+                                loadProfileData();
+                              } else {
+                                Alert.alert('Error', response.message || 'Failed to update emergency contact');
+                              }
+                            } catch (error: any) {
+                              Alert.alert('Error', error.message || 'Failed to update emergency contact');
+                            }
+                          }
+                        }
+                      ],
+                      'plain-text',
+                      profileData?.emergencyContact?.phone || ''
+                    );
+                  }
+                }
+              ],
+              'plain-text',
+              profileData?.emergencyContact?.name || ''
+            );
+          }
+        }
+      ]
+    );
+  };
+
+  // Handle view license
+  const handleViewLicense = () => {
+    if (profileData?.driverInfo.licensePhotoUrl) {
+      // Navigate to image viewer or open in modal
+      Alert.alert(
+        'License Document',
+        'License document viewer',
+        [
+          { text: 'Close', style: 'cancel' },
+          {
+            text: 'View',
+            onPress: () => {
+              // In production, open image viewer modal
+              console.log('View license:', profileData.driverInfo.licensePhotoUrl);
+            }
+          }
+        ]
+      );
+    }
+  };
+
   // Utility functions
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -305,7 +436,26 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
               <Text style={styles.profileName}>{profileData.user.name}</Text>
               <Text style={styles.profileDetail}>ID: {profileData.user.employeeId}</Text>
               <Text style={styles.profileDetail}>Driver</Text>
+              <View style={[
+                styles.statusBadge,
+                { 
+                  backgroundColor: profileData.user.employmentStatus === 'ACTIVE' 
+                    ? ConstructionTheme.colors.success 
+                    : profileData.user.employmentStatus === 'LEFT'
+                    ? ConstructionTheme.colors.error
+                    : ConstructionTheme.colors.warning
+                }
+              ]}>
+                <Text style={styles.statusText}>
+                  {profileData.user.employmentStatus}
+                </Text>
+              </View>
             </View>
+          </View>
+          
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>🏢 Company:</Text>
+            <Text style={styles.infoValue}>{profileData.user.companyName}</Text>
           </View>
           
           <View style={styles.infoRow}>
@@ -315,7 +465,15 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
           
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>📱 Phone:</Text>
-            <Text style={styles.infoValue}>{profileData.user.phone}</Text>
+            <View style={styles.editableFieldContainer}>
+              <Text style={styles.infoValue}>{profileData.user.phone}</Text>
+              <TouchableOpacity 
+                style={styles.editButton}
+                onPress={() => handleEditPhone()}
+              >
+                <Text style={styles.editButtonText}>✏️ Edit</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ConstructionCard>
       </View>
@@ -327,6 +485,7 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
 
     const licenseExpiry = new Date(profileData.driverInfo.licenseExpiry);
     const isExpiringSoon = licenseExpiry.getTime() - new Date().getTime() < 30 * 24 * 60 * 60 * 1000; // 30 days
+    const isExpired = licenseExpiry < new Date();
 
     return (
       <View style={styles.section}>
@@ -341,14 +500,31 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
             <Text style={styles.infoLabel}>License Class:</Text>
             <Text style={styles.infoValue}>{profileData.driverInfo.licenseClass}</Text>
           </View>
+
+          {profileData.driverInfo.licenseIssuingAuthority && profileData.driverInfo.licenseIssuingAuthority !== 'N/A' && (
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Issuing Authority:</Text>
+              <Text style={styles.infoValue}>{profileData.driverInfo.licenseIssuingAuthority}</Text>
+            </View>
+          )}
+
+          {profileData.driverInfo.licenseIssueDate && (
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Issue Date:</Text>
+              <Text style={styles.infoValue}>{formatDate(profileData.driverInfo.licenseIssueDate)}</Text>
+            </View>
+          )}
           
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>License Expiry:</Text>
             <Text style={[
               styles.infoValue,
-              isExpiringSoon && styles.warningText
+              isExpired && styles.expiredText,
+              isExpiringSoon && !isExpired && styles.warningText
             ]}>
               {formatDate(profileData.driverInfo.licenseExpiry)}
+              {isExpired && ' (EXPIRED)'}
+              {isExpiringSoon && !isExpired && ' (Expiring Soon)'}
             </Text>
           </View>
           
@@ -358,6 +534,16 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
               {profileData.driverInfo.yearsOfExperience} years
             </Text>
           </View>
+
+          {/* License Document View Button */}
+          {profileData.driverInfo.licensePhotoUrl && (
+            <TouchableOpacity 
+              style={styles.viewLicenseButton}
+              onPress={() => handleViewLicense()}
+            >
+              <Text style={styles.viewLicenseButtonText}>📄 View License Document</Text>
+            </TouchableOpacity>
+          )}
           
           {profileData.driverInfo.specializations.length > 0 && (
             <View style={styles.specializationsContainer}>
@@ -401,6 +587,64 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
             <Text style={styles.vehicleModel}>{vehicle.model}</Text>
           </ConstructionCard>
         ))}
+      </View>
+    );
+  };
+
+  const renderEmergencyContact = () => {
+    if (!profileData?.emergencyContact) return null;
+
+    const hasEmergencyContact = profileData.emergencyContact.name || 
+                                 profileData.emergencyContact.phone;
+
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🚨 Emergency Contact</Text>
+        <ConstructionCard variant="outlined" style={styles.card}>
+          {hasEmergencyContact ? (
+            <>
+              {profileData.emergencyContact.name && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Name:</Text>
+                  <Text style={styles.infoValue}>{profileData.emergencyContact.name}</Text>
+                </View>
+              )}
+              
+              {profileData.emergencyContact.relationship && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Relationship:</Text>
+                  <Text style={styles.infoValue}>{profileData.emergencyContact.relationship}</Text>
+                </View>
+              )}
+              
+              {profileData.emergencyContact.phone && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Phone:</Text>
+                  <View style={styles.editableFieldContainer}>
+                    <Text style={styles.infoValue}>{profileData.emergencyContact.phone}</Text>
+                    <TouchableOpacity 
+                      style={styles.editButton}
+                      onPress={() => handleEditEmergencyContact()}
+                    >
+                      <Text style={styles.editButtonText}>✏️ Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.emptyStateContainer}>
+              <Text style={styles.emptyStateText}>No emergency contact set</Text>
+              <ConstructionButton
+                title="Add Emergency Contact"
+                onPress={() => handleEditEmergencyContact()}
+                variant="secondary"
+                size="small"
+                style={styles.addButton}
+              />
+            </View>
+          )}
+        </ConstructionCard>
       </View>
     );
   };
@@ -613,6 +857,7 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
       >
         {renderCertificationAlerts()}
         {renderPersonalInfo()}
+        {renderEmergencyContact()}
         {renderDriverInfo()}
         {renderVehicleAssignments()}
         {renderPerformanceMetrics()}
@@ -921,6 +1166,49 @@ const styles = StyleSheet.create({
   },
   bottomSpacing: {
     height: ConstructionTheme.spacing.xl,
+  },
+  editableFieldContainer: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  editButton: {
+    marginLeft: ConstructionTheme.spacing.sm,
+    backgroundColor: ConstructionTheme.colors.primary + '20',
+    paddingHorizontal: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  editButtonText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
+  },
+  viewLicenseButton: {
+    marginTop: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.primary,
+    paddingVertical: ConstructionTheme.spacing.md,
+    paddingHorizontal: ConstructionTheme.spacing.lg,
+    borderRadius: ConstructionTheme.borderRadius.md,
+    alignItems: 'center',
+  },
+  viewLicenseButtonText: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    paddingVertical: ConstructionTheme.spacing.lg,
+  },
+  emptyStateText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  addButton: {
+    marginTop: ConstructionTheme.spacing.sm,
   },
 });
 

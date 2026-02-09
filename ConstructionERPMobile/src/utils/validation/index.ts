@@ -47,6 +47,89 @@ export const validateGPSAccuracy = (accuracy: number, requiredAccuracy: number):
   return accuracy <= requiredAccuracy;
 };
 
+// Time window validation for pickup/dropoff operations
+export const validateTimeWindow = (
+  currentTime: Date,
+  scheduledTime: Date,
+  windowMinutes: number = 30
+): { isValid: boolean; message?: string } => {
+  const timeDiff = Math.abs(currentTime.getTime() - scheduledTime.getTime()) / (1000 * 60);
+  
+  if (timeDiff <= windowMinutes) {
+    return { isValid: true };
+  }
+  
+  const isEarly = currentTime.getTime() < scheduledTime.getTime();
+  return {
+    isValid: false,
+    message: isEarly 
+      ? `Too early. Pickup allowed ${windowMinutes} minutes before scheduled time.`
+      : `Too late. Pickup window expired ${Math.floor(timeDiff - windowMinutes)} minutes ago.`
+  };
+};
+
+// Geofence validation for specific locations
+export const validateGeofence = (
+  currentLocation: { latitude: number; longitude: number },
+  targetLocation: { latitude: number; longitude: number; radius: number },
+  locationName: string
+): { isValid: boolean; distance?: number; message?: string } => {
+  const distance = calculateDistance(
+    currentLocation.latitude,
+    currentLocation.longitude,
+    targetLocation.latitude,
+    targetLocation.longitude
+  );
+  
+  if (distance <= targetLocation.radius) {
+    return { isValid: true, distance };
+  }
+  
+  return {
+    isValid: false,
+    distance,
+    message: `You are ${Math.round(distance)}m away from ${locationName}. Must be within ${targetLocation.radius}m.`
+  };
+};
+
+// Calculate distance between two GPS coordinates (Haversine formula)
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371000; // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+// Grace period validation for attendance
+export const calculateGracePeriod = (
+  delayMinutes: number,
+  delayReason: string
+): { gracePeriodMinutes: number; autoApproved: boolean; requiresApproval: boolean } => {
+  const gracePeriodRules = {
+    'traffic': { base: 15, max: 30, autoApprove: true },
+    'weather': { base: 20, max: 45, autoApprove: true },
+    'vehicle': { base: 30, max: 60, autoApprove: false },
+    'accident': { base: 60, max: 120, autoApprove: false },
+    'road_closure': { base: 25, max: 60, autoApprove: true },
+    'fuel': { base: 10, max: 15, autoApprove: true },
+    'other': { base: 10, max: 30, autoApprove: false }
+  };
+  
+  const rule = gracePeriodRules[delayReason as keyof typeof gracePeriodRules] || gracePeriodRules.other;
+  const gracePeriodMinutes = Math.min(Math.max(delayMinutes, rule.base), rule.max);
+  
+  return {
+    gracePeriodMinutes,
+    autoApproved: rule.autoApprove && delayMinutes <= rule.base,
+    requiresApproval: !rule.autoApprove || delayMinutes > rule.base
+  };
+};
+
 export interface ValidationResult {
   isValid: boolean;
   errors: string[];

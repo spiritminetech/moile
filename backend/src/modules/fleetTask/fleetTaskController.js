@@ -101,6 +101,50 @@ export const createFleetTask = async (req, res) => {
       });
     }
 
+    // ✅ Validate driver license if driverId is provided
+    if (driverId) {
+      const driver = await Employee.findOne({ id: driverId });
+      if (!driver) {
+        return res.status(400).json({
+          success: false,
+          message: `Driver with ID ${driverId} does not exist`,
+        });
+      }
+
+      // Check if license is expired
+      if (driver.licenseExpiry) {
+        const licenseExpiryDate = new Date(driver.licenseExpiry);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset time to start of day
+
+        if (licenseExpiryDate < today) {
+          return res.status(403).json({
+            success: false,
+            message: `Driver license has expired on ${licenseExpiryDate.toLocaleDateString()}. Cannot assign transport tasks to drivers with expired licenses.`,
+            error: 'LICENSE_EXPIRED',
+            driverId: driverId,
+            licenseExpiry: driver.licenseExpiry
+          });
+        }
+      }
+
+      // Check for expired certifications
+      if (driver.certifications && driver.certifications.length > 0) {
+        const expiredCerts = driver.certifications.filter(cert => {
+          if (cert.expiryDate) {
+            const certExpiry = new Date(cert.expiryDate);
+            return certExpiry < new Date();
+          }
+          return false;
+        });
+
+        if (expiredCerts.length > 0) {
+          console.warn(`⚠️ Driver ${driverId} has ${expiredCerts.length} expired certification(s)`);
+          // Log but don't block - certifications are warnings, not blockers
+        }
+      }
+    }
+
     if (createdBy) {
       const userExists = await User.findOne({ id: createdBy });
       if (!userExists) {

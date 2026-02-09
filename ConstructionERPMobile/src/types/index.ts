@@ -1,5 +1,75 @@
 // Core TypeScript type definitions for Construction ERP Mobile Application
 
+// Enhanced types for Trip Updates with validation and vehicle requests
+export interface TimeWindow {
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+  windowMinutes: number; // configurable window in minutes
+  isFlexible: boolean; // whether window can be extended
+}
+
+export interface GeofenceLocation {
+  latitude: number;
+  longitude: number;
+  radius: number; // in meters
+  name: string;
+  type: 'dormitory' | 'construction_site' | 'office' | 'depot';
+  isActive: boolean;
+}
+
+export interface VehicleRequest {
+  requestId?: string;
+  taskId: number;
+  requestType: 'replacement' | 'additional' | 'emergency';
+  reason: string;
+  urgency: 'low' | 'medium' | 'high' | 'critical';
+  currentLocation: GeoLocation;
+  requestedAt: string;
+  estimatedWaitTime?: number; // in minutes
+  status: 'pending' | 'approved' | 'dispatched' | 'arrived' | 'rejected';
+  alternateVehicle?: {
+    vehicleId: number;
+    plateNumber: string;
+    driverName: string;
+    driverPhone: string;
+    estimatedArrival: string;
+  };
+}
+
+export interface GracePeriodApplication {
+  taskId: number;
+  delayMinutes: number;
+  delayReason: string;
+  gracePeriodMinutes: number;
+  autoApproved: boolean;
+  requiresApproval: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
+  attendanceImpact: {
+    affectedWorkers: number[];
+    gracePeriodApplied: boolean;
+    lateMarkingWaived: boolean;
+  };
+}
+
+export interface ModuleIntegration {
+  attendance: {
+    gracePeriodApplied: boolean;
+    affectedWorkers: number[];
+    lateMarkingWaived: boolean;
+  };
+  projectManagement: {
+    manpowerAvailabilityUpdated: boolean;
+    deploymentStatusUpdated: boolean;
+    delayImpactAssessed: boolean;
+  };
+  fleetManagement: {
+    vehicleStatusUpdated: boolean;
+    maintenanceTriggered: boolean;
+    replacementRequested: boolean;
+  };
+}
+
 // User and Authentication Types
 export type UserRole = 'Worker' | 'Supervisor' | 'Driver';
 
@@ -643,10 +713,42 @@ export interface WorkerManifest {
     checkedIn: boolean;
     checkInTime?: string;
     profileImage?: string;
+    // Enhanced worker details
+    trade: string;
+    supervisorId: number;
+    supervisorName: string;
+    employeeId: string;
+    department: string;
+    skillLevel: 'trainee' | 'skilled' | 'senior' | 'specialist';
+    emergencyContact?: string;
+    // Permission-based visibility
+    canViewDetails: boolean;
+    canCall: boolean;
+    canCheckIn: boolean;
+    // Additional status info
+    attendanceStatus: 'present' | 'absent' | 'late' | 'on_leave';
+    leaveReason?: string;
+    expectedArrival?: string;
   }>;
   totalWorkers: number;
   checkedInWorkers: number;
+  // Trade-wise breakdown
+  tradeBreakdown: Array<{
+    trade: string;
+    totalWorkers: number;
+    checkedInWorkers: number;
+    workers: number[]; // Array of worker IDs
+  }>;
+  // Supervisor-wise breakdown
+  supervisorBreakdown: Array<{
+    supervisorId: number;
+    supervisorName: string;
+    totalWorkers: number;
+    checkedInWorkers: number;
+    workers: number[]; // Array of worker IDs
+  }>;
 }
+
 
 export interface AppState {
   auth: AuthState;
@@ -725,12 +827,47 @@ export interface TransportTask {
       latitude: number;
       longitude: number;
     };
+    // Enhanced geofence validation
+    geofence: GeofenceLocation;
+    timeWindow: TimeWindow;
     workerManifest: Array<{
       workerId: number;
       name: string;
       phone: string;
       checkedIn: boolean;
       checkInTime?: string;
+      profileImage?: string;
+      // Enhanced worker details
+      trade: string;
+      supervisorId: number;
+      supervisorName: string;
+      employeeId: string;
+      department: string;
+      skillLevel: 'trainee' | 'skilled' | 'senior' | 'specialist';
+      emergencyContact?: string;
+      // Permission-based visibility
+      canViewDetails: boolean;
+      canCall: boolean;
+      canCheckIn: boolean;
+      // Additional status info
+      attendanceStatus: 'present' | 'absent' | 'late' | 'on_leave';
+      leaveReason?: string;
+      expectedArrival?: string;
+    }>;
+    // Trade-wise breakdown for this location
+    tradeBreakdown: Array<{
+      trade: string;
+      totalWorkers: number;
+      checkedInWorkers: number;
+      workers: number[]; // Array of worker IDs
+    }>;
+    // Supervisor-wise breakdown for this location
+    supervisorBreakdown: Array<{
+      supervisorId: number;
+      supervisorName: string;
+      totalWorkers: number;
+      checkedInWorkers: number;
+      workers: number[]; // Array of worker IDs
     }>;
     estimatedPickupTime: string;
     actualPickupTime?: string;
@@ -742,12 +879,18 @@ export interface TransportTask {
       latitude: number;
       longitude: number;
     };
+    // Enhanced geofence validation for dropoff
+    geofence: GeofenceLocation;
     estimatedArrival: string;
     actualArrival?: string;
   };
   status: 'pending' | 'en_route_pickup' | 'pickup_complete' | 'en_route_dropoff' | 'completed';
   totalWorkers: number;
   checkedInWorkers: number;
+  // Enhanced features
+  vehicleRequest?: VehicleRequest;
+  gracePeriodApplication?: GracePeriodApplication;
+  moduleIntegration?: ModuleIntegration;
 }
 
 export interface VehicleInfo {
@@ -756,8 +899,28 @@ export interface VehicleInfo {
   model: string;
   year: number;
   capacity: number;
+  fuelType?: 'Diesel' | 'Petrol' | 'Electric' | 'Hybrid' | 'CNG';
   currentMileage: number;
   fuelLevel: number;
+  assignedDriverName?: string; // Driver assigned to this vehicle
+  insurance?: {
+    policyNumber: string;
+    provider: string;
+    expiryDate: string;
+    status: 'active' | 'expiring_soon' | 'expired';
+  };
+  roadTax?: {
+    validUntil: string;
+    status: 'active' | 'expiring_soon' | 'expired';
+  };
+  assignedRoute?: {
+    routeName: string;
+    routeCode: string;
+    pickupLocations: string[];
+    dropoffLocation: string;
+    estimatedDistance: number; // in kilometers
+    estimatedDuration: number; // in minutes
+  } | null;
   maintenanceSchedule: Array<{
     type: 'oil_change' | 'tire_rotation' | 'inspection' | 'major_service';
     dueDate: string;
@@ -765,12 +928,25 @@ export interface VehicleInfo {
     status: 'upcoming' | 'due' | 'overdue';
   }>;
   fuelLog: Array<{
+    id?: number;
     date: string;
     amount: number;
     cost: number;
     mileage: number;
     location: string;
+    receiptPhoto?: string;
   }>;
+}
+
+// Fuel Log Entry Request
+export interface FuelLogEntry {
+  vehicleId: number;
+  date: string;
+  amount: number; // liters
+  cost: number;
+  mileage: number;
+  location: string;
+  receiptPhoto?: string; // base64 or URI
 }
 
 export interface TripRecord {

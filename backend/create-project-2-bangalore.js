@@ -165,7 +165,7 @@ async function createProject2Bangalore() {
 
     console.log('\n🎉 PROJECT ID 2 SETUP COMPLETE!');
     console.log('Now you can use Project ID 2 for attendance');
-    console.log(`API Call: POST http://192.168.1.8:5002/api/attendance/validate-geofence`);
+    console.log(`API Call: POST http://192.168.0.3:5002/api/attendance/validate-geofence`);
     console.log(`Payload: {"projectId": 2, "latitude": ${userLocation.latitude}, "longitude": ${userLocation.longitude}, "accuracy": 10}`);
 
   } catch (error) {

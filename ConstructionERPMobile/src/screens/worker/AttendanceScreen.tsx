@@ -77,11 +77,18 @@ const AttendanceScreen: React.FC = () => {
     if (!authState.user || offlineState.isOnline === false) return;
     
     console.log('🔄 Loading attendance status...');
+    console.log('📊 Current user:', {
+      id: authState.user.id,
+      name: authState.user.name,
+      currentProject: authState.user.currentProject,
+      company: authState.company
+    });
+    
     setIsLoading(true);
     try {
       clearError();
       const response = await workerApiService.getTodaysAttendance();
-      console.log('📥 getTodaysAttendance response:', response);
+      console.log('📥 getTodaysAttendance RAW response:', JSON.stringify(response, null, 2));
       
       if (response.success) {
         const data = response.data as TodaysAttendanceResponse & {
@@ -192,11 +199,18 @@ const AttendanceScreen: React.FC = () => {
     if (authState.user?.currentProject?.id) {
       projectId = authState.user.currentProject.id.toString();
       console.log('📍 Using project ID from user.currentProject:', projectId);
-    }
-    // Fallback: Use project ID 1003 (from task assignment we just created)
-    else {
-      projectId = '1003';
-      console.log('📍 Using default project ID (task assignment):', projectId);
+    } else if (authState.company?.id) {
+      // Try to get from company context
+      projectId = authState.company.id.toString();
+      console.log('📍 Using project ID from company:', projectId);
+    } else {
+      // Last resort: Show error instead of using hardcoded value
+      Alert.alert(
+        'No Project Assigned',
+        'You are not assigned to any project. Please contact your supervisor.',
+        [{ text: 'OK' }]
+      );
+      return;
     }
 
     if (!projectId) {
@@ -318,29 +332,34 @@ const AttendanceScreen: React.FC = () => {
         
         // Immediately update local state for better UX
         if (type === 'login') {
+          const newSession = {
+            id: Date.now(), // Use timestamp as temporary ID
+            workerId: authState.user!.id,
+            projectId: parseInt(projectId!),
+            loginTime: new Date().toISOString(),
+            location: { 
+              latitude: location.latitude, 
+              longitude: location.longitude, 
+              accuracy: location.accuracy || 0, 
+              timestamp: new Date() 
+            },
+            sessionType: 'regular' as const,
+          };
+          
           setAttendanceStatus(prev => ({
             ...prev,
-            currentSession: {
-              id: 1,
-              workerId: authState.user!.id,
-              projectId: parseInt(projectId!),
-              loginTime: new Date().toISOString(),
-              location: { latitude: location.latitude, longitude: location.longitude, accuracy: location.accuracy || 0, timestamp: new Date() },
-              sessionType: 'regular' as const,
-            },
-            todaysAttendance: [{
-              id: 1,
-              workerId: authState.user!.id,
-              projectId: parseInt(projectId!),
-              loginTime: new Date().toISOString(),
-              location: { latitude: location.latitude, longitude: location.longitude, accuracy: location.accuracy || 0, timestamp: new Date() },
-              sessionType: 'regular' as const,
-            }],
+            currentSession: newSession,
+            todaysAttendance: [newSession],
             canClockIn: false,
             canClockOut: true,
             isOnLunchBreak: false,
-            totalTodayMinutes: 0, // Reset for new session
+            totalTodayMinutes: 0,
           }));
+          
+          // Refresh from server after a longer delay to ensure backend processing
+          setTimeout(() => {
+            loadAttendanceStatus();
+          }, 2000); // Increased from 1000ms to 2000ms
         } else if (type === 'logout') {
           setAttendanceStatus(prev => ({
             ...prev,
@@ -400,7 +419,7 @@ const AttendanceScreen: React.FC = () => {
       // Always refresh attendance status after any attendance action to ensure consistency
       setTimeout(() => {
         loadAttendanceStatus();
-      }, 1000); // Small delay to allow server to process
+      }, 2000); // Increased delay to 2 seconds to allow server to process
       
     } catch (error: any) {
       console.error('❌ Attendance Action Error:', error);
@@ -410,7 +429,7 @@ const AttendanceScreen: React.FC = () => {
       // Also refresh status after errors, in case the action partially succeeded
       setTimeout(() => {
         loadAttendanceStatus();
-      }, 1000);
+      }, 2000); // Increased delay
     } finally {
       setActionLoading(null);
     }

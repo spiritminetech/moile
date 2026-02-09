@@ -29,8 +29,21 @@ const driverSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  licenseClass: {
+    type: String,
+    default: 'Commercial'
+  },
+  licenseIssueDate: {
+    type: Date
+  },
   licenseExpiry: {
     type: Date
+  },
+  licenseIssuingAuthority: {
+    type: String
+  },
+  licensePhotoUrl: {
+    type: String
   },
   vehicleId: {
     type: Number

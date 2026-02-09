@@ -127,7 +127,7 @@ npm start
 
 To verify the fix worked, check the API response in mobile app console:
 ```
-✅ GET http://192.168.1.8:5002/api/supervisor/attendance-monitoring
+✅ GET http://192.168.0.3:5002/api/supervisor/attendance-monitoring
 📊 Status: 200
 📥 Response Data: { workers: [10+ items], summary: {...} }
 ```

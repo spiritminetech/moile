@@ -126,7 +126,7 @@ describe('DriverApiService Property-Based Tests', () => {
 
             case 'getAssignedVehicle':
               result = await driverApiService.getAssignedVehicle();
-              expectedEndpoint = '/driver/vehicle/assigned';
+              expectedEndpoint = '/driver/vehicle';
               expectedMethod = 'get';
               break;
 

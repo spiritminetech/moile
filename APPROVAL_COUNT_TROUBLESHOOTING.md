@@ -34,7 +34,7 @@ When you see the difference, note down:
 #### Dashboard API
 Look for this in your logs:
 ```
-GET http://192.168.1.8:5002/api/supervisor/dashboard
+GET http://192.168.0.3:5002/api/supervisor/dashboard
 ```
 
 The response should show:
@@ -53,7 +53,7 @@ The response should show:
 #### Approvals API
 Look for this in your logs:
 ```
-GET http://192.168.1.8:5002/api/supervisor/approvals/pending
+GET http://192.168.0.3:5002/api/supervisor/approvals/pending
 ```
 
 The response should show:

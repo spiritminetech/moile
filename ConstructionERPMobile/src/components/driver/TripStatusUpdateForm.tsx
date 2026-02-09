@@ -10,9 +10,10 @@ import {
   Alert,
   TouchableOpacity,
 } from 'react-native';
-import { TransportTask, GeoLocation } from '../../types';
+import { TransportTask, GeoLocation, VehicleRequest, GracePeriodApplication, ModuleIntegration } from '../../types';
 import { ConstructionButton, ConstructionCard, ConstructionInput, ConstructionSelector } from '../common';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
+import { validateTimeWindow, validateGeofence, calculateGracePeriod } from '../../utils/validation';
 
 interface TripStatusUpdateFormProps {
   transportTask: TransportTask;
@@ -21,6 +22,8 @@ interface TripStatusUpdateFormProps {
   onDelayReport: (delayData: DelayReport) => void;
   onBreakdownReport: (breakdownData: BreakdownReport) => void;
   onPhotoUpload: (photoData: TripPhotoData) => void;
+  onVehicleRequest?: (vehicleRequest: VehicleRequest) => void;
+  onGracePeriodApplication?: (gracePeriod: GracePeriodApplication) => void;
   isLoading?: boolean;
 }
 
@@ -68,9 +71,11 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
   onDelayReport,
   onBreakdownReport,
   onPhotoUpload,
+  onVehicleRequest,
+  onGracePeriodApplication,
   isLoading = false,
 }) => {
-  const [selectedUpdateType, setSelectedUpdateType] = useState<'status' | 'delay' | 'breakdown' | 'photo'>('status');
+  const [selectedUpdateType, setSelectedUpdateType] = useState<'status' | 'delay' | 'breakdown' | 'photo' | 'vehicle'>('status');
   const [statusNotes, setStatusNotes] = useState('');
   const [delayReason, setDelayReason] = useState('');
   const [delayMinutes, setDelayMinutes] = useState('');
@@ -80,6 +85,11 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
   const [breakdownDescription, setBreakdownDescription] = useState('');
   const [assistanceRequired, setAssistanceRequired] = useState(false);
   const [photoDescription, setPhotoDescription] = useState('');
+  
+  // Vehicle request state
+  const [vehicleRequestType, setVehicleRequestType] = useState<VehicleRequest['requestType']>('replacement');
+  const [vehicleRequestReason, setVehicleRequestReason] = useState('');
+  const [vehicleRequestUrgency, setVehicleRequestUrgency] = useState<VehicleRequest['urgency']>('medium');
 
   // Status update options based on current status
   const getAvailableStatusUpdates = () => {
@@ -133,29 +143,108 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
     { value: 'critical', label: '🔴 Critical - Cannot Continue' },
   ];
 
-  // Handle status update
+  // Enhanced status update with validation
   const handleStatusUpdate = (newStatus: TripStatusUpdate['status']) => {
     if (!currentLocation) {
       Alert.alert('Location Required', 'GPS location is required for status updates');
       return;
     }
 
+    // Time window validation for pickup
+    if (newStatus === 'pickup_complete') {
+      const pickupLocation = transportTask.pickupLocations[0]; // Assuming first location for now
+      if (pickupLocation?.timeWindow) {
+        const scheduledTime = new Date(pickupLocation.estimatedPickupTime);
+        const timeValidation = validateTimeWindow(new Date(), scheduledTime, pickupLocation.timeWindow.windowMinutes);
+        
+        if (!timeValidation.isValid) {
+          Alert.alert(
+            'Time Window Violation',
+            timeValidation.message,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { 
+                text: 'Proceed Anyway', 
+                style: 'destructive',
+                onPress: () => proceedWithStatusUpdate(newStatus)
+              }
+            ]
+          );
+          return;
+        }
+      }
+
+      // Geofence validation for pickup
+      if (pickupLocation?.geofence) {
+        const geofenceValidation = validateGeofence(
+          { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
+          pickupLocation.geofence,
+          pickupLocation.name
+        );
+        
+        if (!geofenceValidation.isValid) {
+          Alert.alert(
+            'Location Validation Failed',
+            geofenceValidation.message,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { 
+                text: 'Override', 
+                style: 'destructive',
+                onPress: () => proceedWithStatusUpdate(newStatus)
+              }
+            ]
+          );
+          return;
+        }
+      }
+    }
+
+    // Geofence validation for dropoff
+    if (newStatus === 'completed' && transportTask.dropoffLocation?.geofence) {
+      const geofenceValidation = validateGeofence(
+        { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
+        transportTask.dropoffLocation.geofence,
+        transportTask.dropoffLocation.name
+      );
+      
+      if (!geofenceValidation.isValid) {
+        Alert.alert(
+          'Dropoff Location Validation Failed',
+          geofenceValidation.message,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Override', 
+              style: 'destructive',
+              onPress: () => proceedWithStatusUpdate(newStatus)
+            }
+          ]
+        );
+        return;
+      }
+    }
+
+    proceedWithStatusUpdate(newStatus);
+  };
+
+  const proceedWithStatusUpdate = (newStatus: TripStatusUpdate['status']) => {
     const updateData: TripStatusUpdate = {
       taskId: transportTask.taskId,
       status: newStatus,
-      location: currentLocation,
+      location: currentLocation!,
       timestamp: new Date().toISOString(),
       notes: statusNotes.trim() || undefined,
       workerCount: transportTask.checkedInWorkers,
     };
 
     Alert.alert(
-      'Update Status',
+      'Confirm Status Update',
       `Update trip status to "${newStatus.replace('_', ' ').toUpperCase()}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Update',
+          text: 'Confirm',
           onPress: () => {
             onStatusUpdate(updateData);
             setStatusNotes('');
@@ -165,7 +254,7 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
     );
   };
 
-  // Handle delay report
+  // Enhanced delay report with grace period calculation
   const handleDelayReport = () => {
     if (!currentLocation) {
       Alert.alert('Location Required', 'GPS location is required for delay reports');
@@ -177,18 +266,27 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
       return;
     }
 
+    const delayMinutesNum = parseInt(delayMinutes);
+    const gracePeriod = calculateGracePeriod(delayMinutesNum, delayReason);
+
     const delayData: DelayReport = {
       taskId: transportTask.taskId,
       delayReason,
-      estimatedDelay: parseInt(delayMinutes),
+      estimatedDelay: delayMinutesNum,
       location: currentLocation,
       description: delayDescription.trim(),
       timestamp: new Date().toISOString(),
     };
 
+    const gracePeriodMessage = gracePeriod.autoApproved 
+      ? `\n\nGrace period of ${gracePeriod.gracePeriodMinutes} minutes will be automatically applied to affected workers.`
+      : gracePeriod.requiresApproval 
+        ? `\n\nGrace period of ${gracePeriod.gracePeriodMinutes} minutes requires supervisor approval.`
+        : '';
+
     Alert.alert(
       'Report Delay',
-      `Report ${delayMinutes} minute delay due to ${delayReason}?`,
+      `Report ${delayMinutes} minute delay due to ${delayReason}?${gracePeriodMessage}`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -199,13 +297,30 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
             setDelayReason('');
             setDelayMinutes('');
             setDelayDescription('');
+            
+            // Show vehicle request option for major delays
+            if (delayMinutesNum >= 30) {
+              setTimeout(() => {
+                Alert.alert(
+                  'Request Alternate Vehicle?',
+                  'This delay is significant. Would you like to request an alternate vehicle?',
+                  [
+                    { text: 'Not Now', style: 'cancel' },
+                    { 
+                      text: 'Request Vehicle', 
+                      onPress: () => handleVehicleRequest('replacement', 'Significant delay reported')
+                    }
+                  ]
+                );
+              }, 1000);
+            }
           },
         },
       ]
     );
   };
 
-  // Handle breakdown report
+  // Handle breakdown report with vehicle request option
   const handleBreakdownReport = () => {
     if (!currentLocation) {
       Alert.alert('Location Required', 'GPS location is required for breakdown reports');
@@ -240,6 +355,66 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
             // Reset form
             setBreakdownDescription('');
             setAssistanceRequired(false);
+            
+            // Auto-request vehicle for major/critical breakdowns
+            if (breakdownSeverity === 'major' || breakdownSeverity === 'critical') {
+              setTimeout(() => {
+                const urgency = breakdownSeverity === 'critical' ? 'critical' : 'high';
+                handleVehicleRequest('emergency', `${breakdownSeverity} ${breakdownType} breakdown`, urgency);
+              }, 1000);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle vehicle request
+  const handleVehicleRequest = (
+    requestType: VehicleRequest['requestType'] = vehicleRequestType, 
+    reason: string = vehicleRequestReason,
+    urgency: VehicleRequest['urgency'] = vehicleRequestUrgency
+  ) => {
+    if (!currentLocation) {
+      Alert.alert('Location Required', 'GPS location is required for vehicle requests');
+      return;
+    }
+
+    if (!reason.trim()) {
+      Alert.alert('Missing Information', 'Please provide a reason for the vehicle request');
+      return;
+    }
+
+    const vehicleRequest: VehicleRequest = {
+      taskId: transportTask.taskId,
+      requestType,
+      reason: reason.trim(),
+      urgency,
+      currentLocation,
+      requestedAt: new Date().toISOString(),
+      status: 'pending'
+    };
+
+    const urgencyText = urgency === 'critical' ? 'EMERGENCY' : urgency.toUpperCase();
+    const requestTypeText = requestType === 'replacement' ? 'replacement vehicle' : 
+                           requestType === 'additional' ? 'additional vehicle' : 'emergency assistance';
+
+    Alert.alert(
+      `${urgencyText} Vehicle Request`,
+      `Request ${requestTypeText} for: ${reason}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Request',
+          style: urgency === 'critical' ? 'destructive' : 'default',
+          onPress: () => {
+            if (onVehicleRequest) {
+              onVehicleRequest(vehicleRequest);
+            }
+            // Reset form
+            setVehicleRequestReason('');
+            setVehicleRequestType('replacement');
+            setVehicleRequestUrgency('medium');
           },
         },
       ]
@@ -371,6 +546,20 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
                 selectedUpdateType === 'photo' && styles.updateTypeButtonTextActive
               ]}>
                 📸 Photo
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.updateTypeButton,
+                selectedUpdateType === 'vehicle' && styles.updateTypeButtonActive
+              ]}
+              onPress={() => setSelectedUpdateType('vehicle')}
+            >
+              <Text style={[
+                styles.updateTypeButtonText,
+                selectedUpdateType === 'vehicle' && styles.updateTypeButtonTextActive
+              ]}>
+                🚗 Vehicle
               </Text>
             </TouchableOpacity>
           </View>
@@ -508,6 +697,92 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
               fullWidth
               loading={isLoading}
             />
+          </View>
+        )}
+
+        {/* Vehicle Request Form */}
+        {selectedUpdateType === 'vehicle' && (
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>Request Vehicle</Text>
+            
+            <ConstructionSelector
+              label="Request Type"
+              value={vehicleRequestType}
+              onValueChange={setVehicleRequestType}
+              options={[
+                { value: 'replacement', label: '🔄 Replacement Vehicle' },
+                { value: 'additional', label: '➕ Additional Vehicle' },
+                { value: 'emergency', label: '🚨 Emergency Assistance' },
+              ]}
+            />
+
+            <ConstructionSelector
+              label="Urgency Level"
+              value={vehicleRequestUrgency}
+              onValueChange={setVehicleRequestUrgency}
+              options={[
+                { value: 'low', label: '🟢 Low - Can Wait' },
+                { value: 'medium', label: '🟡 Medium - Soon' },
+                { value: 'high', label: '🟠 High - Urgent' },
+                { value: 'critical', label: '🔴 Critical - Emergency' },
+              ]}
+            />
+
+            <ConstructionInput
+              label="Reason for Request"
+              value={vehicleRequestReason}
+              onChangeText={setVehicleRequestReason}
+              placeholder="Explain why you need a vehicle..."
+              multiline
+              numberOfLines={3}
+              required
+            />
+
+            <ConstructionButton
+              title="🚗 Request Vehicle"
+              onPress={() => handleVehicleRequest()}
+              variant={vehicleRequestUrgency === 'critical' ? 'error' : 'primary'}
+              size="medium"
+              fullWidth
+              loading={isLoading}
+              disabled={!vehicleRequestReason.trim()}
+            />
+
+            {transportTask.vehicleRequest && (
+              <View style={styles.existingRequestInfo}>
+                <Text style={styles.existingRequestTitle}>
+                  📋 Current Request Status
+                </Text>
+                <Text style={styles.existingRequestText}>
+                  Type: {transportTask.vehicleRequest.requestType}
+                </Text>
+                <Text style={styles.existingRequestText}>
+                  Status: {transportTask.vehicleRequest.status.toUpperCase()}
+                </Text>
+                <Text style={styles.existingRequestText}>
+                  Urgency: {transportTask.vehicleRequest.urgency.toUpperCase()}
+                </Text>
+                {transportTask.vehicleRequest.alternateVehicle && (
+                  <View style={styles.alternateVehicleInfo}>
+                    <Text style={styles.alternateVehicleTitle}>
+                      🚛 Alternate Vehicle Assigned
+                    </Text>
+                    <Text style={styles.alternateVehicleText}>
+                      Vehicle: {transportTask.vehicleRequest.alternateVehicle.plateNumber}
+                    </Text>
+                    <Text style={styles.alternateVehicleText}>
+                      Driver: {transportTask.vehicleRequest.alternateVehicle.driverName}
+                    </Text>
+                    <Text style={styles.alternateVehicleText}>
+                      Phone: {transportTask.vehicleRequest.alternateVehicle.driverPhone}
+                    </Text>
+                    <Text style={styles.alternateVehicleText}>
+                      ETA: {new Date(transportTask.vehicleRequest.alternateVehicle.estimatedArrival).toLocaleTimeString()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -675,6 +950,43 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.error,
     fontWeight: 'bold',
+  },
+  // Vehicle request styles
+  existingRequestInfo: {
+    marginTop: ConstructionTheme.spacing.md,
+    padding: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.secondaryContainer,
+    borderRadius: ConstructionTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.secondary,
+  },
+  existingRequestTitle: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onSecondaryContainer,
+    marginBottom: ConstructionTheme.spacing.sm,
+    fontWeight: 'bold',
+  },
+  existingRequestText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSecondaryContainer,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  alternateVehicleInfo: {
+    marginTop: ConstructionTheme.spacing.sm,
+    padding: ConstructionTheme.spacing.sm,
+    backgroundColor: ConstructionTheme.colors.tertiaryContainer,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  alternateVehicleTitle: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onTertiaryContainer,
+    marginBottom: ConstructionTheme.spacing.xs,
+    fontWeight: 'bold',
+  },
+  alternateVehicleText: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onTertiaryContainer,
+    marginBottom: ConstructionTheme.spacing.xs,
   },
 });
 

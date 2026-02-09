@@ -19,6 +19,9 @@ import DriverProfileScreen from '../screens/driver/DriverProfileScreen';
 // Import notification placeholder screens
 import DriverNotificationsScreen from '../screens/driver/DriverNotificationsScreen';
 
+// Import shared screens
+import ChangePasswordScreen from '../screens/worker/ChangePasswordScreen';
+
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
@@ -422,6 +425,13 @@ const ProfileStackNavigator: React.FC = () => {
         component={DriverNotificationsScreen}
         options={{
           title: 'Notifications',
+        }}
+      />
+      <Stack.Screen 
+        name="ChangePassword" 
+        component={ChangePasswordScreen}
+        options={{
+          title: 'Change Password',
         }}
       />
       {/* Additional profile screens */}

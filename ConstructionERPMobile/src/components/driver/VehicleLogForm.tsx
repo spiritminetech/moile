@@ -71,7 +71,7 @@ const VehicleLogForm: React.FC<VehicleLogFormProps> = ({
   // Fuel log state
   const [fuelAmount, setFuelAmount] = useState('');
   const [fuelCost, setFuelCost] = useState('');
-  const [fuelMileage, setFuelMileage] = useState(vehicleInfo.currentMileage.toString());
+  const [fuelMileage, setFuelMileage] = useState(vehicleInfo.currentMileage?.toString() || '0');
   const [fuelLocation, setFuelLocation] = useState('');
   const [fuelType, setFuelType] = useState<FuelLogEntry['fuelType']>('diesel');
   const [fuelNotes, setFuelNotes] = useState('');
@@ -80,7 +80,7 @@ const VehicleLogForm: React.FC<VehicleLogFormProps> = ({
   const [maintenanceType, setMaintenanceType] = useState<MaintenanceLogEntry['maintenanceType']>('oil_change');
   const [maintenanceDescription, setMaintenanceDescription] = useState('');
   const [maintenanceCost, setMaintenanceCost] = useState('');
-  const [maintenanceMileage, setMaintenanceMileage] = useState(vehicleInfo.currentMileage.toString());
+  const [maintenanceMileage, setMaintenanceMileage] = useState(vehicleInfo.currentMileage?.toString() || '0');
   const [serviceProvider, setServiceProvider] = useState('');
   const [nextServiceDue, setNextServiceDue] = useState('');
   const [maintenanceNotes, setMaintenanceNotes] = useState('');
@@ -252,7 +252,7 @@ const VehicleLogForm: React.FC<VehicleLogFormProps> = ({
             {vehicleInfo.model} ({vehicleInfo.year})
           </Text>
           <Text style={styles.vehicleDetails}>
-            Plate: {vehicleInfo.plateNumber} | Mileage: {vehicleInfo.currentMileage.toLocaleString()} km
+            Plate: {vehicleInfo.plateNumber} | Mileage: {vehicleInfo.currentMileage?.toLocaleString() || 'N/A'} km
           </Text>
           <Text style={styles.vehicleDetails}>
             Fuel Level: {vehicleInfo.fuelLevel}% | Capacity: {vehicleInfo.capacity} passengers
@@ -525,7 +525,7 @@ const VehicleLogForm: React.FC<VehicleLogFormProps> = ({
                 {maintenance.type.replace('_', ' ').toUpperCase()}
               </Text>
               <Text style={styles.maintenanceDetails}>
-                Due: {maintenance.dueDate} | {maintenance.dueMileage.toLocaleString()} km
+                Due: {maintenance.dueDate} | {maintenance.dueMileage?.toLocaleString() || 'N/A'} km
               </Text>
               <Text style={[
                 styles.maintenanceStatus,

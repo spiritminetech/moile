@@ -17,7 +17,6 @@ interface TransportTaskCardProps {
   onStartRoute: (taskId: number) => void;
   onViewRoute: (task: TransportTask) => void;
   onUpdateStatus: (taskId: number, status: string) => void;
-  isOffline: boolean;
 }
 
 const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
@@ -25,7 +24,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
   onStartRoute,
   onViewRoute,
   onUpdateStatus,
-  isOffline,
 }) => {
   // Get status color
   const getStatusColor = (status: string): string => {
@@ -65,15 +63,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
 
   // Handle start route
   const handleStartRoute = () => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot start route while offline. Please connect to internet.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     Alert.alert(
       'Start Route',
       `Are you sure you want to start route "${task.route}"?`,
@@ -91,15 +80,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
 
   // Handle status update
   const handleStatusUpdate = () => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot update status while offline. Please connect to internet.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     // Determine next status based on current status
     let nextStatus = '';
     let confirmMessage = '';
@@ -154,7 +134,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
       <View style={styles.header}>
         <View style={styles.titleContainer}>
           <Text style={styles.routeName}>{task.route}</Text>
-          <Text style={styles.taskId}>Task #{task.taskId}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
           <Text style={styles.statusText}>{getStatusText(task.status)}</Text>
@@ -185,7 +164,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
             onPress={handleStartRoute}
             variant="success"
             size="medium"
-            disabled={isOffline}
             icon="🚗"
             style={styles.actionButton}
           />
@@ -197,7 +175,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
             onPress={handleStatusUpdate}
             variant="primary"
             size="medium"
-            disabled={isOffline}
             icon="📍"
             style={styles.actionButton}
           />
@@ -212,13 +189,6 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
           style={styles.actionButton}
         />
       </View>
-
-      {/* Offline indicator */}
-      {isOffline && (
-        <View style={styles.offlineIndicator}>
-          <Text style={styles.offlineText}>⚠️ Limited functionality while offline</Text>
-        </View>
-      )}
     </ConstructionCard>
   );
 };
@@ -241,11 +211,6 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.headlineSmall,
     color: ConstructionTheme.colors.onSurface,
     marginBottom: 4,
-  },
-  taskId: {
-    ...ConstructionTheme.typography.bodyMedium,
-    color: ConstructionTheme.colors.onSurfaceVariant,
-    fontWeight: '500',
   },
   statusBadge: {
     paddingHorizontal: ConstructionTheme.spacing.md,
@@ -288,19 +253,6 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
     minWidth: 120,
-  },
-  offlineIndicator: {
-    marginTop: ConstructionTheme.spacing.md,
-    padding: ConstructionTheme.spacing.sm,
-    backgroundColor: ConstructionTheme.colors.warning + '20',
-    borderRadius: ConstructionTheme.borderRadius.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: ConstructionTheme.colors.warning,
-  },
-  offlineText: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: '#E65100',
-    fontWeight: '500',
   },
 });
 

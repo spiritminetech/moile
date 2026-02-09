@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const API_BASE_URL = 'http://192.168.1.8:5002/api';
+const API_BASE_URL = 'http://192.168.0.3:5002/api';
 
 // Test credentials for supervisor
 const SUPERVISOR_CREDENTIALS = {

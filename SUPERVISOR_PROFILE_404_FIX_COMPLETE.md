@@ -61,7 +61,7 @@ Response: {
     "phoneNumber": "+9876543210",
     "companyName": "Horizon Lifting & Logistics Pte Ltd",
     "role": "SUPERVISOR",
-    "photoUrl": "http://192.168.1.8:5002/uploads/supervisors/...",
+    "photoUrl": "http://192.168.0.3:5002/uploads/supervisors/...",
     "employeeCode": null,
     "jobTitle": "Supervisor",
     "department": "Construction",

@@ -128,7 +128,7 @@ When you open the Attendance Monitoring screen, you should see:
 When the screen loads, you should see:
 ```
 🎯 Auto-selecting project: 1 Downtown Construction
-✅ GET http://192.168.1.8:5002/api/supervisor/attendance-monitoring
+✅ GET http://192.168.0.3:5002/api/supervisor/attendance-monitoring
 📊 Status: 200
 📥 Response Data: { workers: [10 items], summary: {...} }
 ```

@@ -81,19 +81,19 @@ export class LocationService {
       const hasPermission = await this.requestLocationPermissions();
       if (!hasPermission) {
         if (allowFallback) {
-          console.warn('Location permission denied, using fallback location');
+          console.warn('⚠️ Location permission denied, using fallback location');
           return this.getFallbackLocation();
         }
-        throw new Error('Location permission denied');
+        throw new Error('Location permission denied. Please enable location permissions in your device settings.');
       }
 
       const isEnabled = await this.isLocationEnabled();
       if (!isEnabled) {
         if (allowFallback) {
-          console.warn('Location services disabled, using fallback location');
+          console.warn('⚠️ Location services disabled, using fallback location');
           return this.getFallbackLocation();
         }
-        throw new Error('Location services are disabled');
+        throw new Error('Location services are disabled. Please enable location services in your device settings.');
       }
 
       const location = await Location.getCurrentPositionAsync({
@@ -112,16 +112,27 @@ export class LocationService {
       };
 
       this.currentLocation = geoLocation;
+      console.log('✅ Location obtained successfully:', geoLocation);
       return geoLocation;
     } catch (error) {
-      console.error('Error getting current location:', error);
+      console.error('❌ Error getting current location:', error);
+      
+      // Check if it's a permission error
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('Not authorized') || errorMessage.includes('permission')) {
+        if (allowFallback) {
+          console.warn('⚠️ Location permission error, using fallback location');
+          return this.getFallbackLocation();
+        }
+        throw new Error('Location permission denied. Please enable location permissions in your device settings.');
+      }
       
       if (allowFallback) {
-        console.warn('Location error, using fallback location');
+        console.warn('⚠️ Location error, using fallback location');
         return this.getFallbackLocation();
       }
       
-      throw new Error(`Failed to get location: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to get location: ${errorMessage}`);
     }
   }
 

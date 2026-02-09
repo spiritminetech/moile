@@ -115,6 +115,28 @@ const attendanceSchema = new mongoose.Schema(
         default: null
       }
     }],
+    // Transport delay linking
+    linkedToTransportDelay: {
+      type: Boolean,
+      default: false
+    },
+    linkedDelayId: {
+      type: Number,
+      default: null
+    },
+    delayReason: {
+      type: String,
+      default: ''
+    },
+    lateMinutes: {
+      type: Number,
+      default: 0
+    },
+    status: {
+      type: String,
+      enum: ['present', 'late', 'absent', 'late_excused', 'on_leave'],
+      default: 'present'
+    },
     createdAt: {
       type: Date,
       default: Date.now,

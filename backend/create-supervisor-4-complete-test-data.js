@@ -363,27 +363,27 @@ async function createCompleteTestData() {
     console.log(`\n🎯 Test URLs for Postman:\n`);
     
     console.log(`1️⃣  Workers Assigned (Project 1):`);
-    console.log(`   GET http://192.168.1.8:5002/api/supervisor/workers-assigned?projectId=1`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/workers-assigned?projectId=1`);
     console.log(`   Expected: 4 workers (2 present, 1 late, 1 absent)\n`);
     
     console.log(`2️⃣  Workers Assigned (Project 2):`);
-    console.log(`   GET http://192.168.1.8:5002/api/supervisor/workers-assigned?projectId=2`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/workers-assigned?projectId=2`);
     console.log(`   Expected: 4 workers (2 present, 1 late, 1 absent)\n`);
     
     console.log(`3️⃣  Late/Absent Workers (Project 1):`);
-    console.log(`   GET http://192.168.1.8:5002/api/supervisor/late-absent-workers?projectId=1`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/late-absent-workers?projectId=1`);
     console.log(`   Expected: 1 late (ID: 103), 1 absent (ID: 104)\n`);
     
     console.log(`4️⃣  Late/Absent Workers (Project 2):`);
-    console.log(`   GET http://192.168.1.8:5002/api/supervisor/late-absent-workers?projectId=2`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/late-absent-workers?projectId=2`);
     console.log(`   Expected: 1 late (ID: 107), 1 absent (ID: 108)\n`);
     
     console.log(`5️⃣  Geofence Violations (Project 2):`);
-    console.log(`   GET http://192.168.1.8:5002/api/supervisor/geofence-violations?projectId=2`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/geofence-violations?projectId=2`);
     console.log(`   Expected: Currently returns empty (feature ready for implementation)\n`);
     
     console.log(`6️⃣  Manual Attendance Override:`);
-    console.log(`   POST http://192.168.1.8:5002/api/supervisor/manual-attendance-override`);
+    console.log(`   POST http://192.168.0.3:5002/api/supervisor/manual-attendance-override`);
     console.log(`   Body: {`);
     console.log(`     "supervisorId": ${supervisorEmployeeId},`);
     console.log(`     "workerId": 104,`);
@@ -398,7 +398,7 @@ async function createCompleteTestData() {
     console.log(`\n📝 Login Credentials:`);
     console.log(`   Email: supervisor@gmail.com`);
     console.log(`   Password: password123`);
-    console.log(`   POST http://192.168.1.8:5002/api/auth/login\n`);
+    console.log(`   POST http://192.168.0.3:5002/api/auth/login\n`);
 
   } catch (error) {
     console.error('❌ Error:', error);

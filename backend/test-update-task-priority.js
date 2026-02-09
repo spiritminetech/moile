@@ -5,7 +5,7 @@ import WorkerTaskAssignment from './src/modules/worker/models/WorkerTaskAssignme
 
 dotenv.config();
 
-const BASE_URL = 'http://192.168.1.8:5002/api';
+const BASE_URL = 'http://192.168.0.3:5002/api';
 
 // Test credentials for supervisor
 const SUPERVISOR_CREDENTIALS = {

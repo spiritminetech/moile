@@ -55,20 +55,93 @@ const employeeSchema = new mongoose.Schema({
     trim: true,
     default: null
   },
+  licenseClass: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  licenseIssueDate: {
+    type: Date,
+    default: null
+  },
   licenseExpiry: {
     type: Date,
+    default: null
+  },
+  licenseIssuingAuthority: {
+    type: String,
+    trim: true,
     default: null
   },
   licensePhotoUrl: {
     type: String,
     default: null
   },
+  yearsOfExperience: {
+    type: Number,
+    default: 0
+  },
+  specializations: {
+    type: [String],
+    default: []
+  },
+  // Emergency Contact
+  emergencyContact: {
+    name: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    relationship: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    phone: {
+      type: String,
+      trim: true,
+      default: null
+    }
+  },
+  // Certifications
+  certifications: {
+    type: [{
+      id: Number,
+      name: String,
+      issuer: String,
+      issueDate: Date,
+      expiryDate: Date,
+      status: {
+        type: String,
+        enum: ['active', 'expired', 'expiring_soon'],
+        default: 'active'
+      }
+    }],
+    default: []
+  },
+  // Performance Metrics
+  safetyScore: {
+    type: Number,
+    default: 95,
+    min: 0,
+    max: 100
+  },
+  customerRating: {
+    type: Number,
+    default: 4.5,
+    min: 0,
+    max: 5
+  },
   status: {
     type: String,
-    enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED'],
+    enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED', 'LEFT'],
     default: 'ACTIVE'
   },
   createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
     type: Date,
     default: Date.now
   }

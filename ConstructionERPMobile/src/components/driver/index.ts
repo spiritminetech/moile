@@ -12,3 +12,4 @@ export { default as WorkerCheckInForm } from './WorkerCheckInForm';
 export { default as TripStatusUpdateForm } from './TripStatusUpdateForm';
 export { default as VehicleLogForm } from './VehicleLogForm';
 export { default as TripHistoryComponent } from './TripHistoryComponent';
+export { FuelLogModal } from './FuelLogModal';

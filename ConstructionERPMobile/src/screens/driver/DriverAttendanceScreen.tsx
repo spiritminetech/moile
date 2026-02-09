@@ -42,7 +42,6 @@ interface DriverAttendanceSession {
     model: string;
   } | null;
   totalHours: number;
-  totalDistance: number;
   date: string;
 }
 
@@ -53,7 +52,6 @@ interface AttendanceRecord {
   vehicleId: number;
   vehiclePlateNumber: string;
   totalHours: number;
-  totalDistance: number;
   tripsCompleted: number;
 }
 
@@ -278,7 +276,7 @@ const DriverAttendanceScreen: React.FC = () => {
       if (response.success) {
         Alert.alert(
           'Success', 
-          `Clocked out successfully!\nTotal hours: ${response.data.totalHours.toFixed(1)}\nTotal distance: ${response.data.totalDistance.toFixed(1)} km`
+          `Clocked out successfully!\nTotal hours: ${response.data.totalHours.toFixed(1)}`
         );
         // Refresh attendance data
         await loadAttendanceData(false);
@@ -421,10 +419,6 @@ const DriverAttendanceScreen: React.FC = () => {
                 <Text style={styles.sessionLabel}>Total Hours:</Text>
                 <Text style={styles.sessionValue}>{formatHours(todaysSession.totalHours)}</Text>
               </View>
-              <View style={styles.sessionRow}>
-                <Text style={styles.sessionLabel}>Distance:</Text>
-                <Text style={styles.sessionValue}>{todaysSession.totalDistance.toFixed(1)} km</Text>
-              </View>
               {todaysSession.assignedVehicle && (
                 <View style={styles.sessionRow}>
                   <Text style={styles.sessionLabel}>Vehicle:</Text>
@@ -465,7 +459,7 @@ const DriverAttendanceScreen: React.FC = () => {
                 <View style={styles.completedContainer}>
                   <Text style={styles.completedText}>✅ Work day completed</Text>
                   <Text style={styles.completedSubtext}>
-                    Total: {formatHours(todaysSession.totalHours)} • {todaysSession.totalDistance.toFixed(1)} km
+                    Total: {formatHours(todaysSession.totalHours)}
                   </Text>
                 </View>
               )}
@@ -512,7 +506,9 @@ const DriverAttendanceScreen: React.FC = () => {
 
         {/* Attendance History */}
         <ConstructionCard variant="outlined" style={styles.historyCard}>
-          <Text style={styles.historyTitle}>📋 Recent Attendance (Last 30 Days)</Text>
+          <Text style={styles.historyTitle}>
+            📋 Recent Attendance{attendanceHistory.length > 0 ? ' (Last 30 Days)' : ''}
+          </Text>
           
           {attendanceHistory.length > 0 ? (
             <View style={styles.historyList}>
@@ -525,9 +521,11 @@ const DriverAttendanceScreen: React.FC = () => {
                         day: 'numeric' 
                       })}
                     </Text>
-                    <Text style={styles.historyVehicleText}>
-                      {record.vehiclePlateNumber}
-                    </Text>
+                    {record.vehiclePlateNumber && (
+                      <Text style={styles.historyVehicleText}>
+                        {record.vehiclePlateNumber}
+                      </Text>
+                    )}
                   </View>
                   
                   <View style={styles.historyDetails}>
@@ -535,7 +533,7 @@ const DriverAttendanceScreen: React.FC = () => {
                       {formatTime(record.checkInTime)} - {formatTime(record.checkOutTime)}
                     </Text>
                     <Text style={styles.historyStats}>
-                      {formatHours(record.totalHours)} • {record.totalDistance.toFixed(1)}km • {record.tripsCompleted} trips
+                      {formatHours(record.totalHours)}{record.tripsCompleted > 0 && ` • ${record.tripsCompleted} trips`}
                     </Text>
                   </View>
                 </View>

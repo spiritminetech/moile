@@ -69,7 +69,7 @@ const fleetTaskSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'],
+    enum: ['PLANNED', 'ONGOING', 'PICKUP_COMPLETE', 'EN_ROUTE_DROPOFF', 'COMPLETED', 'CANCELLED'],
     default: 'PLANNED'
   },
   notes: {

@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../../store/context/AuthContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
+import { driverApiService } from '../../services/api/DriverApiService';
 import ConstructionInput from '../../components/common/ConstructionInput';
 import ConstructionButton from '../../components/common/ConstructionButton';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
@@ -79,6 +80,12 @@ const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ navigation,
       if (userRole === 'supervisor') {
         console.log('📡 Calling supervisor password change API');
         response = await supervisorApiService.changePassword({
+          oldPassword,
+          newPassword,
+        });
+      } else if (userRole === 'driver') {
+        console.log('📡 Calling driver password change API');
+        response = await driverApiService.changePassword({
           oldPassword,
           newPassword,
         });

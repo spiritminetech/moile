@@ -16,7 +16,7 @@ import {
 import { useAuth } from '../../store/context/AuthContext';
 import { useOffline } from '../../store/context/OfflineContext';
 import { driverApiService } from '../../services/api/DriverApiService';
-import { VehicleInfo, MaintenanceAlert } from '../../types';
+import { VehicleInfo, MaintenanceAlert, FuelLogEntry } from '../../types';
 
 // Import common components
 import { 
@@ -26,6 +26,7 @@ import {
   ErrorDisplay,
   OfflineIndicator 
 } from '../../components/common';
+import { FuelLogModal } from '../../components/driver/FuelLogModal';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
 const VehicleInfoScreen: React.FC = () => {
@@ -41,6 +42,7 @@ const VehicleInfoScreen: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [showFuelLogModal, setShowFuelLogModal] = useState(false);
 
   // Load vehicle information
   const loadVehicleInfo = useCallback(async (showLoading = true) => {
@@ -53,9 +55,20 @@ const VehicleInfoScreen: React.FC = () => {
       console.log('🚗 Loading vehicle information...');
 
       const response = await driverApiService.getAssignedVehicle();
+      console.log('🚗 API Response:', JSON.stringify(response, null, 2));
+      
       if (response.success && response.data) {
+        console.log('🚗 Vehicle Data:', {
+          plateNumber: response.data.plateNumber,
+          currentMileage: response.data.currentMileage,
+          fuelLevel: response.data.fuelLevel,
+          model: response.data.model,
+          year: response.data.year
+        });
         setVehicleInfo(response.data);
         console.log('✅ Vehicle info loaded');
+      } else {
+        console.warn('⚠️ No vehicle data in response');
       }
 
       // Load maintenance alerts
@@ -93,26 +106,23 @@ const VehicleInfoScreen: React.FC = () => {
       Alert.alert('Error', 'No vehicle assigned');
       return;
     }
-
-    Alert.alert(
-      'Log Fuel Entry',
-      'Enter fuel information for your vehicle',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Open Fuel Log',
-          onPress: () => {
-            // In a full implementation, this would navigate to a fuel logging form
-            Alert.alert(
-              'Fuel Log Form',
-              'This would open a detailed fuel logging form with:\n\n• Fuel amount (liters)\n• Cost\n• Current mileage\n• Gas station location\n• Receipt photo upload\n\nFeature will be fully implemented in the next update.',
-              [{ text: 'OK' }]
-            );
-          },
-        },
-      ]
-    );
+    setShowFuelLogModal(true);
   }, [vehicleInfo]);
+
+  // Handle fuel log submission
+  const handleFuelLogSubmit = useCallback(async (entry: FuelLogEntry) => {
+    try {
+      // In a real implementation, this would call the API
+      // await driverApiService.submitFuelLog(entry);
+      
+      console.log('Fuel log entry submitted:', entry);
+      
+      // Refresh vehicle info to show the new entry
+      await loadVehicleInfo(false);
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to submit fuel log entry');
+    }
+  }, [loadVehicleInfo]);
 
   // Handle maintenance reporting
   const handleReportIssue = useCallback(() => {
@@ -341,17 +351,30 @@ const VehicleInfoScreen: React.FC = () => {
           <ConstructionCard title="Vehicle Details" variant="elevated" style={styles.vehicleCard}>
             <View style={styles.vehicleHeader}>
               <Text style={styles.vehiclePlate}>🚛 {vehicleInfo.plateNumber}</Text>
-              <Text style={styles.vehicleModel}>{vehicleInfo.model} ({vehicleInfo.year})</Text>
+              <Text style={styles.vehicleModel}>
+                {vehicleInfo.model || vehicleInfo.vehicleType || 'Unknown Vehicle'}
+                {vehicleInfo.year ? ` (${vehicleInfo.year})` : ''}
+              </Text>
             </View>
             
             <View style={styles.vehicleSpecs}>
+              <View style={styles.specItem}>
+                <Text style={styles.specLabel}>Assigned Driver</Text>
+                <Text style={styles.specValue}>
+                  {vehicleInfo.assignedDriverName || authState.user?.name || 'Not Assigned'}
+                </Text>
+              </View>
               <View style={styles.specItem}>
                 <Text style={styles.specLabel}>Capacity</Text>
                 <Text style={styles.specValue}>{vehicleInfo.capacity} passengers</Text>
               </View>
               <View style={styles.specItem}>
+                <Text style={styles.specLabel}>Fuel Type</Text>
+                <Text style={styles.specValue}>{vehicleInfo.fuelType || 'Diesel'}</Text>
+              </View>
+              <View style={styles.specItem}>
                 <Text style={styles.specLabel}>Current Mileage</Text>
-                <Text style={styles.specValue}>{vehicleInfo.currentMileage.toLocaleString()} km</Text>
+                <Text style={styles.specValue}>{vehicleInfo.currentMileage?.toLocaleString() || 'N/A'} km</Text>
               </View>
               <View style={styles.specItem}>
                 <Text style={styles.specLabel}>Fuel Level</Text>
@@ -359,7 +382,87 @@ const VehicleInfoScreen: React.FC = () => {
                   {vehicleInfo.fuelLevel}%
                 </Text>
               </View>
+              
+              {/* Insurance Information */}
+              {vehicleInfo.insurance && (
+                <>
+                  <View style={styles.sectionDivider} />
+                  <View style={styles.specItem}>
+                    <Text style={styles.specLabel}>Insurance Provider</Text>
+                    <Text style={styles.specValue}>{vehicleInfo.insurance.provider}</Text>
+                  </View>
+                  <View style={styles.specItem}>
+                    <Text style={styles.specLabel}>Policy Number</Text>
+                    <Text style={styles.specValue}>{vehicleInfo.insurance.policyNumber}</Text>
+                  </View>
+                  <View style={styles.specItem}>
+                    <Text style={styles.specLabel}>Insurance Expiry</Text>
+                    <Text style={[
+                      styles.specValue,
+                      { color: getExpiryStatusColor(vehicleInfo.insurance.status) }
+                    ]}>
+                      {new Date(vehicleInfo.insurance.expiryDate).toLocaleDateString()}
+                      {' '}({vehicleInfo.insurance.status.replace('_', ' ').toUpperCase()})
+                    </Text>
+                  </View>
+                </>
+              )}
+              
+              {/* Road Tax Information */}
+              {vehicleInfo.roadTax && (
+                <>
+                  <View style={styles.sectionDivider} />
+                  <View style={styles.specItem}>
+                    <Text style={styles.specLabel}>Road Tax Valid Until</Text>
+                    <Text style={[
+                      styles.specValue,
+                      { color: getExpiryStatusColor(vehicleInfo.roadTax.status) }
+                    ]}>
+                      {new Date(vehicleInfo.roadTax.validUntil).toLocaleDateString()}
+                      {' '}({vehicleInfo.roadTax.status.replace('_', ' ').toUpperCase()})
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
+
+            {/* Assigned Route Section */}
+            {vehicleInfo.assignedRoute && (
+              <View style={styles.assignedRouteSection}>
+                <Text style={styles.routeSectionTitle}>📍 Assigned Route</Text>
+                <View style={styles.routeDetails}>
+                  <View style={styles.routeHeader}>
+                    <Text style={styles.routeName}>{vehicleInfo.assignedRoute.routeName}</Text>
+                    <Text style={styles.routeCode}>Code: {vehicleInfo.assignedRoute.routeCode}</Text>
+                  </View>
+                  
+                  <View style={styles.routeLocations}>
+                    <Text style={styles.routeLabel}>Pickup Locations:</Text>
+                    {vehicleInfo.assignedRoute.pickupLocations.map((location, index) => (
+                      <Text key={index} style={styles.routeLocation}>
+                        {index + 1}. {location}
+                      </Text>
+                    ))}
+                  </View>
+                  
+                  <View style={styles.routeDestination}>
+                    <Text style={styles.routeLabel}>Drop-off Location:</Text>
+                    <Text style={styles.routeLocation}>🎯 {vehicleInfo.assignedRoute.dropoffLocation}</Text>
+                  </View>
+                  
+                  <View style={styles.routeStats}>
+                    <View style={styles.routeStat}>
+                      <Text style={styles.routeStatLabel}>Distance</Text>
+                      <Text style={styles.routeStatValue}>{vehicleInfo.assignedRoute.estimatedDistance} km</Text>
+                    </View>
+                    <View style={styles.routeStat}>
+                      <Text style={styles.routeStatLabel}>Duration</Text>
+                      <Text style={styles.routeStatValue}>{vehicleInfo.assignedRoute.estimatedDuration} min</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
 
             <View style={styles.vehicleActions}>
               <ConstructionButton
@@ -402,7 +505,7 @@ const VehicleInfoScreen: React.FC = () => {
                 <Text style={styles.alertDescription}>{alert.description}</Text>
                 <Text style={styles.alertDue}>
                   Due: {new Date(alert.dueDate).toLocaleDateString()}
-                  {alert.dueMileage && ` or ${alert.dueMileage.toLocaleString()} km`}
+                  {alert.dueMileage && ` or ${alert.dueMileage?.toLocaleString() || 'N/A'} km`}
                 </Text>
                 {alert.estimatedCost && (
                   <Text style={styles.alertCost}>
@@ -428,7 +531,7 @@ const VehicleInfoScreen: React.FC = () => {
           <ConstructionCard title="Recent Fuel Log" variant="outlined" style={styles.fuelLogCard}>
             <Text style={styles.fuelLogTitle}>⛽ Last 5 Fuel Entries</Text>
             {vehicleInfo.fuelLog.slice(0, 5).map((entry, index) => (
-              <View key={index} style={styles.fuelLogEntry}>
+              <View key={entry.id || index} style={styles.fuelLogEntry}>
                 <View style={styles.fuelLogHeader}>
                   <Text style={styles.fuelLogDate}>
                     {new Date(entry.date).toLocaleDateString()}
@@ -439,11 +542,16 @@ const VehicleInfoScreen: React.FC = () => {
                 </View>
                 <View style={styles.fuelLogDetails}>
                   <Text style={styles.fuelLogDetail}>
-                    Cost: ${entry.cost} • Mileage: {entry.mileage.toLocaleString()} km
+                    Cost: ${entry.cost} • Mileage: {entry.mileage?.toLocaleString() || 'N/A'} km
                   </Text>
                   <Text style={styles.fuelLogLocation}>
                     📍 {entry.location}
                   </Text>
+                  {entry.receiptPhoto && (
+                    <Text style={styles.fuelLogReceipt}>
+                      📎 Receipt attached
+                    </Text>
+                  )}
                 </View>
               </View>
             ))}
@@ -465,7 +573,7 @@ const VehicleInfoScreen: React.FC = () => {
                   </Text>
                 </View>
                 <Text style={styles.scheduleDue}>
-                  Due: {new Date(item.dueDate).toLocaleDateString()} or {item.dueMileage.toLocaleString()} km
+                  Due: {new Date(item.dueDate).toLocaleDateString()} or {item.dueMileage?.toLocaleString() || 'N/A'} km
                 </Text>
               </View>
             ))}
@@ -530,6 +638,17 @@ const VehicleInfoScreen: React.FC = () => {
         {/* Bottom spacing */}
         <View style={styles.bottomSpacing} />
       </ScrollView>
+
+      {/* Fuel Log Modal */}
+      {vehicleInfo && (
+        <FuelLogModal
+          visible={showFuelLogModal}
+          vehicleId={vehicleInfo.id}
+          currentMileage={vehicleInfo.currentMileage}
+          onClose={() => setShowFuelLogModal(false)}
+          onSubmit={handleFuelLogSubmit}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -563,6 +682,19 @@ const getMaintenanceStatusColor = (status: string): string => {
     case 'due':
       return ConstructionTheme.colors.warning;
     case 'upcoming':
+      return ConstructionTheme.colors.success;
+    default:
+      return ConstructionTheme.colors.onSurfaceVariant;
+  }
+};
+
+const getExpiryStatusColor = (status: string): string => {
+  switch (status) {
+    case 'expired':
+      return ConstructionTheme.colors.error;
+    case 'expiring_soon':
+      return ConstructionTheme.colors.warning;
+    case 'active':
       return ConstructionTheme.colors.success;
     default:
       return ConstructionTheme.colors.onSurfaceVariant;
@@ -665,6 +797,11 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurface,
     fontWeight: 'bold',
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: ConstructionTheme.colors.outline + '33',
+    marginVertical: ConstructionTheme.spacing.md,
   },
   vehicleActions: {
     flexDirection: 'row',
@@ -781,6 +918,12 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodySmall,
     color: ConstructionTheme.colors.onSurfaceVariant,
   },
+  fuelLogReceipt: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.primary,
+    marginTop: ConstructionTheme.spacing.xs,
+    fontStyle: 'italic',
+  },
   scheduleCard: {
     marginBottom: ConstructionTheme.spacing.lg,
   },
@@ -833,6 +976,78 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodySmall,
     color: ConstructionTheme.colors.onSurfaceVariant,
     fontStyle: 'italic',
+  },
+  // Assigned Route Styles
+  assignedRouteSection: {
+    marginTop: ConstructionTheme.spacing.lg,
+    paddingTop: ConstructionTheme.spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline + '33',
+  },
+  routeSectionTitle: {
+    ...ConstructionTheme.typography.headlineSmall,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  routeDetails: {
+    backgroundColor: ConstructionTheme.colors.primaryContainer + '22',
+    padding: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.md,
+    borderLeftWidth: 4,
+    borderLeftColor: ConstructionTheme.colors.primary,
+  },
+  routeHeader: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  routeName: {
+    ...ConstructionTheme.typography.titleMedium,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  routeCode: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontStyle: 'italic',
+  },
+  routeLocations: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  routeDestination: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  routeLabel: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  routeLocation: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    marginLeft: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  routeStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingTop: ConstructionTheme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline + '22',
+  },
+  routeStat: {
+    alignItems: 'center',
+  },
+  routeStatLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  routeStatValue: {
+    ...ConstructionTheme.typography.titleMedium,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
   },
   bottomSpacing: {
     height: ConstructionTheme.spacing.xl,

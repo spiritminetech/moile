@@ -19,7 +19,6 @@ interface RouteMapCardProps {
   onNavigateToLocation: (coordinates: { latitude: number; longitude: number }, name: string) => void;
   onRefreshLocation: () => void;
   isLocationEnabled: boolean;
-  isOffline: boolean;
 }
 
 const RouteMapCard: React.FC<RouteMapCardProps> = ({
@@ -28,7 +27,6 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
   onNavigateToLocation,
   onRefreshLocation,
   isLocationEnabled,
-  isOffline,
 }) => {
   // Calculate distance between two coordinates (Haversine formula)
   const calculateDistance = (
@@ -93,15 +91,6 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
 
   // Handle navigation
   const handleNavigate = (coordinates: { latitude: number; longitude: number }, name: string) => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Navigation requires internet connection. Please connect to use GPS navigation.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     if (!isLocationEnabled) {
       Alert.alert(
         'Location Disabled',
@@ -119,15 +108,6 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
 
   // Handle refresh location
   const handleRefreshLocation = () => {
-    if (isOffline) {
-      Alert.alert(
-        'Offline Mode',
-        'Cannot refresh location while offline.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     onRefreshLocation();
   };
 
@@ -144,7 +124,6 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
               onPress={handleRefreshLocation}
               variant="primary"
               size="small"
-              disabled={isOffline}
               icon="🔄"
               style={styles.refreshButton}
             />
@@ -159,7 +138,6 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
           <Text style={styles.sectionTitle}>📍 Current Location</Text>
           <TouchableOpacity
             onPress={handleRefreshLocation}
-            disabled={isOffline}
             style={styles.refreshIconButton}
           >
             <Text style={styles.refreshIcon}>🔄</Text>
@@ -218,7 +196,7 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
           onPress={() => handleNavigate(destination.coordinates, destination.name)}
           variant="success"
           size="medium"
-          disabled={isOffline || !isLocationEnabled}
+          disabled={!isLocationEnabled}
           icon="🧭"
           style={styles.navigateButton}
         />
@@ -277,7 +255,7 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
               )}
               <TouchableOpacity
                 onPress={() => handleNavigate(location.coordinates, location.name)}
-                disabled={isOffline || !isLocationEnabled}
+                disabled={!isLocationEnabled}
                 style={styles.miniNavigateButton}
               >
                 <Text style={styles.miniNavigateText}>Navigate 🧭</Text>
@@ -319,12 +297,6 @@ const RouteMapCard: React.FC<RouteMapCardProps> = ({
       {/* All locations */}
       {renderAllLocations()}
 
-      {/* Offline indicator */}
-      {isOffline && (
-        <View style={styles.offlineIndicator}>
-          <Text style={styles.offlineText}>⚠️ Navigation requires internet connection</Text>
-        </View>
-      )}
     </ConstructionCard>
   );
 };
@@ -491,19 +463,6 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodySmall,
     color: ConstructionTheme.colors.secondary,
     fontWeight: '600',
-  },
-  offlineIndicator: {
-    marginTop: ConstructionTheme.spacing.md,
-    padding: ConstructionTheme.spacing.sm,
-    backgroundColor: ConstructionTheme.colors.warning + '20',
-    borderRadius: ConstructionTheme.borderRadius.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: ConstructionTheme.colors.warning,
-  },
-  offlineText: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: '#E65100',
-    fontWeight: '500',
   },
 });
 
