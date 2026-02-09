@@ -6,67 +6,36 @@ import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
 import ProjectManpowerRequirement from "../project/models/ProjectManpowerRequirement.js";
 import ProjectMaterialRequirement from "../project/models/ProjectMaterialRequirement.js";
 
+// Helper function to create UTC date at start of day
+const getUTCStartOfDay = (dateInput) => {
+    const date = dateInput ? new Date(dateInput) : new Date();
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
+};
+
+// Helper function to create UTC date at end of day
+const getUTCEndOfDay = (dateInput) => {
+    const date = dateInput ? new Date(dateInput) : new Date();
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+};
+
 /* ----------------------------------------------------
    POST: Submit Daily Progress (SUPERVISOR)
+   - Now supports both automatic (from worker progress) and manual submission
 ---------------------------------------------------- */
 export const submitDailyProgress = async (req, res) => {
     try {
-        const { projectId, remarks = "", issues = "" } = req.body;
+        const { projectId, remarks = "", issues = "", overallProgress: manualProgress } = req.body;
 
         if (!projectId) {
             return res.status(400).json({ message: "projectId is required" });
         }
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
-
-        const todayStr = new Date().toISOString().split("T")[0];
-
-        const assignments = await WorkerTaskAssignment.find({
-            projectId: Number(projectId),
-            date: todayStr
-        });
-
-
-
-        if (!assignments.length) {
-            return res.status(400).json({
-                message: "No worker assignments today"
-            });
-        }
-
-        const assignmentIds = assignments.map(a => a.id);
-
-        // 2️⃣ Get APPROVED progress via assignmentId
-        const approvedProgress = await WorkerTaskProgress.find({
-            workerTaskAssignmentId: { $in: assignmentIds },
-            status: "APPROVED",
-            submittedAt: { $gte: startOfDay, $lte: endOfDay }
-        });
-
-        if (!approvedProgress.length) {
-            return res.status(400).json({
-                message: "No approved worker progress found"
-            });
-        }
-
-        // 3️⃣ Calculate progress
-        const total = approvedProgress.reduce(
-            (sum, p) => sum + p.progressPercent,
-            0
-        );
-
-        const overallProgress = Math.round(total / approvedProgress.length);
-
-
-        const lastProgress = await ProjectDailyProgress.findOne().sort({ id: -1 });
-        const nextId = lastProgress && typeof lastProgress.id === "number" ? lastProgress.id + 1 : 1;
+        // Use UTC dates to avoid timezone issues
+        const now = new Date();
+        const today = getUTCStartOfDay(now);
+        const startOfDay = getUTCStartOfDay(now);
+        const endOfDay = getUTCEndOfDay(now);
+        const todayStr = now.toISOString().split("T")[0];
 
         // Get supervisorId from Project
         const project = await Project.findOne({ id: Number(projectId) });
@@ -77,10 +46,50 @@ export const submitDailyProgress = async (req, res) => {
         }
         const supervisorId = project.supervisorId;
 
+        let overallProgress = 0;
+        let calculationMethod = 'manual';
+
+        // Try to calculate progress from worker tasks (optional)
+        if (manualProgress !== undefined && manualProgress !== null) {
+            // Manual progress provided - use it directly
+            overallProgress = Number(manualProgress);
+            calculationMethod = 'manual';
+        } else {
+            // Try automatic calculation from worker progress
+            const assignments = await WorkerTaskAssignment.find({
+                projectId: Number(projectId),
+                date: todayStr
+            });
+
+            if (assignments.length > 0) {
+                const assignmentIds = assignments.map(a => a.id);
+
+                const approvedProgress = await WorkerTaskProgress.find({
+                    workerTaskAssignmentId: { $in: assignmentIds },
+                    status: "APPROVED",
+                    submittedAt: { $gte: startOfDay, $lte: endOfDay }
+                });
+
+                if (approvedProgress.length > 0) {
+                    // Calculate from approved worker progress
+                    const total = approvedProgress.reduce(
+                        (sum, p) => sum + p.progressPercent,
+                        0
+                    );
+                    overallProgress = Math.round(total / approvedProgress.length);
+                    calculationMethod = 'automatic';
+                }
+            }
+            // If no worker progress found, overallProgress remains 0 (which is fine)
+        }
+
+        const lastProgress = await ProjectDailyProgress.findOne().sort({ id: -1 });
+        const nextId = lastProgress && typeof lastProgress.id === "number" ? lastProgress.id + 1 : 1;
+
         const dailyProgress = await ProjectDailyProgress.create({
             id: nextId,
             projectId: Number(projectId),
-            supervisorId,             // <-- added supervisorId
+            supervisorId,
             date: today,
             overallProgress,
             remarks,
@@ -90,9 +99,9 @@ export const submitDailyProgress = async (req, res) => {
 
         return res.status(201).json({
             message: "Daily progress submitted successfully",
-            dailyProgress
+            dailyProgress,
+            calculationMethod // Inform client how progress was calculated
         });
-
 
     } catch (err) {
         console.error("submitDailyProgress error:", err);
@@ -211,8 +220,8 @@ export const getDailyProgressByDate = async (req, res) => {
     try {
         const { projectId, date } = req.params;
 
-        const targetDate = new Date(date);
-        targetDate.setHours(0, 0, 0, 0);
+        const parsedDate = new Date(date);
+        const targetDate = getUTCStartOfDay(parsedDate);
 
         const progress = await ProjectDailyProgress.findOne({
             projectId: Number(projectId),
@@ -258,20 +267,31 @@ export const getDailyProgressRange = async (req, res) => {
             });
         }
 
-        const fromDate = new Date(from);
-        const toDate = new Date(to);
-        fromDate.setHours(0, 0, 0, 0);
-        toDate.setHours(23, 59, 59, 999);
+        const parsedFrom = new Date(from);
+        const parsedTo = new Date(to);
+        const fromDate = new Date(Date.UTC(parsedFrom.getUTCFullYear(), parsedFrom.getUTCMonth(), parsedFrom.getUTCDate(), 0, 0, 0, 0));
+        const toDate = new Date(Date.UTC(parsedTo.getUTCFullYear(), parsedTo.getUTCMonth(), parsedTo.getUTCDate(), 23, 59, 59, 999));
 
         const progressList = await ProjectDailyProgress.find({
             projectId: Number(projectId),
             date: { $gte: fromDate, $lte: toDate }
         }).sort({ date: 1 });
 
+        // Get project name
+        const project = await Project.findOne({ id: Number(projectId) });
+        const projectName = project?.projectName || project?.name || `Project ${projectId}`;
+
+        // Add project name to each progress item
+        const progressWithProjectName = progressList.map(progress => ({
+            ...progress.toObject(),
+            projectName
+        }));
+
         return res.json({
             projectId,
+            projectName,
             count: progressList.length,
-            data: progressList
+            data: progressWithProjectName
         });
     } catch (err) {
         console.error("getDailyProgressRange error:", err);
@@ -307,8 +327,7 @@ export const logIssuesAndSafety = async (req, res) => {
             });
         }
 
-        const targetDate = date ? new Date(date) : new Date();
-        targetDate.setHours(0, 0, 0, 0);
+        const targetDate = getUTCStartOfDay(date);
 
         // Find or create daily progress
         let dailyProgress;
@@ -406,8 +425,7 @@ export const trackManpowerUsage = async (req, res) => {
             });
         }
 
-        const targetDate = date ? new Date(date) : new Date();
-        targetDate.setHours(0, 0, 0, 0);
+        const targetDate = getUTCStartOfDay(date);
 
         // Find or create daily progress for this date
         let dailyProgress;
@@ -499,8 +517,7 @@ export const logIssues = async (req, res) => {
             });
         }
 
-        const issueDate = date ? new Date(date) : new Date();
-        issueDate.setHours(0, 0, 0, 0);
+        const issueDate = getUTCStartOfDay(date);
 
         // Find or create daily progress record
         let dailyProgress;
@@ -580,8 +597,7 @@ export const trackMaterialConsumption = async (req, res) => {
             });
         }
 
-        const targetDate = date ? new Date(date) : new Date();
-        targetDate.setHours(0, 0, 0, 0);
+        const targetDate = getUTCStartOfDay(date);
 
         // Find or create daily progress for this date
         let dailyProgress;

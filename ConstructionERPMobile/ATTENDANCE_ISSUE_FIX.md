@@ -75,7 +75,7 @@ const TEST_TOKEN = 'your-jwt-token-here'; // Valid JWT token
 Edit `src/utils/constants/index.ts`:
 ```typescript
 // Update the IP address to match your backend
-return 'http://192.168.0.3:5002/api';  // Your computer's IP
+return 'http://192.168.1.8:5002/api';  // Your computer's IP
 ```
 
 ### 3. **Run Diagnostics**

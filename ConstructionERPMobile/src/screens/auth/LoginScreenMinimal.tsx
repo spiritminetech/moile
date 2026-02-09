@@ -1,12 +1,13 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, StatusBar } from 'react-native';
 
 const LoginScreenMinimal: React.FC = () => {
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <Text style={styles.title}>Construction ERP</Text>
       <Text style={styles.subtitle}>Minimal Test Screen</Text>
-    </View>
+    </SafeAreaView>
   );
 };
 

@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Alert,
   TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useOffline } from '../../store/context/OfflineContext';
@@ -297,7 +299,8 @@ const VehicleInfoScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
@@ -390,10 +393,10 @@ const VehicleInfoScreen: React.FC = () => {
               <View key={alert.id} style={styles.alertItem}>
                 <View style={styles.alertHeader}>
                   <Text style={[styles.alertType, { color: getAlertColor(alert.priority) }]}>
-                    {alert.type.toUpperCase()}
+                    {(alert.type || 'general').toUpperCase()}
                   </Text>
                   <Text style={styles.alertPriority}>
-                    {alert.priority.toUpperCase()}
+                    {(alert.priority || 'normal').toUpperCase()}
                   </Text>
                 </View>
                 <Text style={styles.alertDescription}>{alert.description}</Text>
@@ -455,10 +458,10 @@ const VehicleInfoScreen: React.FC = () => {
               <View key={index} style={styles.scheduleItem}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleType}>
-                    {item.type.replace('_', ' ').toUpperCase()}
+                    {(item.type || 'general').replace('_', ' ').toUpperCase()}
                   </Text>
                   <Text style={[styles.scheduleStatus, { color: getMaintenanceStatusColor(item.status) }]}>
-                    {item.status.toUpperCase()}
+                    {(item.status || 'pending').toUpperCase()}
                   </Text>
                 </View>
                 <Text style={styles.scheduleDue}>
@@ -527,7 +530,7 @@ const VehicleInfoScreen: React.FC = () => {
         {/* Bottom spacing */}
         <View style={styles.bottomSpacing} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 

@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { TaskAssignment } from '../../types';
@@ -200,7 +202,8 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <OfflineIndicator />
       
       {/* Header */}
@@ -245,7 +248,7 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
           />
         </>
       )}
-    </View>
+    </SafeAreaView>
   );
 };
 

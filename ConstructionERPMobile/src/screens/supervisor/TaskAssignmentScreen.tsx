@@ -14,6 +14,8 @@ import {
   Modal,
   TextInput,
   Switch,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
@@ -43,19 +45,32 @@ interface TaskAssignment {
   actualHours: number | null;
   dependencies: number[];
   canStart: boolean;
+  dailyTarget?: {
+    quantity: number;
+    unit: string;
+  };
 }
 
-// Task creation form data
+// Task creation form data - ENHANCED with all required fields
 interface TaskCreationForm {
   taskName: string;
   description: string;
   workerId: number;
+  workerIds: number[]; // For group assignment
+  assignmentMode: 'individual' | 'group';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   estimatedHours: number;
   instructions: string;
   requiredSkills: string[];
   dependencies: number[];
   projectId: number;
+  // NEW FIELDS - Missing from specification
+  trade: 'electrical' | 'plumbing' | 'carpentry' | 'masonry' | 'painting' | 'welding' | 'hvac' | 'other';
+  siteLocation: string; // Location within site
+  toolsRequired: string; // Tools/materials required
+  materialsRequired: string; // Materials required
+  startTime: string; // Start time (HH:mm format)
+  endTime: string; // End time (HH:mm format)
 }
 
 const TaskAssignmentScreen: React.FC = () => {
@@ -75,19 +90,36 @@ const TaskAssignmentScreen: React.FC = () => {
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [showTaskDetailsModal, setShowTaskDetailsModal] = useState(false);
+  const [showUpdateDailyTargetModal, setShowUpdateDailyTargetModal] = useState(false);
+  const [showVerifyCompletionModal, setShowVerifyCompletionModal] = useState(false); // NEW
   const [selectedTask, setSelectedTask] = useState<TaskAssignment | null>(null);
+
+  // Daily target state
+  const [dailyTargetQuantity, setDailyTargetQuantity] = useState<string>('');
+  const [dailyTargetUnit, setDailyTargetUnit] = useState<string>('');
+  const [targetUpdateReason, setTargetUpdateReason] = useState<string>(''); // NEW
+  const [targetUpdateReasonCategory, setTargetUpdateReasonCategory] = useState<'weather' | 'manpower' | 'material' | 'other'>('other'); // NEW
 
   // Form states
   const [createTaskForm, setCreateTaskForm] = useState<TaskCreationForm>({
     taskName: '',
     description: '',
     workerId: 0,
+    workerIds: [], // NEW
+    assignmentMode: 'individual', // NEW
     priority: 'normal',
     estimatedHours: 8,
     instructions: '',
     requiredSkills: [],
     dependencies: [],
     projectId: 0,
+    // NEW FIELDS
+    trade: 'other',
+    siteLocation: '',
+    toolsRequired: '',
+    materialsRequired: '',
+    startTime: '08:00',
+    endTime: '17:00',
   });
   const [reassignWorkerId, setReassignWorkerId] = useState<number>(0);
   const [reassignReason, setReassignReason] = useState<string>('');
@@ -184,31 +216,77 @@ const TaskAssignmentScreen: React.FC = () => {
     return supervisorState.assignedProjects.filter(project => project.status === 'active');
   }, [supervisorState.assignedProjects]);
 
-  // Task creation handler
+  // Task creation handler - ENHANCED with all new fields
   const handleCreateTask = useCallback(async () => {
     try {
-      if (!createTaskForm.taskName.trim() || !createTaskForm.workerId || !createTaskForm.projectId) {
-        Alert.alert('Validation Error', 'Please fill in all required fields');
+      // Validation
+      if (!createTaskForm.taskName.trim() || !createTaskForm.projectId) {
+        Alert.alert('Validation Error', 'Please fill in task name and select a project');
         return;
       }
 
-      // Use the correct API structure that matches the backend
+      // Validate worker selection based on assignment mode
+      if (createTaskForm.assignmentMode === 'individual' && !createTaskForm.workerId) {
+        Alert.alert('Validation Error', 'Please select a worker');
+        return;
+      }
+
+      if (createTaskForm.assignmentMode === 'group' && createTaskForm.workerIds.length === 0) {
+        Alert.alert('Validation Error', 'Please select at least one worker for group assignment');
+        return;
+      }
+
+      // Validate time range
+      if (createTaskForm.startTime && createTaskForm.endTime) {
+        const start = new Date(`2000-01-01T${createTaskForm.startTime}`);
+        const end = new Date(`2000-01-01T${createTaskForm.endTime}`);
+        if (end <= start) {
+          Alert.alert('Validation Error', 'End time must be after start time');
+          return;
+        }
+      }
+
+      // Prepare task data with all new fields
       const taskData = {
-        employeeId: createTaskForm.workerId,
+        taskName: createTaskForm.taskName,
+        description: createTaskForm.description || createTaskForm.taskName,
+        employeeId: createTaskForm.assignmentMode === 'individual' ? createTaskForm.workerId : undefined,
+        employeeIds: createTaskForm.assignmentMode === 'group' ? createTaskForm.workerIds : undefined,
+        assignmentMode: createTaskForm.assignmentMode,
         projectId: createTaskForm.projectId,
-        taskIds: [Date.now()], // Mock task ID - in real app, this would come from task selection
+        priority: createTaskForm.priority,
+        estimatedHours: createTaskForm.estimatedHours,
+        instructions: createTaskForm.instructions,
         date: new Date().toISOString().split('T')[0],
+        // NEW FIELDS
+        trade: createTaskForm.trade,
+        siteLocation: createTaskForm.siteLocation,
+        toolsRequired: createTaskForm.toolsRequired,
+        materialsRequired: createTaskForm.materialsRequired,
+        startTime: createTaskForm.startTime,
+        endTime: createTaskForm.endTime,
       };
 
-      const response = await supervisorApiService.assignTask(taskData);
+      // Use appropriate endpoint based on assignment mode
+      let response;
+      if (createTaskForm.assignmentMode === 'group') {
+        // Group assignment endpoint (to be implemented in backend)
+        response = await supervisorApiService.createAndAssignTaskGroup(taskData);
+      } else {
+        // Individual assignment endpoint (existing)
+        response = await supervisorApiService.createAndAssignTask(taskData);
+      }
       
       if (response.success) {
-        Alert.alert('Success', 'Task assigned successfully');
+        const assignmentType = createTaskForm.assignmentMode === 'group' 
+          ? `to ${createTaskForm.workerIds.length} workers` 
+          : 'successfully';
+        Alert.alert('Success', `Task created and assigned ${assignmentType}`);
         setShowCreateTaskModal(false);
         resetCreateTaskForm();
         await loadTaskAssignments();
       } else {
-        Alert.alert('Error', response.errors?.join(', ') || 'Failed to assign task');
+        Alert.alert('Error', response.errors?.join(', ') || 'Failed to create task');
       }
     } catch (error) {
       console.error('Task creation error:', error);
@@ -268,20 +346,110 @@ const TaskAssignmentScreen: React.FC = () => {
     }
   }, [loadTaskAssignments]);
 
-  // Reset create task form
+  // Daily target update handler - ENHANCED with reason tracking
+  const handleUpdateDailyTarget = useCallback(async () => {
+    try {
+      if (!selectedTask) return;
+
+      const quantity = parseInt(dailyTargetQuantity);
+      if (isNaN(quantity) || quantity <= 0) {
+        Alert.alert('Invalid Input', 'Please enter a valid quantity');
+        return;
+      }
+
+      if (!dailyTargetUnit.trim()) {
+        Alert.alert('Invalid Input', 'Please enter a unit (e.g., panels, meters, items)');
+        return;
+      }
+
+      // Validate reason if target is being changed
+      if (!targetUpdateReason.trim()) {
+        Alert.alert('Reason Required', 'Please provide a reason for updating the daily target');
+        return;
+      }
+
+      const response = await supervisorApiService.updateTaskAssignment({
+        assignmentId: selectedTask.assignmentId,
+        changes: {
+          dailyTarget: {
+            quantity,
+            unit: dailyTargetUnit.trim()
+          },
+          targetUpdateReason: targetUpdateReason.trim(),
+          targetUpdateReasonCategory: targetUpdateReasonCategory,
+          targetUpdatedAt: new Date().toISOString(),
+        }
+      });
+
+      if (response.success) {
+        Alert.alert('Success', 'Daily target updated successfully');
+        setShowUpdateDailyTargetModal(false);
+        setDailyTargetQuantity('');
+        setDailyTargetUnit('');
+        setTargetUpdateReason('');
+        setTargetUpdateReasonCategory('other');
+        await loadTaskAssignments();
+      } else {
+        Alert.alert('Error', response.errors?.join(', ') || 'Failed to update daily target');
+      }
+    } catch (error) {
+      console.error('Daily target update error:', error);
+      Alert.alert('Error', 'Failed to update daily target');
+    }
+  }, [selectedTask, dailyTargetQuantity, dailyTargetUnit, targetUpdateReason, targetUpdateReasonCategory, loadTaskAssignments]);
+
+  // Reset create task form - ENHANCED with all new fields
   const resetCreateTaskForm = useCallback(() => {
     setCreateTaskForm({
       taskName: '',
       description: '',
       workerId: 0,
+      workerIds: [],
+      assignmentMode: 'individual',
       priority: 'normal',
       estimatedHours: 8,
       instructions: '',
       requiredSkills: [],
       dependencies: [],
       projectId: availableProjects[0]?.id || 0,
+      trade: 'other',
+      siteLocation: '',
+      toolsRequired: '',
+      materialsRequired: '',
+      startTime: '08:00',
+      endTime: '17:00',
     });
   }, [availableProjects]);
+
+  // NEW: Supervisor verification handler
+  const handleVerifyCompletion = useCallback(async (task: TaskAssignment) => {
+    try {
+      Alert.alert(
+        'Verify Task Completion',
+        `Are you sure you want to verify and confirm completion of "${task.taskName}"?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Verify',
+            onPress: async () => {
+              const response = await supervisorApiService.verifyTaskCompletion(task.assignmentId);
+              
+              if (response.success) {
+                Alert.alert('Success', 'Task completion verified successfully');
+                setShowVerifyCompletionModal(false);
+                await loadTaskAssignments();
+              } else {
+                Alert.alert('Error', response.errors?.join(', ') || 'Failed to verify task completion');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Task verification error:', error);
+      Alert.alert('Error', 'Failed to verify task completion');
+    }
+  }, [loadTaskAssignments]);
 
   // Get priority color
   const getPriorityColor = (priority: TaskAssignment['priority']) => {
@@ -308,15 +476,17 @@ const TaskAssignmentScreen: React.FC = () => {
   // Show loading state during initial load
   if (isLoading && taskAssignments.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView style={styles.loadingContainer}>
+        <StatusBar barStyle="light-content" />
         <ActivityIndicator size="large" color={ConstructionTheme.colors.primary} />
         <Text style={styles.loadingText}>Loading task assignments...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
@@ -452,9 +622,9 @@ const TaskAssignmentScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
         ) : (
-          filteredTasks.map((task, index) => (
+          filteredTasks.map((task) => (
             <TouchableOpacity
-              key={`${task.assignmentId}-${index}`}
+              key={`task-${task.assignmentId}`}
               style={styles.taskCard}
               onPress={() => {
                 setSelectedTask(task);
@@ -471,12 +641,12 @@ const TaskAssignmentScreen: React.FC = () => {
                   <View style={styles.taskBadges}>
                     <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(task.priority) }]}>
                       <Text style={styles.priorityBadgeText}>
-                        {task.priority.toUpperCase()}
+                        {(task.priority || 'normal').toUpperCase()}
                       </Text>
                     </View>
                     <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
                       <Text style={styles.statusBadgeText}>
-                        {task.status.replace('_', ' ').toUpperCase()}
+                        {(task.status || 'pending').replace('_', ' ').toUpperCase()}
                       </Text>
                     </View>
                   </View>
@@ -528,6 +698,16 @@ const TaskAssignmentScreen: React.FC = () => {
                 </View>
               </View>
 
+              {/* Daily Target Display */}
+              {task.dailyTarget && (
+                <View style={styles.dailyTargetContainer}>
+                  <Text style={styles.dailyTargetLabel}>Daily Target:</Text>
+                  <Text style={styles.dailyTargetValue}>
+                    {task.dailyTarget.quantity} {task.dailyTarget.unit}
+                  </Text>
+                </View>
+              )}
+
               {/* Dependencies Indicator */}
               {task.dependencies.length > 0 && (
                 <View style={styles.dependenciesContainer}>
@@ -571,6 +751,18 @@ const TaskAssignmentScreen: React.FC = () => {
                   }}
                 >
                   <Text style={styles.actionButtonText}>Priority</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.updateTargetButton]}
+                  onPress={() => {
+                    setSelectedTask(task);
+                    setDailyTargetQuantity(task.dailyTarget?.quantity.toString() || '');
+                    setDailyTargetUnit(task.dailyTarget?.unit || '');
+                    setShowUpdateDailyTargetModal(true);
+                  }}
+                >
+                  <Text style={styles.actionButtonText}>Update Target</Text>
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -649,26 +841,189 @@ const TaskAssignmentScreen: React.FC = () => {
 
             {/* Worker Selection */}
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Assign to Worker *</Text>
+              <Text style={styles.formLabel}>Assignment Mode *</Text>
+              <View style={styles.assignmentModeToggle}>
+                <TouchableOpacity
+                  style={[
+                    styles.modeButton,
+                    createTaskForm.assignmentMode === 'individual' && styles.modeButtonActive
+                  ]}
+                  onPress={() => setCreateTaskForm(prev => ({ ...prev, assignmentMode: 'individual', workerIds: [] }))}
+                >
+                  <Text style={[
+                    styles.modeButtonText,
+                    createTaskForm.assignmentMode === 'individual' && styles.modeButtonTextActive
+                  ]}>
+                    Individual Worker
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modeButton,
+                    createTaskForm.assignmentMode === 'group' && styles.modeButtonActive
+                  ]}
+                  onPress={() => setCreateTaskForm(prev => ({ ...prev, assignmentMode: 'group', workerId: 0 }))}
+                >
+                  <Text style={[
+                    styles.modeButtonText,
+                    createTaskForm.assignmentMode === 'group' && styles.modeButtonTextActive
+                  ]}>
+                    Group Assignment
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Individual Worker Selection */}
+            {createTaskForm.assignmentMode === 'individual' && (
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Assign to Worker *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
+                  {availableWorkers.map((worker) => (
+                    <TouchableOpacity
+                      key={worker.id}
+                      style={[
+                        styles.optionChip,
+                        createTaskForm.workerId === worker.id && styles.optionChipActive
+                      ]}
+                      onPress={() => setCreateTaskForm(prev => ({ ...prev, workerId: worker.id }))}
+                    >
+                      <Text style={[
+                        styles.optionChipText,
+                        createTaskForm.workerId === worker.id && styles.optionChipTextActive
+                      ]}>
+                        {worker.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Group Worker Selection */}
+            {createTaskForm.assignmentMode === 'group' && (
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Select Workers * ({createTaskForm.workerIds.length} selected)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
+                  {availableWorkers.map((worker) => (
+                    <TouchableOpacity
+                      key={worker.id}
+                      style={[
+                        styles.optionChip,
+                        createTaskForm.workerIds.includes(worker.id) && styles.optionChipActive
+                      ]}
+                      onPress={() => {
+                        setCreateTaskForm(prev => ({
+                          ...prev,
+                          workerIds: prev.workerIds.includes(worker.id)
+                            ? prev.workerIds.filter(id => id !== worker.id)
+                            : [...prev.workerIds, worker.id]
+                        }));
+                      }}
+                    >
+                      <Text style={[
+                        styles.optionChipText,
+                        createTaskForm.workerIds.includes(worker.id) && styles.optionChipTextActive
+                      ]}>
+                        {createTaskForm.workerIds.includes(worker.id) && '✓ '}
+                        {worker.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* NEW: Trade/Nature of Work Selection */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Trade / Nature of Work *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                {availableWorkers.map((worker) => (
+                {(['electrical', 'plumbing', 'carpentry', 'masonry', 'painting', 'welding', 'hvac', 'other'] as const).map((trade) => (
                   <TouchableOpacity
-                    key={worker.id}
+                    key={trade}
                     style={[
                       styles.optionChip,
-                      createTaskForm.workerId === worker.id && styles.optionChipActive
+                      createTaskForm.trade === trade && styles.optionChipActive
                     ]}
-                    onPress={() => setCreateTaskForm(prev => ({ ...prev, workerId: worker.id }))}
+                    onPress={() => setCreateTaskForm(prev => ({ ...prev, trade }))}
                   >
                     <Text style={[
                       styles.optionChipText,
-                      createTaskForm.workerId === worker.id && styles.optionChipTextActive
+                      createTaskForm.trade === trade && styles.optionChipTextActive
                     ]}>
-                      {worker.name}
+                      {trade.charAt(0).toUpperCase() + trade.slice(1)}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+            </View>
+
+            {/* NEW: Site Location */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Location Within Site</Text>
+              <TextInput
+                style={styles.formInput}
+                value={createTaskForm.siteLocation}
+                onChangeText={(text) => setCreateTaskForm(prev => ({ ...prev, siteLocation: text }))}
+                placeholder="e.g., Building A - 3rd Floor, North Wing"
+                placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+              />
+            </View>
+
+            {/* NEW: Start and End Time */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Work Schedule</Text>
+              <View style={styles.timePickerRow}>
+                <View style={styles.timePickerField}>
+                  <Text style={styles.timePickerLabel}>Start Time</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={createTaskForm.startTime}
+                    onChangeText={(text) => setCreateTaskForm(prev => ({ ...prev, startTime: text }))}
+                    placeholder="08:00"
+                    placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                  />
+                </View>
+                <View style={styles.timePickerField}>
+                  <Text style={styles.timePickerLabel}>End Time</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={createTaskForm.endTime}
+                    onChangeText={(text) => setCreateTaskForm(prev => ({ ...prev, endTime: text }))}
+                    placeholder="17:00"
+                    placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                  />
+                </View>
+              </View>
+              <Text style={styles.formHint}>Format: HH:mm (24-hour format)</Text>
+            </View>
+
+            {/* NEW: Tools Required */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Tools Required</Text>
+              <TextInput
+                style={[styles.formInput, styles.formTextArea]}
+                value={createTaskForm.toolsRequired}
+                onChangeText={(text) => setCreateTaskForm(prev => ({ ...prev, toolsRequired: text }))}
+                placeholder="e.g., Drill, Hammer, Safety Harness, Measuring Tape"
+                placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                multiline
+                numberOfLines={2}
+              />
+            </View>
+
+            {/* NEW: Materials Required */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Materials Required</Text>
+              <TextInput
+                style={[styles.formInput, styles.formTextArea]}
+                value={createTaskForm.materialsRequired}
+                onChangeText={(text) => setCreateTaskForm(prev => ({ ...prev, materialsRequired: text }))}
+                placeholder="e.g., Cement bags (10), Steel rods (50), Paint (5 gallons)"
+                placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                multiline
+                numberOfLines={2}
+              />
             </View>
 
             {/* Priority Selection */}
@@ -884,12 +1239,12 @@ const TaskAssignmentScreen: React.FC = () => {
                   <View style={styles.taskOverviewBadges}>
                     <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(selectedTask.priority) }]}>
                       <Text style={styles.priorityBadgeText}>
-                        {selectedTask.priority.toUpperCase()}
+                        {(selectedTask.priority || 'normal').toUpperCase()}
                       </Text>
                     </View>
                     <View style={[styles.statusBadge, { backgroundColor: getStatusColor(selectedTask.status) }]}>
                       <Text style={styles.statusBadgeText}>
-                        {selectedTask.status.replace('_', ' ').toUpperCase()}
+                        {(selectedTask.status || 'pending').replace('_', ' ').toUpperCase()}
                       </Text>
                     </View>
                   </View>
@@ -1018,6 +1373,37 @@ const TaskAssignmentScreen: React.FC = () => {
                     >
                       <Text style={styles.quickActionText}>Change Priority</Text>
                     </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.quickActionButton}
+                      onPress={() => {
+                        setShowTaskDetailsModal(false);
+                        setTimeout(() => {
+                          setDailyTargetQuantity(selectedTask.dailyTarget?.quantity.toString() || '');
+                          setDailyTargetUnit(selectedTask.dailyTarget?.unit || '');
+                          setTargetUpdateReason('');
+                          setTargetUpdateReasonCategory('other');
+                          setShowUpdateDailyTargetModal(true);
+                        }, 300);
+                      }}
+                    >
+                      <Text style={styles.quickActionText}>Update Daily Target</Text>
+                    </TouchableOpacity>
+
+                    {/* NEW: Verify Completion Button */}
+                    {selectedTask.status === 'completed' && (
+                      <TouchableOpacity
+                        style={[styles.quickActionButton, styles.verifyButton]}
+                        onPress={() => {
+                          setShowTaskDetailsModal(false);
+                          setTimeout(() => {
+                            handleVerifyCompletion(selectedTask);
+                          }, 300);
+                        }}
+                      >
+                        <Text style={[styles.quickActionText, styles.verifyButtonText]}>✓ Verify & Confirm Completion</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               </>
@@ -1025,7 +1411,145 @@ const TaskAssignmentScreen: React.FC = () => {
           </ScrollView>
         </View>
       </Modal>
-    </View>
+
+      {/* Update Daily Target Modal */}
+      <Modal
+        visible={showUpdateDailyTargetModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowUpdateDailyTargetModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Update Daily Target</Text>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowUpdateDailyTargetModal(false)}
+            >
+              <Text style={styles.modalCloseButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            {selectedTask && (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  {selectedTask.taskName} - {selectedTask.workerName}
+                </Text>
+
+                <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Daily Target</Text>
+                  <Text style={styles.formSectionDescription}>
+                    Set the daily target quantity and unit for this task
+                  </Text>
+
+                  <View style={styles.formRow}>
+                    <View style={styles.formFieldHalf}>
+                      <Text style={styles.formLabel}>Quantity *</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={dailyTargetQuantity}
+                        onChangeText={setDailyTargetQuantity}
+                        placeholder="e.g., 50"
+                        keyboardType="numeric"
+                        placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                      />
+                    </View>
+
+                    <View style={styles.formFieldHalf}>
+                      <Text style={styles.formLabel}>Unit *</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={dailyTargetUnit}
+                        onChangeText={setDailyTargetUnit}
+                        placeholder="e.g., panels, meters"
+                        placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.examplesContainer}>
+                    <Text style={styles.examplesTitle}>Common Examples:</Text>
+                    <Text style={styles.exampleText}>• 50 panels</Text>
+                    <Text style={styles.exampleText}>• 100 sq meters</Text>
+                    <Text style={styles.exampleText}>• 25 outlets</Text>
+                    <Text style={styles.exampleText}>• 150 meters</Text>
+                  </View>
+                </View>
+
+                {/* NEW: Reason for Target Update */}
+                <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Reason for Update *</Text>
+                  <Text style={styles.formSectionDescription}>
+                    Explain why the daily target is being changed
+                  </Text>
+
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Reason Category *</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
+                      {(['weather', 'manpower', 'material', 'other'] as const).map((category) => (
+                        <TouchableOpacity
+                          key={category}
+                          style={[
+                            styles.optionChip,
+                            targetUpdateReasonCategory === category && styles.optionChipActive
+                          ]}
+                          onPress={() => setTargetUpdateReasonCategory(category)}
+                        >
+                          <Text style={[
+                            styles.optionChipText,
+                            targetUpdateReasonCategory === category && styles.optionChipTextActive
+                          ]}>
+                            {category.charAt(0).toUpperCase() + category.slice(1)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Details *</Text>
+                    <TextInput
+                      style={[styles.formInput, styles.formTextArea]}
+                      value={targetUpdateReason}
+                      onChangeText={setTargetUpdateReason}
+                      placeholder="Provide specific details about why the target is being updated"
+                      placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+
+                  <View style={styles.reasonExamplesContainer}>
+                    <Text style={styles.examplesTitle}>Example Reasons:</Text>
+                    <Text style={styles.exampleText}>• Weather: Heavy rain delayed work</Text>
+                    <Text style={styles.exampleText}>• Manpower: 2 workers absent today</Text>
+                    <Text style={styles.exampleText}>• Material: Cement delivery delayed</Text>
+                    <Text style={styles.exampleText}>• Other: Client requested scope change</Text>
+                  </View>
+                </View>
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => setShowUpdateDailyTargetModal(false)}
+                  >
+                    <Text style={styles.modalCancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.modalSubmitButton}
+                    onPress={handleUpdateDailyTarget}
+                  >
+                    <Text style={styles.modalSubmitButtonText}>Update Target</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
@@ -1579,6 +2103,181 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.buttonMedium,
     color: ConstructionTheme.colors.onPrimary,
     textAlign: 'center',
+  },
+  // Daily Target Styles
+  dailyTargetContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: ConstructionTheme.colors.primaryContainer,
+    padding: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    marginTop: ConstructionTheme.spacing.sm,
+  },
+  dailyTargetLabel: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onPrimaryContainer,
+    fontWeight: '600',
+  },
+  dailyTargetValue: {
+    ...ConstructionTheme.typography.bodyLarge,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: 'bold',
+  },
+  updateTargetButton: {
+    backgroundColor: ConstructionTheme.colors.secondary,
+  },
+  formSection: {
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
+  formSectionTitle: {
+    ...ConstructionTheme.typography.titleMedium,
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.xs,
+    fontWeight: 'bold',
+  },
+  formSectionDescription: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  formRow: {
+    flexDirection: 'row',
+    gap: ConstructionTheme.spacing.md,
+  },
+  formFieldHalf: {
+    flex: 1,
+  },
+  formLabel: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.xs,
+    fontWeight: '600',
+  },
+  formInput: {
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.outline,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    backgroundColor: ConstructionTheme.colors.surface,
+    minHeight: 44,
+  },
+  examplesContainer: {
+    marginTop: ConstructionTheme.spacing.md,
+    padding: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  examplesTitle: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: '600',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  exampleText: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginLeft: ConstructionTheme.spacing.sm,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.lg,
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    paddingVertical: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    minHeight: ConstructionTheme.dimensions.buttonMedium,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCancelButtonText: {
+    ...ConstructionTheme.typography.buttonMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: 'bold',
+  },
+  modalSubmitButton: {
+    flex: 1,
+    backgroundColor: ConstructionTheme.colors.primary,
+    paddingVertical: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    minHeight: ConstructionTheme.dimensions.buttonMedium,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSubmitButtonText: {
+    ...ConstructionTheme.typography.buttonMedium,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    ...ConstructionTheme.typography.bodyLarge,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.lg,
+    textAlign: 'center',
+  },
+  // NEW STYLES for enhanced features
+  assignmentModeToggle: {
+    flexDirection: 'row',
+    gap: ConstructionTheme.spacing.sm,
+    marginTop: ConstructionTheme.spacing.xs,
+  },
+  modeButton: {
+    flex: 1,
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderWidth: 2,
+    borderColor: ConstructionTheme.colors.outline,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modeButtonActive: {
+    backgroundColor: ConstructionTheme.colors.primary,
+    borderColor: ConstructionTheme.colors.primary,
+  },
+  modeButtonText: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontWeight: '600',
+  },
+  modeButtonTextActive: {
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  timePickerRow: {
+    flexDirection: 'row',
+    gap: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.xs,
+  },
+  timePickerField: {
+    flex: 1,
+  },
+  timePickerLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  reasonExamplesContainer: {
+    marginTop: ConstructionTheme.spacing.md,
+    padding: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: ConstructionTheme.colors.warning,
+  },
+  verifyButton: {
+    backgroundColor: ConstructionTheme.colors.success,
+  },
+  verifyButtonText: {
+    fontWeight: 'bold',
   },
 });
 

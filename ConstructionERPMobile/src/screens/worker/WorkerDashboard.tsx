@@ -6,7 +6,9 @@ import {
   StyleSheet, 
   Alert, 
   ScrollView, 
-  RefreshControl 
+  RefreshControl,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../store/context/AuthContext';
@@ -83,7 +85,8 @@ const WorkerDashboard: React.FC = () => {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.title}>Worker Dashboard</Text>
@@ -293,7 +296,7 @@ const WorkerDashboard: React.FC = () => {
         visible={isLoading && !lastRefresh} 
         message="Loading dashboard data..." 
       />
-    </View>
+    </SafeAreaView>
   );
 };
 

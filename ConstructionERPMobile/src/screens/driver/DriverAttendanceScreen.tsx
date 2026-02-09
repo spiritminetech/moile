@@ -9,6 +9,8 @@ import {
   RefreshControl,
   Modal,
   TextInput,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useLocation } from '../../store/context/LocationContext';
@@ -368,7 +370,8 @@ const DriverAttendanceScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Driver Attendance</Text>
@@ -687,7 +690,7 @@ const DriverAttendanceScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 

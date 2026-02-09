@@ -4,7 +4,7 @@
 
 import axios from 'axios';
 
-const BASE_URL = 'http://192.168.0.3:5002/api';
+const BASE_URL = 'http://192.168.1.8:5002/api';
 
 async function testGeofenceAPI() {
   try {

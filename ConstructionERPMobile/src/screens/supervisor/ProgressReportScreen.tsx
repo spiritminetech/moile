@@ -16,6 +16,8 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
@@ -38,6 +40,9 @@ interface MaterialConsumptionItem {
   consumed: number;
   remaining: number;
   unit: string;
+  plannedConsumption: number;
+  wastage: number;
+  notes: string;
 }
 
 interface IssueItem {
@@ -45,6 +50,8 @@ interface IssueItem {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: 'open' | 'in_progress' | 'resolved';
+  location: string;
+  actionTaken: string;
 }
 
 interface ProgressReportFormData {
@@ -54,6 +61,9 @@ interface ProgressReportFormData {
     activeWorkers: number;
     productivity: number;
     efficiency: number;
+    overtimeHours: number;
+    absentWorkers: number;
+    lateWorkers: number;
   };
   progressMetrics: {
     overallProgress: number;
@@ -82,6 +92,9 @@ const ProgressReportScreen: React.FC = () => {
       activeWorkers: 0,
       productivity: 0,
       efficiency: 0,
+      overtimeHours: 0,
+      absentWorkers: 0,
+      lateWorkers: 0,
     },
     progressMetrics: {
       overallProgress: 0,
@@ -95,28 +108,48 @@ const ProgressReportScreen: React.FC = () => {
   });
 
   // Issue form state
-  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [showIssueForm, setShowIssueForm] = useState(false);
   const [currentIssue, setCurrentIssue] = useState<IssueItem>({
     type: 'safety',
     description: '',
     severity: 'low',
     status: 'open',
+    location: '',
+    actionTaken: '',
   });
 
   // Material consumption form state
-  const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [showMaterialForm, setShowMaterialForm] = useState(false);
   const [currentMaterial, setCurrentMaterial] = useState<MaterialConsumptionItem>({
     materialId: 0,
     name: '',
     consumed: 0,
     remaining: 0,
     unit: '',
+    plannedConsumption: 0,
+    wastage: 0,
+    notes: '',
   });
+
+  // Debug: Log form state changes
+  useEffect(() => {
+    console.log('🔵 Issue Form State Changed:', showIssueForm);
+  }, [showIssueForm]);
+
+  useEffect(() => {
+    console.log('🟢 Material Form State Changed:', showMaterialForm);
+  }, [showMaterialForm]);
 
   // Load reports on mount
   useEffect(() => {
     loadDailyReports();
   }, [loadDailyReports]);
+
+  // Debug: Log when reports change
+  useEffect(() => {
+    console.log('📊 ProgressReportScreen - Reports updated:', state.dailyReports.length);
+    console.log('📋 Report IDs in screen:', state.dailyReports.map(r => r.reportId || r.id).join(', '));
+  }, [state.dailyReports]);
 
   // Refresh handler
   const handleRefresh = useCallback(async () => {
@@ -137,6 +170,9 @@ const ProgressReportScreen: React.FC = () => {
         activeWorkers: 0,
         productivity: 0,
         efficiency: 0,
+        overtimeHours: 0,
+        absentWorkers: 0,
+        lateWorkers: 0,
       },
       progressMetrics: {
         overallProgress: 0,
@@ -182,13 +218,16 @@ const ProgressReportScreen: React.FC = () => {
       setShowCreateModal(false);
       resetFormData();
       
+      // Explicitly reload the reports list to show the new report
+      await loadDailyReports();
+      
     } catch (error) {
       console.error('Error creating progress report:', error);
       Alert.alert('Error', 'Failed to create progress report. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
-  }, [formData, state.assignedProjects, createProgressReport, resetFormData]);
+  }, [formData, state.assignedProjects, createProgressReport, resetFormData, loadDailyReports]);
 
   // Submit report for approval
   const handleSubmitReport = useCallback(async (reportId: string) => {
@@ -205,6 +244,9 @@ const ProgressReportScreen: React.FC = () => {
               setIsSubmitting(true);
               await submitProgressReport(reportId);
               Alert.alert('Success', 'Report submitted for approval!');
+              
+              // Explicitly reload the reports list to show updated status
+              await loadDailyReports();
             } catch (error) {
               console.error('Error submitting report:', error);
               Alert.alert('Error', 'Failed to submit report. Please try again.');
@@ -272,8 +314,10 @@ const ProgressReportScreen: React.FC = () => {
       description: '',
       severity: 'low',
       status: 'open',
+      location: '',
+      actionTaken: '',
     });
-    setShowIssueModal(false);
+    setShowIssueForm(false);
   }, [currentIssue]);
 
   const handleRemoveIssue = useCallback((issueIndex: number) => {
@@ -304,8 +348,11 @@ const ProgressReportScreen: React.FC = () => {
       consumed: 0,
       remaining: 0,
       unit: '',
+      plannedConsumption: 0,
+      wastage: 0,
+      notes: '',
     });
-    setShowMaterialModal(false);
+    setShowMaterialForm(false);
   }, [currentMaterial]);
 
   const handleRemoveMaterial = useCallback((materialIndex: number) => {
@@ -345,7 +392,7 @@ const ProgressReportScreen: React.FC = () => {
 
         <View style={styles.reportActions}>
           <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {item.status.toUpperCase()}
+            {(item.status || 'draft').toUpperCase()}
           </Text>
           
           {item.status === 'draft' && (
@@ -394,16 +441,22 @@ const ProgressReportScreen: React.FC = () => {
     <View style={styles.issueItem}>
       <View style={styles.issueHeader}>
         <Text style={[styles.issueType, { color: getIssueTypeColor(item.type) }]}>
-          {item.type.toUpperCase()}
+          {(item.type || 'general').toUpperCase()}
         </Text>
         <Text style={[styles.issueSeverity, { color: getSeverityColor(item.severity) }]}>
-          {item.severity.toUpperCase()}
+          {(item.severity || 'low').toUpperCase()}
         </Text>
         <TouchableOpacity onPress={() => handleRemoveIssue(index)}>
           <Text style={styles.removeText}>Remove</Text>
         </TouchableOpacity>
       </View>
       <Text style={styles.issueDescription}>{item.description}</Text>
+      {item.location && (
+        <Text style={styles.issueLocation}>📍 Location: {item.location}</Text>
+      )}
+      {item.actionTaken && (
+        <Text style={styles.issueAction}>✅ Action: {item.actionTaken}</Text>
+      )}
     </View>
   ), [handleRemoveIssue]);
 
@@ -451,6 +504,16 @@ const ProgressReportScreen: React.FC = () => {
       <Text style={styles.materialDetails}>
         Consumed: {item.consumed} {item.unit} | Remaining: {item.remaining} {item.unit}
       </Text>
+      {(item.plannedConsumption > 0 || item.wastage > 0) && (
+        <Text style={styles.materialDetails}>
+          {item.plannedConsumption > 0 && `Planned: ${item.plannedConsumption} ${item.unit}`}
+          {item.plannedConsumption > 0 && item.wastage > 0 && ' | '}
+          {item.wastage > 0 && `Wastage: ${item.wastage} ${item.unit}`}
+        </Text>
+      )}
+      {item.notes && (
+        <Text style={styles.materialNotes}>Note: {item.notes}</Text>
+      )}
     </View>
   ), [handleRemoveMaterial]);
 
@@ -474,7 +537,8 @@ const ProgressReportScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Progress Reports</Text>
@@ -594,6 +658,46 @@ const ProgressReportScreen: React.FC = () => {
                   style={styles.halfInput}
                 />
               </View>
+              <View style={styles.inputRow}>
+                <ConstructionInput
+                  label="Overtime Hours"
+                  value={formData.manpowerUtilization.overtimeHours.toString()}
+                  onChangeText={(text) => setFormData(prev => ({
+                    ...prev,
+                    manpowerUtilization: {
+                      ...prev.manpowerUtilization,
+                      overtimeHours: parseFloat(text) || 0,
+                    },
+                  }))}
+                  keyboardType="numeric"
+                  style={styles.halfInput}
+                />
+                <ConstructionInput
+                  label="Absent Workers"
+                  value={formData.manpowerUtilization.absentWorkers.toString()}
+                  onChangeText={(text) => setFormData(prev => ({
+                    ...prev,
+                    manpowerUtilization: {
+                      ...prev.manpowerUtilization,
+                      absentWorkers: parseInt(text) || 0,
+                    },
+                  }))}
+                  keyboardType="numeric"
+                  style={styles.halfInput}
+                />
+              </View>
+              <ConstructionInput
+                label="Late Workers"
+                value={formData.manpowerUtilization.lateWorkers.toString()}
+                onChangeText={(text) => setFormData(prev => ({
+                  ...prev,
+                  manpowerUtilization: {
+                    ...prev.manpowerUtilization,
+                    lateWorkers: parseInt(text) || 0,
+                  },
+                }))}
+                keyboardType="numeric"
+              />
             </ConstructionCard>
 
             {/* Progress Metrics */}
@@ -661,12 +765,68 @@ const ProgressReportScreen: React.FC = () => {
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Issues ({formData.issues.length})</Text>
                 <ConstructionButton
-                  title="Add Issue"
-                  onPress={() => setShowIssueModal(true)}
+                  title={showIssueForm ? "Cancel" : "Add Issue"}
+                  onPress={() => {
+                    console.log('🔵 Add Issue button pressed!');
+                    setShowIssueForm(!showIssueForm);
+                    console.log('🔵 showIssueForm toggled to:', !showIssueForm);
+                  }}
                   variant="secondary"
                   size="small"
                 />
               </View>
+              
+              {/* Inline Issue Form */}
+              {showIssueForm && (
+                <View style={styles.inlineForm}>
+                  <ConstructionInput
+                    label="Issue Type"
+                    value={currentIssue.type}
+                    onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, type: text as any }))}
+                    placeholder="safety, quality, delay, resource"
+                  />
+                  
+                  <ConstructionInput
+                    label="Description *"
+                    value={currentIssue.description}
+                    onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, description: text }))}
+                    placeholder="Describe the issue..."
+                    multiline
+                    numberOfLines={3}
+                  />
+                  
+                  <ConstructionInput
+                    label="Severity"
+                    value={currentIssue.severity}
+                    onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, severity: text as any }))}
+                    placeholder="low, medium, high, critical"
+                  />
+
+                  <ConstructionInput
+                    label="Location (Optional)"
+                    value={currentIssue.location}
+                    onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, location: text }))}
+                    placeholder="e.g., Block A, Floor 3, Zone 2"
+                  />
+
+                  <ConstructionInput
+                    label="Action Taken (Optional)"
+                    value={currentIssue.actionTaken}
+                    onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, actionTaken: text }))}
+                    placeholder="Describe action taken..."
+                    multiline
+                    numberOfLines={2}
+                  />
+
+                  <ConstructionButton
+                    title="Add Issue to List"
+                    onPress={handleAddIssue}
+                    variant="primary"
+                    size="small"
+                  />
+                </View>
+              )}
+              
               {formData.issues.length > 0 ? (
                 <FlatList
                   data={formData.issues}
@@ -684,12 +844,86 @@ const ProgressReportScreen: React.FC = () => {
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Materials ({formData.materialConsumption.length})</Text>
                 <ConstructionButton
-                  title="Add Material"
-                  onPress={() => setShowMaterialModal(true)}
+                  title={showMaterialForm ? "Cancel" : "Add Material"}
+                  onPress={() => {
+                    console.log('🟢 Add Material button pressed!');
+                    setShowMaterialForm(!showMaterialForm);
+                    console.log('🟢 showMaterialForm toggled to:', !showMaterialForm);
+                  }}
                   variant="secondary"
                   size="small"
                 />
               </View>
+              
+              {/* Inline Material Form */}
+              {showMaterialForm && (
+                <View style={styles.inlineForm}>
+                  <ConstructionInput
+                    label="Material Name *"
+                    value={currentMaterial.name}
+                    onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, name: text }))}
+                    placeholder="Enter material name"
+                  />
+                  
+                  <View style={styles.inputRow}>
+                    <ConstructionInput
+                      label="Consumed *"
+                      value={currentMaterial.consumed.toString()}
+                      onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, consumed: parseFloat(text) || 0 }))}
+                      keyboardType="numeric"
+                      style={styles.halfInput}
+                    />
+                    <ConstructionInput
+                      label="Remaining"
+                      value={currentMaterial.remaining.toString()}
+                      onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, remaining: parseFloat(text) || 0 }))}
+                      keyboardType="numeric"
+                      style={styles.halfInput}
+                    />
+                  </View>
+                  
+                  <ConstructionInput
+                    label="Unit *"
+                    value={currentMaterial.unit}
+                    onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, unit: text }))}
+                    placeholder="e.g., bags, tons, liters"
+                  />
+
+                  <View style={styles.inputRow}>
+                    <ConstructionInput
+                      label="Planned (Optional)"
+                      value={currentMaterial.plannedConsumption.toString()}
+                      onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, plannedConsumption: parseFloat(text) || 0 }))}
+                      keyboardType="numeric"
+                      style={styles.halfInput}
+                    />
+                    <ConstructionInput
+                      label="Wastage (Optional)"
+                      value={currentMaterial.wastage.toString()}
+                      onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, wastage: parseFloat(text) || 0 }))}
+                      keyboardType="numeric"
+                      style={styles.halfInput}
+                    />
+                  </View>
+
+                  <ConstructionInput
+                    label="Notes (Optional)"
+                    value={currentMaterial.notes}
+                    onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, notes: text }))}
+                    placeholder="Additional notes about material usage..."
+                    multiline
+                    numberOfLines={2}
+                  />
+
+                  <ConstructionButton
+                    title="Add Material to List"
+                    onPress={handleAddMaterial}
+                    variant="primary"
+                    size="small"
+                  />
+                </View>
+              )}
+              
               {formData.materialConsumption.length > 0 ? (
                 <FlatList
                   data={formData.materialConsumption}
@@ -760,119 +994,7 @@ const ProgressReportScreen: React.FC = () => {
           </ScrollView>
         </View>
       </Modal>
-
-      {/* Issue Modal */}
-      <Modal
-        visible={showIssueModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowIssueModal(false)}
-      >
-        <View style={styles.overlayModal}>
-          <View style={styles.issueModal}>
-            <Text style={styles.modalTitle}>Add Issue</Text>
-            
-            <ConstructionInput
-              label="Issue Type"
-              value={currentIssue.type}
-              onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, type: text as any }))}
-              placeholder="Select issue type"
-            />
-            
-            <ConstructionInput
-              label="Description"
-              value={currentIssue.description}
-              onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, description: text }))}
-              placeholder="Describe the issue..."
-              multiline
-              numberOfLines={3}
-            />
-            
-            <ConstructionInput
-              label="Severity"
-              value={currentIssue.severity}
-              onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, severity: text as any }))}
-              placeholder="Select severity"
-            />
-
-            <View style={styles.modalActions}>
-              <ConstructionButton
-                title="Cancel"
-                onPress={() => setShowIssueModal(false)}
-                variant="outline"
-                style={styles.actionButton}
-              />
-              <ConstructionButton
-                title="Add Issue"
-                onPress={handleAddIssue}
-                variant="primary"
-                style={styles.actionButton}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Material Modal */}
-      <Modal
-        visible={showMaterialModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowMaterialModal(false)}
-      >
-        <View style={styles.overlayModal}>
-          <View style={styles.materialModal}>
-            <Text style={styles.modalTitle}>Add Material</Text>
-            
-            <ConstructionInput
-              label="Material Name"
-              value={currentMaterial.name}
-              onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, name: text }))}
-              placeholder="Enter material name"
-            />
-            
-            <View style={styles.inputRow}>
-              <ConstructionInput
-                label="Consumed"
-                value={currentMaterial.consumed.toString()}
-                onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, consumed: parseFloat(text) || 0 }))}
-                keyboardType="numeric"
-                style={styles.halfInput}
-              />
-              <ConstructionInput
-                label="Remaining"
-                value={currentMaterial.remaining.toString()}
-                onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, remaining: parseFloat(text) || 0 }))}
-                keyboardType="numeric"
-                style={styles.halfInput}
-              />
-            </View>
-            
-            <ConstructionInput
-              label="Unit"
-              value={currentMaterial.unit}
-              onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, unit: text }))}
-              placeholder="e.g., bags, tons, liters"
-            />
-
-            <View style={styles.modalActions}>
-              <ConstructionButton
-                title="Cancel"
-                onPress={() => setShowMaterialModal(false)}
-                variant="outline"
-                style={styles.actionButton}
-              />
-              <ConstructionButton
-                title="Add Material"
-                onPress={handleAddMaterial}
-                variant="primary"
-                style={styles.actionButton}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -1003,6 +1125,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: ConstructionTheme.colors.onSurface,
   },
+  inlineForm: {
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    padding: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    marginBottom: ConstructionTheme.spacing.md,
+    gap: ConstructionTheme.spacing.sm,
+  },
   photoButtons: {
     flexDirection: 'row',
     gap: ConstructionTheme.spacing.xs,
@@ -1067,6 +1196,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: ConstructionTheme.colors.onSurface,
   },
+  issueLocation: {
+    fontSize: 12,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginTop: ConstructionTheme.spacing.xs,
+    fontStyle: 'italic',
+  },
+  issueAction: {
+    fontSize: 12,
+    color: ConstructionTheme.colors.success,
+    marginTop: ConstructionTheme.spacing.xs,
+    fontStyle: 'italic',
+  },
   materialItem: {
     backgroundColor: ConstructionTheme.colors.surfaceVariant,
     padding: ConstructionTheme.spacing.sm,
@@ -1087,6 +1228,13 @@ const styles = StyleSheet.create({
   materialDetails: {
     fontSize: 12,
     color: ConstructionTheme.colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  materialNotes: {
+    fontSize: 12,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginTop: ConstructionTheme.spacing.xs,
+    fontStyle: 'italic',
   },
   modalActions: {
     flexDirection: 'row',

@@ -911,3 +911,288 @@ export const getMaterialReturns = async (req, res) => {
     }
 };
 
+/* ===============================
+   GET MATERIALS AND TOOLS (Combined endpoint for mobile app)
+   GET /api/supervisor/materials-tools
+================================ */
+export const getMaterialsAndTools = async (req, res) => {
+    try {
+        const { projectId } = req.query;
+        const userId = req.user?.id || req.user?.userId;
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Supervisor not found' 
+            });
+        }
+
+        // Build query for projects
+        let projectQuery = {};
+        if (projectId) {
+            // Verify supervisor owns this project
+            const project = await Project.findOne({ id: parseInt(projectId) });
+            if (!project || project.supervisorId !== supervisor.id) {
+                return res.status(403).json({ 
+                    success: false,
+                    message: 'You do not have permission to view this project' 
+                });
+            }
+            projectQuery = { id: parseInt(projectId) };
+        } else {
+            // Get all supervisor's projects
+            projectQuery = { supervisorId: supervisor.id };
+        }
+
+        const projects = await Project.find(projectQuery).lean();
+        const projectIds = projects.map(p => p.id);
+
+        // Get material requests for these projects
+        const materialRequests = await MaterialRequest.find({
+            projectId: { $in: projectIds }
+        }).sort({ createdAt: -1 }).lean();
+
+        // Get employee details for requests
+        const employeeIds = [...new Set(materialRequests.map(r => r.employeeId))];
+        const employees = await Employee.find({ id: { $in: employeeIds } }).lean();
+
+        // Format material requests for mobile app
+        const formattedMaterialRequests = materialRequests.map(req => {
+            const employee = employees.find(e => e.id === req.employeeId);
+            const project = projects.find(p => p.id === req.projectId);
+
+            return {
+                id: req.id,
+                projectId: req.projectId,
+                projectName: project?.projectName || 'Unknown',
+                itemName: req.itemName,
+                category: req.itemCategory || req.category || 'other',
+                quantity: req.quantity,
+                unit: req.unit || 'pieces',
+                urgency: req.urgency?.toLowerCase() || 'normal',
+                requiredDate: req.requiredDate,
+                purpose: req.purpose,
+                justification: req.justification,
+                estimatedCost: req.estimatedCost,
+                status: req.status?.toLowerCase() || 'pending',
+                requestType: req.requestType,
+                requestedBy: employee?.fullName || 'Unknown',
+                requestedById: req.employeeId,
+                approvedQuantity: req.approvedQuantity,
+                approvedAt: req.approvedAt,
+                fulfilledAt: req.fulfilledAt,
+                createdAt: req.createdAt,
+                updatedAt: req.updatedAt
+            };
+        });
+
+        // For tool allocations, we'll use the material requests with type TOOL
+        // and format them as allocations
+        const toolAllocations = materialRequests
+            .filter(req => req.requestType === 'TOOL' && req.status === 'FULFILLED')
+            .map(req => {
+                const employee = employees.find(e => e.id === req.employeeId);
+                const project = projects.find(p => p.id === req.projectId);
+
+                return {
+                    id: req.id,
+                    toolId: req.id, // Using request ID as tool ID
+                    toolName: req.itemName,
+                    projectId: req.projectId,
+                    projectName: project?.projectName || 'Unknown',
+                    allocatedTo: req.employeeId,
+                    allocatedToName: employee?.fullName || 'Unknown',
+                    quantity: req.approvedQuantity || req.quantity,
+                    allocationDate: req.fulfilledAt || req.approvedAt,
+                    expectedReturnDate: req.requiredDate,
+                    actualReturnDate: null, // Would need separate tracking
+                    condition: 'good', // Default condition
+                    location: req.pickupLocation || 'Site',
+                    purpose: req.purpose,
+                    status: 'allocated'
+                };
+            });
+
+        res.json({
+            success: true,
+            data: {
+                materialRequests: formattedMaterialRequests,
+                toolAllocations: toolAllocations
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error getting materials and tools:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};
+
+
+/* ===============================
+   ALLOCATE TOOL
+   POST /api/supervisor/allocate-tool
+================================ */
+export const allocateTool = async (req, res) => {
+    try {
+        const {
+            toolId,
+            toolName,
+            allocatedTo,
+            allocatedToName,
+            allocationDate,
+            expectedReturnDate,
+            condition,
+            location
+        } = req.body;
+        const userId = req.user?.id || req.user?.userId;
+
+        // Validate required fields
+        if (!toolId || !toolName || !allocatedTo || !allocationDate) {
+            return res.status(400).json({
+                success: false,
+                message: 'toolId, toolName, allocatedTo, and allocationDate are required'
+            });
+        }
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Supervisor not found'
+            });
+        }
+
+        // Find the tool
+        const tool = await Tool.findOne({ id: toolId });
+        if (!tool) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tool not found'
+            });
+        }
+
+        // Check if tool is already allocated
+        if (tool.allocated) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tool is already allocated to another worker'
+            });
+        }
+
+        // Update tool allocation status
+        tool.allocated = true;
+        tool.allocatedTo = allocatedTo;
+        tool.allocatedToName = allocatedToName;
+        tool.allocationDate = new Date(allocationDate);
+        tool.expectedReturnDate = expectedReturnDate ? new Date(expectedReturnDate) : null;
+        tool.condition = condition || tool.condition;
+        tool.location = location || tool.location;
+        tool.status = 'in_use';
+
+        await tool.save();
+
+        // Log the tool usage
+        const nextId = await Counter.getNextSequence('toolUsageLog');
+        
+        // Create a simple tool usage log entry (you may need to create this model)
+        // For now, we'll just return success
+
+        res.json({
+            success: true,
+            data: {
+                allocationId: tool.id,
+                toolName: tool.toolName,
+                allocatedTo: allocatedToName,
+                message: 'Tool allocated successfully'
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error allocating tool:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};
+
+/* ===============================
+   RETURN TOOL
+   POST /api/supervisor/return-tool/:allocationId
+================================ */
+export const returnTool = async (req, res) => {
+    try {
+        const { allocationId } = req.params;
+        const { condition, notes } = req.body;
+        const userId = req.user?.id || req.user?.userId;
+
+        // Validate required fields
+        if (!allocationId) {
+            return res.status(400).json({
+                success: false,
+                message: 'allocationId is required'
+            });
+        }
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Supervisor not found'
+            });
+        }
+
+        // Find the tool
+        const tool = await Tool.findOne({ id: parseInt(allocationId) });
+        if (!tool) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tool not found'
+            });
+        }
+
+        // Check if tool is allocated
+        if (!tool.allocated) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tool is not currently allocated'
+            });
+        }
+
+        // Update tool return status
+        tool.allocated = false;
+        tool.allocatedTo = null;
+        tool.allocatedToName = null;
+        tool.actualReturnDate = new Date();
+        tool.condition = condition || tool.condition;
+        tool.status = 'available';
+        tool.notes = notes || tool.notes;
+
+        await tool.save();
+
+        res.json({
+            success: true,
+            data: {
+                toolId: tool.id,
+                toolName: tool.toolName,
+                returnDate: tool.actualReturnDate,
+                condition: tool.condition,
+                message: 'Tool returned successfully'
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error returning tool:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};

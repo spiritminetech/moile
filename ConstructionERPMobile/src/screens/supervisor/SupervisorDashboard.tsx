@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useState, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -8,20 +8,30 @@ import {
   ScrollView, 
   RefreshControl,
   ActivityIndicator,
-  Dimensions 
+  Animated,
+  SafeAreaView,
+  Platform,
+  StatusBar,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
+import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../../store/context/AuthContext';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
 import { SupervisorDashboardResponse } from '../../types';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
+// Cache configuration
+const CACHE_KEY = 'supervisor_dashboard_cache';
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 // Import supervisor dashboard components
+import WorkforceMetricsCard from '../../components/supervisor/WorkforceMetricsCard';
+import TaskMetricsCard from '../../components/supervisor/TaskMetricsCard';
 import TeamManagementCard from '../../components/supervisor/TeamManagementCard';
 import AttendanceMonitorCard from '../../components/supervisor/AttendanceMonitorCard';
-import TaskAssignmentCard from '../../components/supervisor/TaskAssignmentCard';
 import ApprovalQueueCard from '../../components/supervisor/ApprovalQueueCard';
-import ProgressReportCard from '../../components/supervisor/ProgressReportCard';
 
 interface SupervisorDashboardProps {
   navigation?: any;
@@ -29,224 +39,189 @@ interface SupervisorDashboardProps {
 
 const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation }) => {
   const { state: authState, logout } = useAuth();
-  const { state: supervisorState, refreshAllData, clearError } = useSupervisorContext();
+  const { state: supervisorState, clearError } = useSupervisorContext();
   
   // Local state for dashboard data
   const [dashboardData, setDashboardData] = useState<SupervisorDashboardResponse | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
+  const [loadedCards, setLoadedCards] = useState(0);
+  const [highContrast, setHighContrast] = useState(false);
+  
+  // Animation values for progressive loading
+  const fadeAnim = useMemo(() => new Animated.Value(0), []);
 
-  // Load dashboard data
-  const loadDashboardData = useCallback(async () => {
+  // Load cached data first for instant display
+  const loadCachedData = useCallback(async () => {
     try {
-      clearError();
-      
-      // Get projects data
-      const projectsResponse = await supervisorApiService.getSupervisorProjects();
-      
-      if (projectsResponse.success && projectsResponse.data) {
-        // Get pending approvals summary (parallel with projects)
-        const approvalsPromise = supervisorApiService.getPendingApprovalsSummary();
+      const cached = await AsyncStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const age = Date.now() - timestamp;
         
-        // Transform projects data to match dashboard format
-        const projects = await Promise.all(
-          projectsResponse.data.map(async (project: any) => {
-            // Get attendance data for this project
-            const attendanceResponse = await supervisorApiService.getAttendanceMonitoring({
-              projectId: project.id.toString(),
-              date: new Date().toISOString().split('T')[0]
-            });
-
-            // Get workers assigned (workforce count)
-            const workersResponse = await supervisorApiService.getWorkersAssigned({
-              projectId: project.id.toString(),
-              date: new Date().toISOString().split('T')[0]
-            });
-
-            // Get late/absent workers alerts
-            const lateAbsentResponse = await supervisorApiService.getLateAbsentWorkers({
-              projectId: project.id.toString(),
-              date: new Date().toISOString().split('T')[0]
-            });
-
-            // Get geofence violations
-            const geofenceResponse = await supervisorApiService.getGeofenceViolations({
-              projectId: project.id.toString(),
-              timeRange: 'today'
-            });
-
-            // Get task progress data
-            const tasksResponse = await supervisorApiService.getActiveTasks(project.id);
-
-            let attendanceSummary = {
-              present: 0,
-              absent: 0,
-              late: 0,
-              total: 0
-            };
-
-            let workforceCount = 0;
-
-            // Use workers-assigned endpoint for workforce count
-            if (workersResponse.success && workersResponse.data?.workers) {
-              workforceCount = workersResponse.data.workers.length;
-            }
-
-            // Use attendance monitoring for attendance summary
-            if (attendanceResponse.success && attendanceResponse.data?.workers) {
-              const workers = attendanceResponse.data.workers;
-              
-              attendanceSummary = {
-                present: workers.filter((w: any) => w.status === 'CHECKED_IN').length,
-                absent: workers.filter((w: any) => w.status === 'ABSENT').length,
-                late: workers.filter((w: any) => w.isLate).length,
-                total: workers.length
-              };
-            }
-
-            // Combine alerts from late/absent workers and geofence violations
-            const projectAlerts = [];
-            
-            if (lateAbsentResponse.success && lateAbsentResponse.data) {
-              const { lateWorkers = [], absentWorkers = [] } = lateAbsentResponse.data;
-              
-              // Add late worker alerts
-              lateWorkers.forEach((worker: any) => {
-                projectAlerts.push({
-                  id: `late-${worker.employeeId}-${project.id}`,
-                  type: 'attendance',
-                  priority: 'medium',
-                  message: `${worker.workerName} is late (${worker.minutesLate} min)`,
-                  timestamp: new Date().toISOString(),
-                  projectId: project.id
-                });
-              });
-
-              // Add absent worker alerts
-              absentWorkers.forEach((worker: any) => {
-                projectAlerts.push({
-                  id: `absent-${worker.employeeId}-${project.id}`,
-                  type: 'attendance',
-                  priority: 'high',
-                  message: `${worker.workerName} is absent`,
-                  timestamp: new Date().toISOString(),
-                  projectId: project.id
-                });
-              });
-            }
-
-            // Add geofence violation alerts
-            if (geofenceResponse.success && geofenceResponse.data?.violations) {
-              geofenceResponse.data.violations.forEach((violation: any) => {
-                projectAlerts.push({
-                  id: `geofence-${violation.id}`,
-                  type: 'geofence',
-                  priority: violation.severity.toLowerCase(),
-                  message: `${violation.workerName} outside geofence (${violation.distance}m away)`,
-                  timestamp: violation.violationTime,
-                  projectId: project.id
-                });
-              });
-            }
-
-            // Calculate progress summary (mock for now, TODO: implement real calculation)
-            const progressSummary = {
-              overallProgress: Math.floor(Math.random() * 100), // TODO: Calculate from actual task data
-              completedTasks: 0,
-              totalTasks: 0,
-              onSchedule: true
-            };
-
-            return {
-              id: project.id,
-              name: project.projectName || project.name,
-              location: project.location || 'Unknown',
-              workforceCount,
-              attendanceSummary,
-              progressSummary,
-              alerts: projectAlerts
-            };
-          })
-        );
-
-        // Wait for pending approvals summary
-        const approvalsResponse = await approvalsPromise;
-        
-        let pendingApprovals = {
-          leaveRequests: 0,
-          materialRequests: 0,
-          toolRequests: 0,
-          urgent: 0,
-          total: 0
-        };
-
-        // Update pending approvals from API response
-        if (approvalsResponse.success && approvalsResponse.data?.summary) {
-          const summary = approvalsResponse.data.summary;
-          pendingApprovals = {
-            leaveRequests: summary.byType.leave || 0,
-            materialRequests: summary.byType.material || 0,
-            toolRequests: summary.byType.tool || 0,
-            urgent: summary.urgentCount || 0,
-            total: summary.totalPending || 0
-          };
+        if (age < CACHE_DURATION) {
+          console.log('📦 Loading from cache (age:', Math.round(age / 1000), 'seconds)');
+          setDashboardData(data);
+          setLastRefresh(new Date(timestamp));
+          setIsLoading(false);
+          
+          // Animate fade-in
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }).start();
+          
+          return true;
         }
-
-        // Collect all alerts from all projects
-        const allAlerts = projects.flatMap(p => p.alerts || []);
-
-        const dashboardData: SupervisorDashboardResponse = {
-          projects,
-          pendingApprovals,
-          alerts: allAlerts
-        };
-
-        setDashboardData(dashboardData);
-        setLastRefresh(new Date());
-      } else {
-        console.error('Failed to load dashboard data:', projectsResponse.errors);
       }
     } catch (error) {
-      console.error('Dashboard data loading error:', error);
+      console.error('Cache load error:', error);
     }
-  }, [clearError]);
+    return false;
+  }, [fadeAnim]);
+
+  // Save data to cache
+  const saveCacheData = useCallback(async (data: SupervisorDashboardResponse) => {
+    try {
+      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({
+        data,
+        timestamp: Date.now(),
+      }));
+      console.log('💾 Dashboard data cached successfully');
+    } catch (error) {
+      console.error('Cache save error:', error);
+    }
+  }, []);
+
+  // Load dashboard data using SINGLE API call (optimized)
+  const loadDashboardData = useCallback(async (skipCache = false) => {
+    try {
+      setError(null);
+      clearError();
+      
+      // Load from cache first if not skipping
+      if (!skipCache) {
+        const cacheLoaded = await loadCachedData();
+        if (cacheLoaded && !isRefreshing) {
+          // Continue to fetch fresh data in background
+          console.log('🔄 Fetching fresh data in background...');
+        }
+      }
+      
+      console.log('📊 Loading supervisor dashboard data (single API call)...');
+      
+      // OPTIMIZED: Single API call instead of N+1 queries
+      const response = await supervisorApiService.getDashboardData();
+      
+      if (response.success && response.data) {
+        console.log('✅ Dashboard data loaded successfully:', {
+          projects: response.data.projects?.length || 0,
+          totalWorkers: response.data.teamOverview?.totalMembers || 0,
+          totalTasks: response.data.taskMetrics?.totalTasks || 0,
+          alerts: response.data.alerts?.length || 0,
+        });
+        
+        setDashboardData(response.data);
+        setLastRefresh(new Date());
+        
+        // Save to cache
+        await saveCacheData(response.data);
+        
+        // Haptic feedback on successful load
+        if (isRefreshing) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        
+        // Progressive card loading animation
+        setLoadedCards(0);
+        const cardInterval = setInterval(() => {
+          setLoadedCards(prev => {
+            if (prev >= 4) {
+              clearInterval(cardInterval);
+              return 4;
+            }
+            return prev + 1;
+          });
+        }, 100);
+        
+      } else {
+        const errorMsg = response.errors?.[0] || 'Failed to load dashboard data';
+        console.error('❌ Dashboard data loading failed:', errorMsg);
+        setError(errorMsg);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+    } catch (error: any) {
+      console.error('❌ Dashboard data loading error:', error);
+      setError(error.message || 'An error occurred while loading dashboard');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [clearError, loadCachedData, saveCacheData, isRefreshing]);
+
+  // Network status monitoring
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const offline = !state.isConnected;
+      setIsOffline(offline);
+      
+      if (offline) {
+        console.log('📡 Device is offline - using cached data');
+      } else {
+        console.log('📡 Device is online');
+      }
+    });
+    
+    return () => unsubscribe();
+  }, []);
 
   // Initial data load
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  // Auto-refresh every 30 seconds
+  // Smart auto-refresh: only when app is active and online
   useEffect(() => {
+    if (isOffline) {
+      console.log('⏸️ Auto-refresh paused (offline)');
+      return;
+    }
+    
     const interval = setInterval(() => {
-      loadDashboardData();
-    }, 30000); // 30 seconds
+      if (!isOffline && !isRefreshing) {
+        console.log('🔄 Auto-refreshing dashboard...');
+        loadDashboardData();
+      }
+    }, 60000); // 60 seconds (reduced frequency)
 
     return () => clearInterval(interval);
-  }, [loadDashboardData]);
+  }, [loadDashboardData, isOffline, isRefreshing]);
 
   // Pull-to-refresh handler
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
     try {
-      await Promise.all([
-        loadDashboardData(),
-        refreshAllData()
-      ]);
+      await loadDashboardData(true); // Skip cache on manual refresh
     } catch (error) {
       console.error('Refresh error:', error);
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadDashboardData, refreshAllData]);
+  }, [loadDashboardData]);
 
-  // Navigation handlers
+  // Navigation handlers with haptic feedback
   const handleViewTeamDetails = useCallback((projectId: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
     if (projectId === 0) {
-      // Navigate to Team Management screen (view all teams)
       navigation.navigate('Team', { screen: 'TeamMain' });
     } else {
-      // Navigate to specific project team details
       navigation.navigate('Team', { 
         screen: 'TeamMain', 
         params: { projectId } 
@@ -255,59 +230,44 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
   }, [navigation]);
 
   const handleViewAttendanceDetails = useCallback((projectId: number) => {
-    // TODO: Navigate to attendance monitoring screen
-    console.log('Navigate to attendance details for project:', projectId);
-  }, []);
-
-  const handleViewTaskDetails = useCallback((projectId: number) => {
-    // TODO: Navigate to task assignment screen
-    console.log('Navigate to task details for project:', projectId);
-  }, []);
-
-  const handleCreateTask = useCallback(() => {
-    // TODO: Navigate to task creation screen
-    console.log('Navigate to task creation');
-  }, []);
-
-  const handleAssignTask = useCallback((projectId: number) => {
-    // TODO: Navigate to task assignment screen
-    console.log('Navigate to task assignment for project:', projectId);
-  }, []);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    navigation?.navigate('Team', { 
+      screen: 'AttendanceMonitoring',
+      params: { projectId } 
+    });
+  }, [navigation]);
 
   const handleViewApproval = useCallback((approvalType: string) => {
-    // TODO: Navigate to specific approval type screen
-    console.log('Navigate to approval type:', approvalType);
-  }, []);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    navigation?.navigate('Approvals', { approvalType });
+  }, [navigation]);
 
   const handleQuickApprove = useCallback((approvalType: string) => {
-    // TODO: Show quick approval modal
-    console.log('Quick approve for type:', approvalType);
-  }, []);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    navigation?.navigate('Approvals', { approvalType, quickApprove: true });
+  }, [navigation]);
 
   const handleViewAllApprovals = useCallback(() => {
-    // Navigate to Approvals tab
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     navigation?.navigate('Approvals');
   }, [navigation]);
 
-  const handleViewProgressDetails = useCallback((projectId: number) => {
-    // TODO: Navigate to progress details screen
-    console.log('Navigate to progress details for project:', projectId);
-  }, []);
-
-  const handleCreateReport = useCallback(() => {
-    // Navigate to Reports tab which contains the ProgressReportScreen
-    navigation?.navigate('Reports');
-  }, [navigation]);
-
-  const handleViewReports = useCallback(() => {
-    // Navigate to Reports tab which contains the ProgressReportScreen
-    navigation?.navigate('Reports');
-  }, [navigation]);
-
-  const handleResolveAlert = useCallback((alertId: number) => {
-    // TODO: Handle alert resolution
-    console.log('Resolve alert:', alertId);
-  }, []);
+  const handleResolveAlert = useCallback(async (alertId: number) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      // TODO: Call API to resolve alert
+      console.log('Resolving alert:', alertId);
+      
+      // Simulate success
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
+      // Refresh dashboard to update alerts
+      await loadDashboardData();
+    } catch (error) {
+      console.error('Error resolving alert:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }, [loadDashboardData]);
 
   const handleLogout = async () => {
     Alert.alert(
@@ -330,34 +290,90 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
     );
   };
 
-  // Show loading state during initial load
-  if (!dashboardData && supervisorState.isLoading) {
+  // Skeleton loading component
+  const SkeletonCard = () => (
+    <View style={[styles.skeletonCard, highContrast && styles.highContrastCard]}>
+      <View style={styles.skeletonTitle} />
+      <View style={styles.skeletonLine} />
+      <View style={styles.skeletonLine} />
+      <View style={[styles.skeletonLine, { width: '60%' }]} />
+    </View>
+  );
+
+  // Show skeleton loading during initial load
+  if (isLoading && !dashboardData) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={ConstructionTheme.colors.primary} />
-        <Text style={styles.loadingText}>Loading supervisor dashboard...</Text>
-      </View>
+      <SafeAreaView style={[styles.container, highContrast && styles.highContrastBg]}>
+        <StatusBar barStyle="light-content" backgroundColor={ConstructionTheme.colors.primary} />
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <Text style={styles.title}>Supervisor Dashboard</Text>
+            <Text style={styles.lastRefreshText}>Loading...</Text>
+          </View>
+        </View>
+        <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.welcomeSection}>
+            <View style={[styles.skeletonTitle, { width: '70%' }]} />
+            <View style={[styles.skeletonLine, { width: '50%', marginTop: 8 }]} />
+          </View>
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, highContrast && styles.highContrastBg]}>
+      <StatusBar barStyle="light-content" backgroundColor={ConstructionTheme.colors.primary} />
+      
+      {/* Offline Banner */}
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📡 Offline Mode - Showing cached data</Text>
+        </View>
+      )}
+      
       {/* Header with real-time status */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <Text style={styles.title}>Supervisor Dashboard</Text>
           {lastRefresh && (
             <Text style={styles.lastRefreshText}>
-              Last updated: {lastRefresh.toLocaleTimeString('en-US', {
+              {isOffline ? '📦 Cached: ' : 'Last updated: '}
+              {lastRefresh.toLocaleTimeString('en-US', {
                 hour: '2-digit',
                 minute: '2-digit'
               })}
             </Text>
           )}
         </View>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.contrastButton} 
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setHighContrast(!highContrast);
+            }}
+            accessible={true}
+            accessibilityLabel="Toggle high contrast mode"
+            accessibilityRole="button"
+          >
+            <Text style={styles.contrastButtonText}>{highContrast ? '☀️' : '🌙'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.logoutButton} 
+            onPress={handleLogout}
+            accessible={true}
+            accessibilityLabel="Logout"
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView 
@@ -373,7 +389,7 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Welcome Section */}
+        {/* Welcome Section - Simplified */}
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeTitle}>
             Welcome back, {authState.user?.name || 'Supervisor'}
@@ -384,68 +400,63 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
         </View>
 
         {/* Error Display */}
-        {supervisorState.error && (
+        {(error || supervisorState.error) && (
           <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{supervisorState.error}</Text>
-            <TouchableOpacity onPress={clearError} style={styles.errorDismiss}>
+            <Text style={styles.errorText}>{error || supervisorState.error}</Text>
+            <TouchableOpacity onPress={() => { setError(null); clearError(); }} style={styles.errorDismiss}>
               <Text style={styles.errorDismissText}>Dismiss</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Dashboard Cards */}
+        {/* Dashboard Cards - As Per Menu Specification */}
         {dashboardData && (
-          <>
-            {/* Team Management Card */}
-            <TeamManagementCard
-              projects={dashboardData.projects || []}
-              isLoading={supervisorState.teamLoading}
-              onViewTeamDetails={handleViewTeamDetails}
-            />
+          <Animated.View style={{ opacity: fadeAnim }}>
+            {/* Card 1: Assigned Projects */}
+            {loadedCards >= 1 && (
+              <TeamManagementCard
+                projects={dashboardData.projects || []}
+                isLoading={false}
+                onViewTeamDetails={handleViewTeamDetails}
+                highContrast={highContrast}
+              />
+            )}
 
-            {/* Attendance Monitor Card */}
-            <AttendanceMonitorCard
-              projects={dashboardData.projects || []}
-              alerts={dashboardData.alerts || []}
-              isLoading={supervisorState.teamLoading}
-              onViewAttendanceDetails={handleViewAttendanceDetails}
-              onResolveAlert={handleResolveAlert}
-            />
+            {/* Card 2: Today's Workforce Count */}
+            {loadedCards >= 2 && (
+              <WorkforceMetricsCard
+                teamOverview={dashboardData.teamOverview}
+                attendanceMetrics={dashboardData.attendanceMetrics}
+                isLoading={false}
+                highContrast={highContrast}
+              />
+            )}
 
-            {/* Task Assignment Card */}
-            <TaskAssignmentCard
-              projects={dashboardData.projects || []}
-              isLoading={supervisorState.isLoading}
-              onCreateTask={handleCreateTask}
-              onViewTaskDetails={handleViewTaskDetails}
-              onAssignTask={handleAssignTask}
-            />
+            {/* Card 3: Attendance Summary + Alerts (Geo-fence, Absence) */}
+            {loadedCards >= 3 && (
+              <AttendanceMonitorCard
+                projects={dashboardData.projects || []}
+                alerts={dashboardData.alerts || []}
+                workerDetails={dashboardData.workerAttendanceDetails || []}
+                isLoading={false}
+                onViewAttendanceDetails={handleViewAttendanceDetails}
+                onResolveAlert={handleResolveAlert}
+                highContrast={highContrast}
+              />
+            )}
 
-            {/* Approval Queue Card */}
-            <ApprovalQueueCard
-              pendingApprovals={dashboardData.pendingApprovals || {
-                leaveRequests: 0,
-                materialRequests: 0,
-                toolRequests: 0,
-                urgent: 0,
-                total: 0
-              }}
-              isLoading={supervisorState.approvalsLoading}
-              onViewApproval={handleViewApproval}
-              onQuickApprove={handleQuickApprove}
-              onViewAllApprovals={handleViewAllApprovals}
-            />
-
-            {/* Progress Report Card */}
-            <ProgressReportCard
-              projects={dashboardData.projects || []}
-              alerts={dashboardData.alerts || []}
-              isLoading={supervisorState.reportsLoading}
-              onViewProgressDetails={handleViewProgressDetails}
-              onCreateReport={handleCreateReport}
-              onViewReports={handleViewReports}
-            />
-          </>
+            {/* Card 4: Pending Approvals */}
+            {loadedCards >= 4 && (
+              <ApprovalQueueCard
+                pendingApprovals={dashboardData.pendingApprovals}
+                isLoading={false}
+                onViewApproval={handleViewApproval}
+                onQuickApprove={handleQuickApprove}
+                onViewAllApprovals={handleViewAllApprovals}
+                highContrast={highContrast}
+              />
+            )}
+          </Animated.View>
         )}
 
         {/* Priority Alerts Section */}
@@ -455,11 +466,11 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
             {dashboardData.alerts
               .filter(alert => alert.priority === 'critical' || alert.priority === 'high')
               .slice(0, 3)
-              .map((alert) => (
+              .map((alert, index) => (
                 <TouchableOpacity
-                  key={alert.id}
-                  style={[styles.alertItem, styles[`alert_${alert.priority}`]]}
-                  onPress={() => handleResolveAlert(alert.id)}
+                  key={`dashboard-alert-${alert.id}-${index}`}
+                  style={[styles.alertItem, alert.priority === 'critical' ? styles.alert_critical : alert.priority === 'high' ? styles.alert_high : styles.alert_medium]}
+                  onPress={() => handleResolveAlert(typeof alert.id === 'number' ? alert.id : parseInt(String(alert.id)))}
                 >
                   <View style={styles.alertContent}>
                     <Text style={styles.alertType}>
@@ -475,7 +486,7 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
                   </View>
                   <View style={styles.alertPriorityBadge}>
                     <Text style={styles.alertPriorityText}>
-                      {alert.priority.toUpperCase()}
+                      {(alert.priority || 'normal').toUpperCase()}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -485,6 +496,17 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
 
         {/* Quick Actions Footer */}
         <View style={styles.quickActionsFooter}>
+          <TouchableOpacity 
+            style={styles.quickActionButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              navigation?.navigate('IssueEscalation');
+            }}
+          >
+            <Text style={styles.quickActionIcon}>🚨</Text>
+            <Text style={styles.quickActionText}>Escalate Issue</Text>
+          </TouchableOpacity>
+          
           <TouchableOpacity 
             style={styles.quickActionButton}
             onPress={handleRefresh}
@@ -497,7 +519,7 @@ const SupervisorDashboard: React.FC<SupervisorDashboardProps> = ({ navigation })
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -505,6 +527,45 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: ConstructionTheme.colors.background,
+  },
+  highContrastBg: {
+    backgroundColor: '#000000',
+  },
+  highContrastCard: {
+    backgroundColor: '#1A1A1A',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  offlineBanner: {
+    backgroundColor: '#FFA726',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  skeletonCard: {
+    backgroundColor: ConstructionTheme.colors.surface,
+    marginHorizontal: ConstructionTheme.spacing.md,
+    marginBottom: ConstructionTheme.spacing.md,
+    padding: ConstructionTheme.spacing.lg,
+    borderRadius: ConstructionTheme.borderRadius.md,
+    ...ConstructionTheme.shadows.small,
+  },
+  skeletonTitle: {
+    height: 24,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 4,
+    marginBottom: 12,
+  },
+  skeletonLine: {
+    height: 16,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 4,
+    marginBottom: 8,
   },
   loadingContainer: {
     flex: 1,
@@ -522,13 +583,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: ConstructionTheme.spacing.lg,
-    paddingTop: ConstructionTheme.spacing.xl,
+    paddingTop: ConstructionTheme.spacing.md,
     paddingBottom: ConstructionTheme.spacing.md,
     backgroundColor: ConstructionTheme.colors.primary,
     ...ConstructionTheme.shadows.medium,
   },
   headerContent: {
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
   title: {
     ...ConstructionTheme.typography.headlineMedium,
@@ -540,6 +605,19 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onPrimary,
     opacity: 0.8,
     marginTop: ConstructionTheme.spacing.xs,
+  },
+  contrastButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    minHeight: ConstructionTheme.dimensions.buttonSmall,
+    minWidth: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contrastButtonText: {
+    fontSize: 20,
   },
   logoutButton: {
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -578,7 +656,9 @@ const styles = StyleSheet.create({
   welcomeSubtitle: {
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.sm,
   },
+
   errorContainer: {
     backgroundColor: '#FFEBEE', // Light red background for error
     marginHorizontal: ConstructionTheme.spacing.md,

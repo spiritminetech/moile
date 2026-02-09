@@ -9,6 +9,8 @@ import {
   ScrollView,
   Alert,
   RefreshControl,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useLocation } from '../../store/context/LocationContext';
 import { useAuth } from '../../store/context/AuthContext';
@@ -492,12 +494,14 @@ const AttendanceScreen: React.FC = () => {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
-      }
-    >
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView
+        style={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
+        }
+      >
       <OfflineIndicator />
       
       {/* Error Display */}
@@ -695,6 +699,7 @@ const AttendanceScreen: React.FC = () => {
         )}
       </ConstructionCard>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

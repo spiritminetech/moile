@@ -11,6 +11,8 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { TaskAssignment, GeoLocation } from '../../types';
@@ -261,7 +263,9 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Task Information */}
       <View style={styles.taskInfoContainer}>
         <Text style={styles.taskName}>{task.taskName}</Text>
@@ -375,6 +379,7 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
         )}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

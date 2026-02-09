@@ -14,6 +14,8 @@ import {
   Modal,
   FlatList,
   Dimensions,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
@@ -97,7 +99,20 @@ const ApprovalsScreen: React.FC<ApprovalsScreenProps> = ({ navigation }) => {
       const response = await supervisorApiService.getPendingApprovals(params);
       
       if (response.success && response.data) {
-        setApprovals(response.data.approvals);
+        // Ensure dates are properly converted from strings to Date objects
+        const approvalsWithDates = response.data.approvals.map(approval => ({
+          ...approval,
+          requestDate: approval.requestDate instanceof Date 
+            ? approval.requestDate 
+            : new Date(approval.requestDate),
+          approvalDeadline: approval.approvalDeadline 
+            ? (approval.approvalDeadline instanceof Date 
+                ? approval.approvalDeadline 
+                : new Date(approval.approvalDeadline))
+            : undefined,
+        }));
+        
+        setApprovals(approvalsWithDates);
         setSummary(response.data.summary);
         setLastRefresh(new Date());
       } else {
@@ -201,7 +216,9 @@ const ApprovalsScreen: React.FC<ApprovalsScreenProps> = ({ navigation }) => {
 
       switch (filters.sortBy) {
         case 'date':
-          comparison = a.requestDate.getTime() - b.requestDate.getTime();
+          const dateA = a.requestDate instanceof Date ? a.requestDate : new Date(a.requestDate);
+          const dateB = b.requestDate instanceof Date ? b.requestDate : new Date(b.requestDate);
+          comparison = dateA.getTime() - dateB.getTime();
           break;
         case 'urgency':
           const urgencyOrder = { urgent: 4, high: 3, normal: 2, low: 1 };
@@ -427,15 +444,17 @@ const ApprovalsScreen: React.FC<ApprovalsScreenProps> = ({ navigation }) => {
   // Show loading state during initial load
   if (isLoading && approvals.length === 0 && approvalHistory.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView style={styles.loadingContainer}>
+        <StatusBar barStyle="light-content" />
         <ActivityIndicator size="large" color={ConstructionTheme.colors.primary} />
         <Text style={styles.loadingText}>Loading approvals...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header with summary and controls */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
@@ -719,10 +738,13 @@ const ApprovalsScreen: React.FC<ApprovalsScreenProps> = ({ navigation }) => {
                       Department: {approvalDetails.requesterInfo.department}
                     </Text>
                     <Text style={styles.detailText}>
-                      Requested: {selectedApproval.requestDate.toLocaleDateString()}
+                      Requested: {(selectedApproval.requestDate instanceof Date 
+                        ? selectedApproval.requestDate 
+                        : new Date(selectedApproval.requestDate)
+                      ).toLocaleDateString()}
                     </Text>
                     <Text style={styles.detailText}>
-                      Priority: {selectedApproval.urgency.toUpperCase()}
+                      Priority: {(selectedApproval.urgency || 'normal').toUpperCase()}
                     </Text>
                   </ConstructionCard>
                   
@@ -753,7 +775,7 @@ const ApprovalsScreen: React.FC<ApprovalsScreenProps> = ({ navigation }) => {
                       <Text style={styles.detailSectionTitle}>Approval History</Text>
                       {approvalDetails.approvalHistory.map((history: any, index: number) => (
                         <View key={index} style={styles.historyItem}>
-                          <Text style={styles.historyAction}>{history.action.toUpperCase()}</Text>
+                          <Text style={styles.historyAction}>{(history.action || 'unknown').toUpperCase()}</Text>
                           <Text style={styles.historyBy}>by {history.by}</Text>
                           <Text style={styles.historyTime}>
                             {new Date(history.timestamp).toLocaleString()}
@@ -806,7 +828,7 @@ const ApprovalsScreen: React.FC<ApprovalsScreenProps> = ({ navigation }) => {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 

@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import ConstructionCard from '../../components/common/ConstructionCard';
 import ConstructionButton from '../../components/common/ConstructionButton';
@@ -123,7 +125,9 @@ const HelpSupportScreen: React.FC<HelpSupportScreenProps> = ({ navigation }) => 
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={styles.container}>
       <View style={styles.content}>
         {/* Quick Actions */}
         <ConstructionCard style={styles.section}>
@@ -208,6 +212,7 @@ const HelpSupportScreen: React.FC<HelpSupportScreenProps> = ({ navigation }) => 
         </ConstructionCard>
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { workerApiService } from '../../services/api/WorkerApiService';
@@ -185,12 +187,14 @@ const RequestDetailsScreen: React.FC = () => {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
-      }
-    >
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView
+        style={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+        }
+      >
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
@@ -217,7 +221,7 @@ const RequestDetailsScreen: React.FC = () => {
           >
             <Text style={styles.statusIcon}>{getStatusIcon(request.status)}</Text>
             <Text style={styles.statusText}>
-              {request.status.toUpperCase()}
+              {(request.status || 'pending').toUpperCase()}
             </Text>
           </View>
         </View>
@@ -368,6 +372,7 @@ const RequestDetailsScreen: React.FC = () => {
         </Text>
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

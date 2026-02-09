@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Attendance from '../attendance/Attendance.js';
 import Project from '../project/models/Project.js';
 import Employee from '../employee/Employee.js';
@@ -10,7 +11,8 @@ import LeaveRequest from '../leaveRequest/models/LeaveRequest.js';
 import PaymentRequest from '../leaveRequest/models/PaymentRequest.js';
 import MedicalClaim from '../leaveRequest/models/MedicalClaim.js';
 import MaterialRequest from '../project/models/MaterialRequest.js';
-// import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
+import AttendanceCorrection from '../attendance/models/AttendanceCorrection.js';
+import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
 
 // Helper function for distance calculation
 function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
@@ -787,8 +789,8 @@ export const updateTaskAssignment = async (req, res) => {
       return res.status(400).json({ message: "Assignment ID and changes are required" });
     }
 
-    // Find the assignment
-    const assignment = await WorkerTaskAssignment.findOne({ id: assignmentId });
+    // Find the assignment by MongoDB _id (ObjectId)
+    const assignment = await WorkerTaskAssignment.findById(assignmentId);
     if (!assignment) {
       return res.status(404).json({ message: "Assignment not found" });
     }
@@ -826,31 +828,32 @@ export const updateTaskAssignment = async (req, res) => {
     }
 
     // Send task location change notification if location changed (Requirement 2.4)
-    if (taskLocationChanged) {
-      try {
-        const oldTaskLocation = {
-          workArea: originalAssignment.workArea,
-          floor: originalAssignment.floor,
-          zone: originalAssignment.zone
-        };
-        const newTaskLocation = {
-          workArea: assignment.workArea,
-          floor: assignment.floor,
-          zone: assignment.zone
-        };
+    // TODO: Fix SiteChangeNotificationService to work with numeric IDs instead of MongoDB ObjectIds
+    // if (taskLocationChanged) {
+    //   try {
+    //     const oldTaskLocation = {
+    //       workArea: originalAssignment.workArea,
+    //       floor: originalAssignment.floor,
+    //       zone: originalAssignment.zone
+    //     };
+    //     const newTaskLocation = {
+    //       workArea: assignment.workArea,
+    //       floor: assignment.floor,
+    //       zone: assignment.zone
+    //     };
 
-        await SiteChangeNotificationService.notifyTaskLocationChange(
-          assignmentId,
-          assignment.employeeId,
-          oldTaskLocation,
-          newTaskLocation
-        );
-        console.log(`✅ Task location change notification sent for assignment ${assignmentId}`);
-      } catch (notificationError) {
-        console.error("❌ Error sending task location change notification:", notificationError);
-        // Don't fail the request if notifications fail
-      }
-    }
+    //     await SiteChangeNotificationService.notifyTaskLocationChange(
+    //       assignmentId,
+    //       assignment.employeeId,
+    //       oldTaskLocation,
+    //       newTaskLocation
+    //     );
+    //     console.log(`✅ Task location change notification sent for assignment ${assignmentId}`);
+    //   } catch (notificationError) {
+    //     console.error("❌ Error sending task location change notification:", notificationError);
+    //     // Don't fail the request if notifications fail
+    //   }
+    // }
 
     res.json({
       success: true,
@@ -950,7 +953,7 @@ export const updateDailyTargets = async (req, res) => {
         continue; // Skip invalid updates
       }
 
-      const assignment = await WorkerTaskAssignment.findOne({ id: assignmentId });
+      const assignment = await WorkerTaskAssignment.findById(assignmentId);
       if (assignment) {
         assignment.dailyTarget = { ...assignment.dailyTarget, ...dailyTarget };
         await assignment.save();
@@ -1213,7 +1216,8 @@ export const getAttendanceMonitoring = async (req, res) => {
         projects: projects.map(p => ({
           id: p.id,
           name: p.projectName || p.name,
-          location: p.location || 'Unknown'
+          location: p.address || p.location || 'Unknown',
+          geofenceRadius: p.geofenceRadius || p.geofence?.radius || 100
         }))
       });
     }
@@ -1221,27 +1225,59 @@ export const getAttendanceMonitoring = async (req, res) => {
     const employeeIds = [...new Set(assignments.map(a => a.employeeId))];
 
     // Fetch employees with search filter
-    let employeeQuery = { id: { $in: employeeIds } };
+    // Convert string IDs to ObjectIds for MongoDB query
+    const objectIdEmployeeIds = employeeIds.map(id => {
+      try {
+        return typeof id === 'string' ? new mongoose.Types.ObjectId(id) : id;
+      } catch (e) {
+        return id;
+      }
+    });
+    
+    let employeeQuery = { _id: { $in: objectIdEmployeeIds } };
     if (search) {
       employeeQuery.fullName = { $regex: search, $options: 'i' };
     }
 
     const employees = await Employee.find(employeeQuery).lean();
     const employeeMap = employees.reduce((map, emp) => {
-      map[emp.id] = emp;
+      // Use _id as string for mapping since assignments use string IDs
+      map[emp._id.toString()] = emp;
       return map;
     }, {});
 
     // Get attendance records for all employees and date
+    // Handle timezone: expand range to cover the full day in any timezone
+    const startOfDay = new Date(workDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    // Go back 24 hours to catch records stored in different timezones
+    startOfDay.setHours(startOfDay.getHours() - 24);
+    
+    const endOfDay = new Date(workDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    // Go forward 24 hours to catch records stored in different timezones
+    endOfDay.setHours(endOfDay.getHours() + 24);
+    
     const attendanceRecords = await Attendance.find({
       employeeId: { $in: employeeIds },
       date: {
-        $gte: new Date(workDate),
-        $lt: new Date(new Date(workDate).setDate(new Date(workDate).getDate() + 1))
+        $gte: startOfDay,
+        $lte: endOfDay
       }
     }).lean();
+    
+    // Filter to exact date match after retrieval (to handle timezone differences)
+    const filteredAttendance = attendanceRecords.filter(att => {
+      const attDate = new Date(att.date);
+      const attDateString = attDate.toISOString().split('T')[0];
+      const workDateString = new Date(workDate).toISOString().split('T')[0];
+      // Also check if the date in local timezone matches
+      const attLocalDate = new Date(attDate.getTime() - attDate.getTimezoneOffset() * 60000);
+      const attLocalDateString = attLocalDate.toISOString().split('T')[0];
+      return attDateString === workDateString || attLocalDateString === workDateString;
+    });
 
-    const attendanceMap = attendanceRecords.reduce((map, att) => {
+    const attendanceMap = filteredAttendance.reduce((map, att) => {
       const key = `${att.employeeId}-${att.projectId}`;
       map[key] = att;
       return map;
@@ -1309,6 +1345,23 @@ export const getAttendanceMonitoring = async (req, res) => {
         createdAt: { $gte: new Date(Date.now() - 2 * 60 * 60 * 1000) } // Last 2 hours
       }).sort({ createdAt: -1 });
 
+      // Calculate lunch duration and OT hours
+      let lunchDuration = 0;
+      let regularHours = 0;
+      let otHours = 0;
+
+      if (attendance?.lunchStartTime && attendance?.lunchEndTime) {
+        const lunchStart = new Date(attendance.lunchStartTime);
+        const lunchEnd = new Date(attendance.lunchEndTime);
+        lunchDuration = (lunchEnd - lunchStart) / (1000 * 60 * 60); // in hours
+      }
+
+      if (workingHours > 0) {
+        const netWorkHours = workingHours - lunchDuration;
+        regularHours = Math.min(netWorkHours, 8);
+        otHours = Math.max(netWorkHours - 8, 0);
+      }
+
       const workerData = {
         employeeId: assignment.employeeId,
         workerName: employee.fullName,
@@ -1317,11 +1370,16 @@ export const getAttendanceMonitoring = async (req, res) => {
         email: employee.email,
         projectId: assignment.projectId,
         projectName: project.projectName || project.name,
-        projectLocation: project.location || 'Unknown',
+        projectLocation: project.address || project.location || 'Unknown',
         status: status,
         checkInTime: attendance?.checkIn || null,
         checkOutTime: attendance?.checkOut || null,
+        lunchStartTime: attendance?.lunchStartTime || null,
+        lunchEndTime: attendance?.lunchEndTime || null,
+        lunchDuration: lunchDuration,
         workingHours: workingHours,
+        regularHours: regularHours,
+        otHours: otHours,
         isLate: isLate,
         minutesLate: Math.max(0, minutesLate),
         insideGeofence: attendance?.insideGeofenceAtCheckin || false,
@@ -1335,7 +1393,11 @@ export const getAttendanceMonitoring = async (req, res) => {
           insideGeofence: recentLocation.insideGeofence
         } : null,
         hasManualOverride: attendance?.manualOverrides?.length > 0 || false,
-        attendanceId: attendance?.id || null
+        attendanceId: attendance?.id || null,
+        absenceReason: attendance?.absenceReason || null,
+        absenceNotes: attendance?.absenceNotes || '',
+        absenceMarkedBy: attendance?.absenceMarkedBy || null,
+        absenceMarkedAt: attendance?.absenceMarkedAt || null
       };
 
       // Apply status filter
@@ -1384,8 +1446,8 @@ export const getAttendanceMonitoring = async (req, res) => {
       projects: projects.map(p => ({
         id: p.id,
         name: p.projectName || p.name,
-        location: p.location || 'Unknown',
-        geofenceRadius: p.geofenceRadius || 100
+        location: p.address || p.location || 'Unknown',
+        geofenceRadius: p.geofenceRadius || p.geofence?.radius || 100
       }))
     });
 
@@ -1778,8 +1840,33 @@ export const getDashboardData = async (req, res) => {
     const workDate = date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     const currentTime = new Date();
 
-    // Get supervisor ID from token or use default
-    const supervisorId = req.user?.userId || req.user?.id || 1;
+    // Get userId from token
+    const userId = req.user?.id || req.user?.userId;
+    
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'User authentication required' 
+      });
+    }
+
+    // Find supervisor by userId (same as approvals screen)
+    const supervisor = await Employee.findOne({ userId }).lean();
+    
+    if (!supervisor) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Supervisor not found' 
+      });
+    }
+
+    const supervisorId = supervisor.id;
+
+    console.log('📊 Dashboard - Supervisor Info:', {
+      userId,
+      supervisorId,
+      supervisorName: supervisor.fullName
+    });
 
     // Get supervisor's projects
     const projects = await Project.find({ supervisorId: supervisorId });
@@ -1794,7 +1881,8 @@ export const getDashboardData = async (req, res) => {
             presentToday: 0,
             absentToday: 0,
             lateToday: 0,
-            onBreak: 0
+            onBreak: 0,
+            overtimeWorkers: 0 // NEW: Include in empty state
           },
           taskMetrics: {
             totalTasks: 0,
@@ -1817,6 +1905,7 @@ export const getDashboardData = async (req, res) => {
           },
           alerts: [],
           recentActivity: [],
+          workerAttendanceDetails: [], // NEW: Include in empty state
           summary: {
             totalProjects: 0,
             totalWorkers: 0,
@@ -1844,6 +1933,24 @@ export const getDashboardData = async (req, res) => {
       id: { $in: employeeIds }
     }).lean();
 
+    // For approval counts, we need ALL employees in supervisor's projects, not just those with tasks today
+    // Try both possible employee-project link structures
+    const allProjectEmployees = await Employee.find({
+      $or: [
+        { 'currentProject.id': { $in: projectIds } },
+        { currentProjectId: { $in: projectIds } }
+      ]
+    }).lean();
+    const allEmployeeIds = allProjectEmployees.map(e => e.id);
+    
+    console.log('📊 Dashboard Approval Query Debug:', {
+      supervisorId,
+      projectIds,
+      projectCount: projects.length,
+      allEmployeeCount: allProjectEmployees.length,
+      allEmployeeIds: allEmployeeIds.slice(0, 10) // First 10 for debugging
+    });
+
     // Get attendance records for the date
     const attendanceRecords = await Attendance.find({
       employeeId: { $in: employeeIds },
@@ -1864,33 +1971,96 @@ export const getDashboardData = async (req, res) => {
       presentToday: 0,
       absentToday: 0,
       lateToday: 0,
-      onBreak: 0
+      onBreak: 0,
+      overtimeWorkers: 0 // NEW: OT workers count
     };
 
     const WORK_START_HOUR = 8;
     const LATE_THRESHOLD_MINUTES = 15;
+    const STANDARD_WORK_HOURS = 8;
+    const OT_THRESHOLD_HOURS = 9; // Consider OT after 9 hours
     let totalWorkingHours = 0;
     let workersWithHours = 0;
+
+    // NEW: Detailed worker attendance list
+    const workerAttendanceDetails = [];
 
     for (const employee of employees) {
       const attendance = attendanceRecords.find(a => a.employeeId === employee.id);
       
+      let workerDetail = {
+        employeeId: employee.id,
+        workerName: employee.fullName,
+        role: employee.role,
+        status: 'absent',
+        morningCheckIn: null,
+        morningCheckOut: null,
+        afternoonCheckIn: null,
+        afternoonCheckOut: null,
+        totalHours: 0,
+        overtimeHours: 0,
+        isLate: false,
+        minutesLate: 0,
+        flags: []
+      };
+
       if (attendance) {
         if (attendance.checkOut) {
           teamOverview.presentToday++;
+          workerDetail.status = 'present';
+          
           // Calculate working hours
           const checkInTime = new Date(attendance.checkIn);
           const checkOutTime = new Date(attendance.checkOut);
           const hoursWorked = (checkOutTime - checkInTime) / (1000 * 60 * 60);
           totalWorkingHours += hoursWorked;
           workersWithHours++;
+          workerDetail.totalHours = Math.round(hoursWorked * 100) / 100;
+
+          // Check for overtime
+          if (hoursWorked > OT_THRESHOLD_HOURS) {
+            teamOverview.overtimeWorkers++;
+            workerDetail.overtimeHours = Math.round((hoursWorked - STANDARD_WORK_HOURS) * 100) / 100;
+          }
+
+          // Morning session (assuming check-in is morning)
+          workerDetail.morningCheckIn = attendance.checkIn;
+          
+          // Check if there's a lunch break recorded
+          if (attendance.lunchStart && attendance.lunchEnd) {
+            workerDetail.morningCheckOut = attendance.lunchStart;
+            workerDetail.afternoonCheckIn = attendance.lunchEnd;
+            workerDetail.afternoonCheckOut = attendance.checkOut;
+          } else {
+            // No lunch break recorded, assume full day
+            workerDetail.afternoonCheckOut = attendance.checkOut;
+          }
+
+          // Flag: Early logout (before 5 PM)
+          const checkOutHour = checkOutTime.getHours();
+          if (checkOutHour < 17) {
+            workerDetail.flags.push('early_logout');
+          }
+
         } else if (attendance.checkIn) {
           teamOverview.presentToday++;
-          // Check if on break (simplified logic)
+          workerDetail.status = 'checked_in';
+          
+          // Check if on break
           const checkInTime = new Date(attendance.checkIn);
           const hoursWorked = (currentTime - checkInTime) / (1000 * 60 * 60);
           totalWorkingHours += hoursWorked;
           workersWithHours++;
+          workerDetail.totalHours = Math.round(hoursWorked * 100) / 100;
+
+          workerDetail.morningCheckIn = attendance.checkIn;
+
+          // Check if currently on lunch break
+          if (attendance.lunchStart && !attendance.lunchEnd) {
+            teamOverview.onBreak++;
+            workerDetail.status = 'on_break';
+            workerDetail.morningCheckOut = attendance.lunchStart;
+          }
         }
 
         // Check if late
@@ -1902,11 +2072,27 @@ export const getDashboardData = async (req, res) => {
           const minutesLate = Math.floor((checkInTime - expectedStartTime) / (1000 * 60));
           if (minutesLate > LATE_THRESHOLD_MINUTES) {
             teamOverview.lateToday++;
+            workerDetail.isLate = true;
+            workerDetail.minutesLate = minutesLate;
           }
         }
+
+        // Flag: Invalid location (outside geofence at check-in)
+        if (attendance.insideGeofenceAtCheckin === false) {
+          workerDetail.flags.push('invalid_location');
+        }
+
+        // Flag: Missed punch (checked in but no checkout after work hours)
+        if (attendance.checkIn && !attendance.checkOut && currentTime.getHours() >= 18) {
+          workerDetail.flags.push('missed_punch');
+        }
+
       } else {
         teamOverview.absentToday++;
+        workerDetail.status = 'absent';
       }
+
+      workerAttendanceDetails.push(workerDetail);
     }
 
     // Process task metrics
@@ -1950,7 +2136,35 @@ export const getDashboardData = async (req, res) => {
       };
     });
 
-    // Get pending approvals data
+    // NEW: Add manpower shortfall alerts
+    for (const project of projects) {
+      const projectAssignments = assignments.filter(a => a.projectId === project.id);
+      const projectAttendance = attendanceRecords.filter(a => a.projectId === project.id);
+      
+      const expectedWorkers = projectAssignments.length;
+      const actualWorkers = projectAttendance.filter(a => a.checkIn).length;
+      const shortfall = expectedWorkers - actualWorkers;
+
+      // Alert if shortfall is more than 20% or more than 3 workers
+      if (shortfall > 0 && (shortfall >= 3 || (expectedWorkers > 0 && (shortfall / expectedWorkers) > 0.2))) {
+        alerts.push({
+          id: `shortfall-${project.id}`,
+          type: 'manpower_shortfall',
+          title: 'Manpower Shortfall',
+          message: `${shortfall} workers short of deployment plan at ${project.projectName || project.name}`,
+          projectName: project.projectName || project.name,
+          timestamp: currentTime.toISOString(),
+          severity: shortfall >= 5 ? 'high' : 'medium',
+          priority: shortfall >= 5 ? 'high' : 'medium',
+          projectId: project.id,
+          expectedWorkers,
+          actualWorkers,
+          shortfall
+        });
+      }
+    }
+
+    // Get pending approvals data (using same logic as approvals screen)
     const pendingApprovals = {
       leaveRequests: 0,
       materialRequests: 0,
@@ -1960,39 +2174,101 @@ export const getDashboardData = async (req, res) => {
     };
 
     try {
-      // Get leave requests count
-      const leaveRequestsCount = await LeaveRequest.countDocuments({
-        status: 'pending',
-        supervisorId: supervisorId
-      });
-      pendingApprovals.leaveRequests = leaveRequestsCount;
-
-      // Get payment requests count (advance payments)
-      const paymentRequestsCount = await PaymentRequest.countDocuments({
-        status: 'pending',
-        supervisorId: supervisorId
-      });
-      pendingApprovals.leaveRequests += paymentRequestsCount; // Add to leave requests for now
-
-      // Get medical claims count
-      const medicalClaimsCount = await MedicalClaim.countDocuments({
-        status: 'pending',
-        supervisorId: supervisorId
-      });
-      pendingApprovals.leaveRequests += medicalClaimsCount; // Add to leave requests for now
-
-      // Calculate urgent requests (high priority or overdue)
-      const urgentLeaveRequests = await LeaveRequest.countDocuments({
-        status: 'pending',
-        supervisorId: supervisorId,
-        $or: [
-          { priority: 'urgent' },
-          { priority: 'high' },
-          { requestDate: { $lte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } // Older than 24 hours
-        ]
+      // Debug: Log the query parameters
+      console.log('🔍 Approval Count Query Parameters:', {
+        allEmployeeIds,
+        projectIds,
+        employeeCount: allEmployeeIds.length,
+        projectCount: projectIds.length
       });
 
-      pendingApprovals.urgent = urgentLeaveRequests;
+      // Count pending requests using ALL employees in supervisor's projects (not just those with tasks today)
+      const [leaveCount, advanceCount, materialCount, toolCount] = await Promise.all([
+        // Pending leave requests from supervisor's workers
+        LeaveRequest.countDocuments({ 
+          employeeId: { $in: allEmployeeIds },
+          status: 'PENDING' 
+        }),
+        
+        // Pending advance payment requests from supervisor's workers
+        PaymentRequest.countDocuments({ 
+          employeeId: { $in: allEmployeeIds },
+          status: 'PENDING' 
+        }),
+        
+        // Pending material requests for supervisor's projects
+        MaterialRequest.countDocuments({ 
+          projectId: { $in: projectIds },
+          requestType: 'MATERIAL',
+          status: 'PENDING' 
+        }),
+        
+        // Pending tool requests for supervisor's projects
+        MaterialRequest.countDocuments({ 
+          projectId: { $in: projectIds },
+          requestType: 'TOOL',
+          status: 'PENDING' 
+        })
+      ]);
+
+      console.log('📊 Approval Counts:', {
+        leaveCount,
+        advanceCount,
+        materialCount,
+        toolCount,
+        total: leaveCount + advanceCount + materialCount + toolCount
+      });
+
+      // Debug: Fetch actual tool requests to see what's being counted
+      const actualToolRequests = await MaterialRequest.find({ 
+        projectId: { $in: projectIds },
+        requestType: 'TOOL',
+        status: 'PENDING' 
+      }).lean();
+      
+      console.log('🔧 Actual Tool Requests Found:', actualToolRequests.map(r => ({
+        id: r.id,
+        projectId: r.projectId,
+        itemName: r.itemName,
+        status: r.status
+      })));
+
+      pendingApprovals.leaveRequests = leaveCount + advanceCount;
+      pendingApprovals.materialRequests = materialCount;
+      pendingApprovals.toolRequests = toolCount;
+
+      // Count urgent requests (older than 24 hours)
+      const urgentThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      const [urgentLeave, urgentAdvance, urgentMaterial, urgentTool] = await Promise.all([
+        LeaveRequest.countDocuments({ 
+          employeeId: { $in: allEmployeeIds },
+          status: 'PENDING',
+          requestedAt: { $lt: urgentThreshold }
+        }),
+        
+        PaymentRequest.countDocuments({ 
+          employeeId: { $in: allEmployeeIds },
+          status: 'PENDING',
+          createdAt: { $lt: urgentThreshold }
+        }),
+        
+        MaterialRequest.countDocuments({ 
+          projectId: { $in: projectIds },
+          requestType: 'MATERIAL',
+          status: 'PENDING',
+          createdAt: { $lt: urgentThreshold }
+        }),
+        
+        MaterialRequest.countDocuments({ 
+          projectId: { $in: projectIds },
+          requestType: 'TOOL',
+          status: 'PENDING',
+          createdAt: { $lt: urgentThreshold }
+        })
+      ]);
+
+      pendingApprovals.urgent = urgentLeave + urgentAdvance + urgentMaterial + urgentTool;
       pendingApprovals.total = pendingApprovals.leaveRequests + pendingApprovals.materialRequests + pendingApprovals.toolRequests;
 
     } catch (approvalError) {
@@ -2024,7 +2300,7 @@ export const getDashboardData = async (req, res) => {
         };
       });
 
-    // Prepare project summary
+    // Prepare project summary with enhanced details
     const projectSummary = projects.map(project => {
       const projectAssignments = assignments.filter(a => a.projectId === project.id);
       const projectEmployees = employees.filter(emp => 
@@ -2044,10 +2320,24 @@ export const getDashboardData = async (req, res) => {
         return minutesLate > LATE_THRESHOLD_MINUTES;
       }).length;
 
+      // NEW: Determine project status based on progress and timeline
+      let projectStatus = 'Ongoing';
+      const completionRate = projectAssignments.length > 0 
+        ? (projectAssignments.filter(a => a.status === 'completed').length / projectAssignments.length) * 100
+        : 0;
+      
+      if (completionRate >= 80) {
+        projectStatus = 'Near Completion';
+      } else if (project.status === 'DELAYED' || absentCount > projectEmployees.length * 0.3) {
+        projectStatus = 'Delayed';
+      }
+
       return {
         id: project.id,
         name: project.projectName || project.name,
-        location: project.location || 'Unknown',
+        location: project.location || project.address || 'Location not specified', // NEW: Site location
+        client: project.clientName || project.client || 'Client not specified', // NEW: Client name
+        status: projectStatus, // NEW: Project status
         totalWorkers: projectEmployees.length,
         presentWorkers: presentCount,
         totalTasks: projectAssignments.length,
@@ -2064,9 +2354,7 @@ export const getDashboardData = async (req, res) => {
         workforceCount: projectEmployees.length,
         // Add progress summary for compatibility
         progressSummary: {
-          overallProgress: projectAssignments.length > 0 
-            ? Math.round((projectAssignments.filter(a => a.status === 'completed').length / projectAssignments.length) * 100)
-            : 0,
+          overallProgress: Math.round(completionRate),
           totalTasks: projectAssignments.length,
           completedTasks: projectAssignments.filter(a => a.status === 'completed').length,
           inProgressTasks: projectAssignments.filter(a => a.status === 'in_progress').length,
@@ -2086,6 +2374,7 @@ export const getDashboardData = async (req, res) => {
         pendingApprovals,
         alerts,
         recentActivity,
+        workerAttendanceDetails, // NEW: Detailed worker attendance list
         summary: {
           totalProjects: projects.length,
           totalWorkers: employees.length,
@@ -2525,6 +2814,11 @@ export const getPendingApprovalsSummary = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?.userId;
     
+    console.log('🔍 Approvals Screen - User Info:', {
+      userId,
+      userFromToken: req.user
+    });
+    
     if (!userId) {
       return res.status(401).json({ 
         success: false,
@@ -2534,6 +2828,12 @@ export const getPendingApprovalsSummary = async (req, res) => {
 
     // Find supervisor by userId
     const supervisor = await Employee.findOne({ userId }).lean();
+    
+    console.log('🔍 Approvals Screen - Supervisor Found:', {
+      supervisorId: supervisor?.id,
+      supervisorName: supervisor?.fullName,
+      userId: supervisor?.userId
+    });
     
     if (!supervisor) {
       return res.status(404).json({ 
@@ -2575,13 +2875,28 @@ export const getPendingApprovalsSummary = async (req, res) => {
     const projectIds = projects.map(p => p.id);
 
     // Get all employees assigned to supervisor's projects
+    // Use same query pattern as dashboard for consistency
     const employees = await Employee.find({ 
-      currentProjectId: { $in: projectIds } 
+      $or: [
+        { 'currentProject.id': { $in: projectIds } },
+        { currentProjectId: { $in: projectIds } }
+      ]
     }).lean();
     
     const employeeIds = employees.map(e => e.id);
 
+    console.log('🔍 Approvals Screen Debug:', {
+      supervisorId: supervisor.id,
+      supervisorName: supervisor.fullName,
+      userId: userId,
+      projectIds,
+      employeeCount: employees.length,
+      employeeIds
+    });
+
     // Count pending requests in parallel for better performance
+    console.log('📊 Counting pending requests with employeeIds:', employeeIds);
+    
     const [leaveCount, advanceCount, materialCount, toolCount] = await Promise.all([
       // Pending leave requests from supervisor's workers
       LeaveRequest.countDocuments({ 
@@ -2644,6 +2959,147 @@ export const getPendingApprovalsSummary = async (req, res) => {
     const urgentCount = urgentLeave + urgentAdvance + urgentMaterial + urgentTool;
     const totalCount = leaveCount + advanceCount + materialCount + toolCount;
 
+    // Fetch actual approval data with pagination
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Fetch all pending requests in parallel
+    const [leaveRequests, paymentRequests, materialRequests, toolRequests] = await Promise.all([
+      LeaveRequest.find({ 
+        employeeId: { $in: employeeIds },
+        status: 'PENDING' 
+      }).sort({ requestedAt: -1 }).lean(),
+      
+      PaymentRequest.find({ 
+        employeeId: { $in: employeeIds },
+        status: 'PENDING' 
+      }).sort({ createdAt: -1 }).lean(),
+      
+      MaterialRequest.find({ 
+        projectId: { $in: projectIds },
+        requestType: 'MATERIAL',
+        status: 'PENDING' 
+      }).sort({ createdAt: -1 }).lean(),
+      
+      MaterialRequest.find({ 
+        projectId: { $in: projectIds },
+        requestType: 'TOOL',
+        status: 'PENDING' 
+      }).sort({ createdAt: -1 }).lean()
+    ]);
+
+    // Create employee map for quick lookup
+    const employeeMap = employees.reduce((map, emp) => {
+      map[emp.id] = emp;
+      return map;
+    }, {});
+
+    // Create project map for quick lookup
+    const projectMap = projects.reduce((map, proj) => {
+      map[proj.id] = proj;
+      return map;
+    }, {});
+
+    // Format approvals for mobile app
+    const allApprovals = [];
+
+    // Add leave requests
+    leaveRequests.forEach(req => {
+      const employee = employeeMap[req.employeeId];
+      allApprovals.push({
+        id: req.id,
+        requestType: 'leave',
+        requesterName: employee?.fullName || 'Unknown',
+        requesterId: req.employeeId,
+        requestDate: req.requestedAt || req.createdAt,
+        status: 'pending',
+        urgency: (new Date() - new Date(req.requestedAt || req.createdAt)) > 24 * 60 * 60 * 1000 ? 'urgent' : 'normal',
+        details: {
+          leaveType: req.leaveType,
+          fromDate: req.fromDate,
+          toDate: req.toDate,
+          totalDays: req.totalDays,
+          reason: req.reason
+        }
+      });
+    });
+
+    // Add payment requests
+    paymentRequests.forEach(req => {
+      const employee = employeeMap[req.employeeId];
+      allApprovals.push({
+        id: req.id,
+        requestType: 'advance_payment',
+        requesterName: employee?.fullName || 'Unknown',
+        requesterId: req.employeeId,
+        requestDate: req.createdAt,
+        status: 'pending',
+        urgency: req.urgency?.toLowerCase() || 'normal',
+        details: {
+          amount: req.amount,
+          currency: req.currency || 'SGD',
+          reason: req.reason,
+          description: req.description
+        }
+      });
+    });
+
+    // Add material requests
+    materialRequests.forEach(req => {
+      const employee = employeeMap[req.employeeId];
+      const project = projectMap[req.projectId];
+      allApprovals.push({
+        id: req.id,
+        requestType: 'material',
+        requesterName: employee?.fullName || 'Unknown',
+        requesterId: req.employeeId,
+        requestDate: req.createdAt,
+        status: 'pending',
+        urgency: req.urgency?.toLowerCase() || 'normal',
+        details: {
+          itemName: req.itemName,
+          itemCategory: req.itemCategory,
+          quantity: req.quantity,
+          unit: req.unit,
+          requiredDate: req.requiredDate,
+          purpose: req.purpose,
+          projectName: project?.name || 'Unknown Project',
+          projectId: req.projectId
+        }
+      });
+    });
+
+    // Add tool requests
+    toolRequests.forEach(req => {
+      const employee = employeeMap[req.employeeId];
+      const project = projectMap[req.projectId];
+      allApprovals.push({
+        id: req.id,
+        requestType: 'tool',
+        requesterName: employee?.fullName || 'Unknown',
+        requesterId: req.employeeId,
+        requestDate: req.createdAt,
+        status: 'pending',
+        urgency: req.urgency?.toLowerCase() || 'normal',
+        details: {
+          itemName: req.itemName,
+          itemCategory: req.itemCategory,
+          quantity: req.quantity,
+          unit: req.unit,
+          requiredDate: req.requiredDate,
+          purpose: req.purpose,
+          projectName: project?.name || 'Unknown Project',
+          projectId: req.projectId
+        }
+      });
+    });
+
+    // Sort by date (most recent first)
+    allApprovals.sort((a, b) => new Date(b.requestDate) - new Date(a.requestDate));
+
+    // Apply pagination
+    const paginatedApprovals = allApprovals.slice(offset, offset + limit);
+
     console.log('✅ Pending approvals summary:', {
       supervisorId: supervisor.id,
       userId: userId,
@@ -2654,30 +3110,31 @@ export const getPendingApprovalsSummary = async (req, res) => {
       materialRequests: materialCount,
       toolRequests: toolCount,
       urgent: urgentCount,
-      total: totalCount
+      total: totalCount,
+      returnedApprovals: paginatedApprovals.length
     });
 
     return res.json({
       success: true,
       data: {
-        approvals: [], // Empty array when no approvals
+        approvals: paginatedApprovals,
         summary: {
           totalPending: totalCount,
           urgentCount: urgentCount,
-          overdueCount: 0, // Can be calculated if needed
+          overdueCount: 0,
           byType: {
             leave: leaveCount,
             material: materialCount,
             tool: toolCount,
-            reimbursement: 0, // Add if you have this type
+            reimbursement: 0,
             advance_payment: advanceCount
           }
         },
         pagination: {
-          total: 0,
-          limit: 50,
-          offset: 0,
-          hasMore: false
+          total: allApprovals.length,
+          limit: limit,
+          offset: offset,
+          hasMore: offset + limit < allApprovals.length
         }
       }
     });
@@ -2688,6 +3145,1160 @@ export const getPendingApprovalsSummary = async (req, res) => {
       success: false,
       message: 'Server error while fetching pending approvals',
       error: err.message 
+    });
+  }
+};
+
+
+/**
+ * Get pending attendance corrections for supervisor review
+ * @route GET /api/supervisor/pending-attendance-corrections
+ */
+export const getPendingAttendanceCorrections = async (req, res) => {
+  try {
+    const { projectId, status = 'pending' } = req.query;
+    const supervisorId = req.user?.userId || req.user?.id;
+
+    // Build query
+    let query = { status };
+    
+    if (projectId && projectId !== 'all') {
+      query.projectId = Number(projectId);
+    }
+
+    // Fetch pending corrections
+    const corrections = await AttendanceCorrection.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Enrich with employee details
+    const employeeIds = [...new Set(corrections.map(c => c.employeeId))];
+    const employees = await Employee.find({ id: { $in: employeeIds } }).lean();
+    const employeeMap = employees.reduce((map, emp) => {
+      map[emp.id] = emp;
+      return map;
+    }, {});
+
+    // Format response
+    const formattedCorrections = corrections.map(correction => {
+      const employee = employeeMap[correction.employeeId];
+      return {
+        correctionId: correction.correctionId,
+        workerId: correction.employeeId,
+        workerName: employee?.fullName || 'Unknown',
+        requestType: correction.requestType,
+        originalTime: correction.originalTime,
+        requestedTime: correction.requestedTime,
+        reason: correction.reason,
+        requestedAt: correction.createdAt,
+        status: correction.status,
+        reviewedBy: correction.reviewedBy,
+        reviewNotes: correction.reviewNotes,
+        reviewedAt: correction.reviewedAt
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: formattedCorrections,
+      count: formattedCorrections.length
+    });
+
+  } catch (err) {
+    console.error('Error fetching pending attendance corrections:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pending attendance corrections',
+      error: err.message
+    });
+  }
+};
+
+/**
+ * Approve or reject attendance correction
+ * @route POST /api/supervisor/attendance-correction/:correctionId/review
+ */
+export const reviewAttendanceCorrection = async (req, res) => {
+  try {
+    const { correctionId } = req.params;
+    const { action, notes } = req.body;
+    const supervisorId = req.user?.userId || req.user?.id;
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be either "approve" or "reject"'
+      });
+    }
+
+    // Find the correction
+    const correction = await AttendanceCorrection.findOne({ 
+      correctionId: Number(correctionId) 
+    });
+
+    if (!correction) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attendance correction not found'
+      });
+    }
+
+    if (correction.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'This correction has already been reviewed'
+      });
+    }
+
+    // Update correction status
+    correction.status = action === 'approve' ? 'approved' : 'rejected';
+    correction.reviewedBy = supervisorId;
+    correction.reviewNotes = notes || '';
+    correction.reviewedAt = new Date();
+    await correction.save();
+
+    // If approved, update the attendance record
+    if (action === 'approve' && correction.attendanceId) {
+      const attendance = await Attendance.findById(correction.attendanceId);
+      
+      if (attendance) {
+        // Update the appropriate time field based on request type
+        switch (correction.requestType) {
+          case 'check_in':
+            attendance.checkIn = correction.requestedTime;
+            break;
+          case 'check_out':
+            attendance.checkOut = correction.requestedTime;
+            break;
+          case 'lunch_start':
+            attendance.lunchStart = correction.requestedTime;
+            break;
+          case 'lunch_end':
+            attendance.lunchEnd = correction.requestedTime;
+            break;
+        }
+
+        // Add to manual overrides array
+        if (!attendance.manualOverrides) {
+          attendance.manualOverrides = [];
+        }
+        attendance.manualOverrides.push({
+          type: correction.requestType,
+          originalTime: correction.originalTime,
+          correctedTime: correction.requestedTime,
+          reason: correction.reason,
+          approvedBy: supervisorId,
+          approvedAt: new Date()
+        });
+
+        await attendance.save();
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Attendance correction ${action}d successfully`,
+      data: {
+        correctionId: correction.correctionId,
+        status: correction.status,
+        reviewedAt: correction.reviewedAt
+      }
+    });
+
+  } catch (err) {
+    console.error('Error reviewing attendance correction:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to review attendance correction',
+      error: err.message
+    });
+  }
+};
+
+/**
+ * Get task assignments with filtering
+ * GET /api/supervisor/task-assignments
+ */
+export const getTaskAssignments = async (req, res) => {
+  try {
+    const { projectId, status, priority, workerId, limit = 50, offset = 0 } = req.query;
+
+    // Build query
+    const query = {};
+    if (projectId) query.projectId = parseInt(projectId);
+    if (workerId) query.employeeId = parseInt(workerId);
+    if (status) query.status = status;
+
+    // Get assignments from database
+    const assignments = await WorkerTaskAssignment.find(query)
+      .sort({ date: -1, sequence: 1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .lean();
+
+    // Get unique task IDs and employee IDs
+    const taskIds = [...new Set(assignments.map(a => a.taskId).filter(Boolean))];
+    const employeeIds = [...new Set(assignments.map(a => a.employeeId).filter(Boolean))];
+
+    // Fetch tasks and employees in parallel
+    const [tasks, employees] = await Promise.all([
+      Task.find({ id: { $in: taskIds } }).lean(),
+      Employee.find({ id: { $in: employeeIds } }).lean()
+    ]);
+
+    // Create lookup maps for quick access
+    const taskMap = new Map(tasks.map(t => [t.id, t]));
+    const employeeMap = new Map(employees.map(e => [e.id, e]));
+
+    // Transform to match mobile app expectations
+    const transformedAssignments = assignments.map(assignment => {
+      const task = taskMap.get(assignment.taskId);
+      const employee = employeeMap.get(assignment.employeeId);
+
+      return {
+        assignmentId: assignment._id,
+        taskId: assignment.taskId,
+        taskName: task?.taskName || 'Unknown Task',
+        workerId: assignment.employeeId,
+        workerName: employee?.fullName || 'Unknown Worker',
+        status: assignment.status || 'queued',
+        priority: assignment.priority || 'medium',
+        progress: assignment.progress || 0,
+        assignedAt: assignment.date || assignment.createdAt,
+        startedAt: assignment.startTime || null,
+        completedAt: assignment.completedAt || null,
+        estimatedHours: task?.estimatedHours || 8,
+        actualHours: assignment.actualHours || null,
+        dependencies: assignment.dependencies || [],
+        canStart: assignment.canStart !== false,
+        instructions: assignment.instructions || ''
+      };
+    });
+
+    // Calculate summary
+    const summary = {
+      totalAssignments: transformedAssignments.length,
+      pending: transformedAssignments.filter(a => a.status === 'queued').length,
+      inProgress: transformedAssignments.filter(a => a.status === 'in_progress').length,
+      completed: transformedAssignments.filter(a => a.status === 'completed').length,
+      cancelled: transformedAssignments.filter(a => a.status === 'cancelled').length
+    };
+
+    // Get total count for pagination
+    const total = await WorkerTaskAssignment.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: {
+        assignments: transformedAssignments,
+        summary,
+        pagination: {
+          total,
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          hasMore: total > (parseInt(offset) + transformedAssignments.length)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching task assignments:', error);
+    res.status(500).json({
+      success: false,
+      errors: ['Failed to fetch task assignments']
+    });
+  }
+};
+
+/**
+ * Reassign task to a different worker
+ * POST /api/supervisor/task-assignments/:assignmentId/reassign
+ */
+export const reassignTask = async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { newWorkerId, reason, priority, instructions } = req.body;
+
+    // Find the assignment
+    const assignment = await WorkerTaskAssignment.findById(assignmentId);
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Task assignment not found']
+      });
+    }
+
+    // Update assignment
+    assignment.employeeId = newWorkerId;
+    assignment.priority = priority || assignment.priority;
+    assignment.instructions = instructions || assignment.instructions;
+    assignment.reassignmentReason = reason;
+    assignment.reassignedAt = new Date();
+    
+    await assignment.save();
+
+    res.json({
+      success: true,
+      data: {
+        assignmentId: assignment._id,
+        newWorkerId,
+        reassignedAt: assignment.reassignedAt,
+        message: 'Task reassigned successfully'
+      }
+    });
+  } catch (error) {
+    console.error('Error reassigning task:', error);
+    res.status(500).json({
+      success: false,
+      errors: ['Failed to reassign task']
+    });
+  }
+};
+
+/**
+ * Update task priority
+ * PUT /api/supervisor/task-assignments/:assignmentId/priority
+ */
+export const updateTaskPriority = async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { priority, instructions, estimatedHours } = req.body;
+
+    console.log('updateTaskPriority called with:', { 
+      assignmentId, 
+      priority, 
+      instructions, 
+      estimatedHours,
+      body: req.body 
+    });
+
+    // Validate required fields
+    if (!priority) {
+      console.log('Missing priority in request body');
+      return res.status(400).json({
+        success: false,
+        errors: ['Priority is required']
+      });
+    }
+
+    // Map priority values from mobile app to database enum
+    // Mobile: 'low', 'normal', 'high', 'urgent'
+    // Database: 'low', 'medium', 'high', 'critical'
+    const priorityMap = {
+      'low': 'low',
+      'normal': 'medium',
+      'medium': 'medium',
+      'high': 'high',
+      'urgent': 'critical',
+      'critical': 'critical'
+    };
+    
+    const mappedPriority = priorityMap[priority.toLowerCase()];
+    
+    if (!mappedPriority) {
+      console.log('Invalid priority value:', priority);
+      return res.status(400).json({
+        success: false,
+        errors: [`Priority must be one of: low, normal, medium, high, urgent, critical`]
+      });
+    }
+
+    // Find and update the assignment
+    const assignment = await WorkerTaskAssignment.findById(assignmentId);
+    
+    if (!assignment) {
+      console.log('Assignment not found for ID:', assignmentId);
+      return res.status(404).json({
+        success: false,
+        errors: ['Task assignment not found']
+      });
+    }
+
+    console.log('Found assignment:', { 
+      id: assignment._id, 
+      currentPriority: assignment.priority,
+      status: assignment.status 
+    });
+
+    // Update fields with mapped priority
+    assignment.priority = mappedPriority;
+    if (instructions !== undefined) assignment.instructions = instructions;
+    if (estimatedHours !== undefined) assignment.estimatedHours = estimatedHours;
+    assignment.updatedAt = new Date();
+    
+    await assignment.save();
+
+    console.log('Assignment updated successfully:', {
+      newPriority: assignment.priority,
+      instructions: assignment.instructions,
+      estimatedHours: assignment.estimatedHours
+    });
+
+    res.json({
+      success: true,
+      data: {
+        assignmentId: assignment._id,
+        priority: assignment.priority,
+        instructions: assignment.instructions,
+        estimatedHours: assignment.estimatedHours,
+        updatedAt: assignment.updatedAt,
+        message: 'Task priority updated successfully'
+      }
+    });
+  } catch (error) {
+    console.error('Error updating task priority:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    
+    // Handle validation errors specifically
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        errors: validationErrors
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      errors: ['Failed to update task priority']
+    });
+  }
+};
+
+/**
+ * Create and assign a new task to a worker
+ * POST /api/supervisor/create-and-assign-task
+ */
+export const createAndAssignTask = async (req, res) => {
+  try {
+    const {
+      taskName,
+      description,
+      employeeId,
+      projectId,
+      priority = 'medium', // Changed default to 'medium'
+      estimatedHours = 8,
+      instructions = '',
+      date
+    } = req.body;
+
+    // Validate required fields
+    if (!taskName || !employeeId || !projectId) {
+      return res.status(400).json({
+        success: false,
+        errors: ['Task name, employee, and project are required']
+      });
+    }
+
+    // Map priority values from mobile app to database enum
+    // Mobile: 'low', 'normal', 'high', 'urgent'
+    // Database: 'low', 'medium', 'high', 'critical'
+    const priorityMap = {
+      'low': 'low',
+      'normal': 'medium',
+      'medium': 'medium',
+      'high': 'high',
+      'urgent': 'critical',
+      'critical': 'critical'
+    };
+    const mappedPriority = priorityMap[priority.toLowerCase()] || 'medium';
+
+    // Use current date if not provided
+    const assignmentDate = date || new Date().toISOString().split('T')[0];
+
+    // 1. Get companyId from project
+    const project = await Project.findOne({ id: Number(projectId) });
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Project not found']
+      });
+    }
+
+    // 2. Create the task first
+    const lastTask = await Task.findOne().sort({ id: -1 });
+    const newTaskId = lastTask ? lastTask.id + 1 : 1;
+
+    const newTask = await Task.create({
+      id: newTaskId,
+      companyId: project.companyId || 1,
+      projectId: Number(projectId),
+      taskType: 'WORK', // Default to WORK type for supervisor-created tasks
+      taskName,
+      description: description || taskName,
+      status: 'PLANNED', // Use valid enum value
+      assignedBy: req.user?.userId || req.user?.id || 1,
+      createdBy: req.user?.userId || req.user?.id || 1,
+      startDate: new Date(assignmentDate),
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    console.log('✅ Task created:', newTask.id, newTask.taskName);
+
+    // 3. Find last sequence for the day
+    const lastAssignment = await WorkerTaskAssignment
+      .findOne({ 
+        employeeId: Number(employeeId), 
+        projectId: Number(projectId), 
+        date: assignmentDate,
+        sequence: { $exists: true, $ne: null, $type: "number" }
+      })
+      .sort({ sequence: -1 });
+
+    const sequence = (lastAssignment && typeof lastAssignment.sequence === 'number' && !isNaN(lastAssignment.sequence)) 
+      ? lastAssignment.sequence + 1 
+      : 1;
+
+    // 4. Generate assignment ID
+    const lastAssignmentId = await WorkerTaskAssignment.findOne().sort({ id: -1 });
+    const newAssignmentId = lastAssignmentId ? lastAssignmentId.id + 1 : 1;
+
+    // 5. Create the assignment
+    const assignment = await WorkerTaskAssignment.create({
+      id: newAssignmentId,
+      employeeId: Number(employeeId),
+      projectId: Number(projectId),
+      companyId: project.companyId || 1,
+      taskId: newTask.id,
+      date: assignmentDate,
+      status: "queued",
+      sequence: sequence,
+      priority: mappedPriority, // Use mapped priority
+      instructions: instructions,
+      estimatedHours: Number(estimatedHours),
+      createdAt: new Date(),
+      assignedDate: new Date()
+    });
+
+    console.log('✅ Task assignment created:', assignment.id);
+
+    // 6. Send task assignment notification
+    try {
+      const supervisorId = req.user?.userId || req.user?.id || 1;
+      await TaskNotificationService.notifyTaskAssignment([assignment], supervisorId);
+      console.log(`✅ Task assignment notification sent`);
+    } catch (notificationError) {
+      console.error("❌ Error sending task assignment notification:", notificationError);
+      // Don't fail the request if notifications fail
+    }
+
+    res.json({
+      success: true,
+      message: "Task created and assigned successfully",
+      data: {
+        taskId: newTask.id,
+        assignmentId: assignment.id,
+        taskName: newTask.taskName,
+        sequence: assignment.sequence
+      }
+    });
+
+  } catch (err) {
+    console.error("createAndAssignTask error:", err);
+    res.status(500).json({
+      success: false,
+      errors: ['Failed to create and assign task'],
+      message: err.message
+    });
+  }
+};
+
+
+/**
+ * Mark absence reason for a worker
+ * @route POST /api/supervisor/mark-absence-reason
+ */
+export const markAbsenceReason = async (req, res) => {
+  try {
+    const { employeeId, projectId, date, reason, notes } = req.body;
+    const supervisorId = req.user?.employeeId || req.user?.id;
+
+    if (!employeeId || !projectId || !date || !reason) {
+      return res.status(400).json({ 
+        message: 'employeeId, projectId, date, and reason are required' 
+      });
+    }
+
+    const validReasons = ['LEAVE_APPROVED', 'LEAVE_NOT_INFORMED', 'MEDICAL', 'UNAUTHORIZED', 'PRESENT'];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({ 
+        message: `Invalid reason. Must be one of: ${validReasons.join(', ')}` 
+      });
+    }
+
+    const workDate = new Date(date);
+    workDate.setHours(0, 0, 0, 0);
+
+    // Find or create attendance record
+    let attendance = await Attendance.findOne({
+      employeeId: Number(employeeId),
+      projectId: Number(projectId),
+      date: workDate
+    });
+
+    if (!attendance) {
+      // Create new attendance record for absent worker
+      const lastAttendance = await Attendance.findOne().sort({ id: -1 });
+      const newId = lastAttendance ? lastAttendance.id + 1 : 1;
+
+      attendance = new Attendance({
+        id: newId,
+        employeeId: Number(employeeId),
+        projectId: Number(projectId),
+        date: workDate,
+        absenceReason: reason,
+        absenceNotes: notes || '',
+        absenceMarkedBy: supervisorId,
+        absenceMarkedAt: new Date()
+      });
+    } else {
+      // Update existing attendance record
+      attendance.absenceReason = reason;
+      attendance.absenceNotes = notes || '';
+      attendance.absenceMarkedBy = supervisorId;
+      attendance.absenceMarkedAt = new Date();
+    }
+
+    await attendance.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Absence reason marked successfully',
+      data: {
+        attendanceId: attendance.id,
+        absenceReason: attendance.absenceReason,
+        absenceNotes: attendance.absenceNotes
+      }
+    });
+  } catch (err) {
+    console.error('Error marking absence reason:', err);
+    return res.status(500).json({ message: 'Error marking absence reason' });
+  }
+};
+
+/**
+ * Create escalation for attendance violations
+ * @route POST /api/supervisor/create-escalation
+ */
+export const createAttendanceEscalation = async (req, res) => {
+  try {
+    const { 
+      employeeId, 
+      projectId, 
+      escalationType, 
+      severity, 
+      description, 
+      occurrenceCount,
+      dateRange,
+      escalatedTo,
+      notes,
+      relatedAttendanceIds 
+    } = req.body;
+    
+    const supervisorId = req.user?.employeeId || req.user?.id;
+
+    if (!employeeId || !projectId || !escalationType || !escalatedTo) {
+      return res.status(400).json({ 
+        message: 'employeeId, projectId, escalationType, and escalatedTo are required' 
+      });
+    }
+
+    const AttendanceEscalation = (await import('../attendance/models/AttendanceEscalation.js')).default;
+
+    const lastEscalation = await AttendanceEscalation.findOne().sort({ id: -1 });
+    const newId = lastEscalation ? lastEscalation.id + 1 : 1;
+
+    const escalation = new AttendanceEscalation({
+      id: newId,
+      employeeId: Number(employeeId),
+      projectId: Number(projectId),
+      escalationType,
+      severity: severity || 'MEDIUM',
+      description: description || `${escalationType} escalation`,
+      occurrenceCount: occurrenceCount || 1,
+      dateRange: dateRange || {
+        from: new Date(),
+        to: new Date()
+      },
+      escalatedBy: supervisorId,
+      escalatedTo,
+      notes: notes || '',
+      relatedAttendanceIds: relatedAttendanceIds || []
+    });
+
+    await escalation.save();
+
+    // Get employee details for response
+    const employee = await Employee.findOne({ id: Number(employeeId) });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Escalation created successfully',
+      data: {
+        escalationId: escalation.id,
+        employeeName: employee?.fullName || 'Unknown',
+        escalationType: escalation.escalationType,
+        severity: escalation.severity,
+        status: escalation.status
+      }
+    });
+  } catch (err) {
+    console.error('Error creating escalation:', err);
+    return res.status(500).json({ message: 'Error creating escalation' });
+  }
+};
+
+/**
+ * Get escalations for a project
+ * @route GET /api/supervisor/escalations
+ */
+export const getEscalations = async (req, res) => {
+  try {
+    const { projectId, status, employeeId } = req.query;
+
+    if (!projectId) {
+      return res.status(400).json({ message: 'projectId is required' });
+    }
+
+    const AttendanceEscalation = (await import('../attendance/models/AttendanceEscalation.js')).default;
+
+    let query = { projectId: Number(projectId) };
+    if (status) query.status = status;
+    if (employeeId) query.employeeId = Number(employeeId);
+
+    const escalations = await AttendanceEscalation.find(query).sort({ createdAt: -1 });
+
+    // Get employee details
+    const employeeIds = [...new Set(escalations.map(e => e.employeeId))];
+    const employees = await Employee.find({ id: { $in: employeeIds } });
+    const employeeMap = employees.reduce((map, emp) => {
+      map[emp.id] = emp;
+      return map;
+    }, {});
+
+    const escalationsWithDetails = escalations.map(esc => ({
+      id: esc.id,
+      employeeId: esc.employeeId,
+      employeeName: employeeMap[esc.employeeId]?.fullName || 'Unknown',
+      escalationType: esc.escalationType,
+      severity: esc.severity,
+      description: esc.description,
+      occurrenceCount: esc.occurrenceCount,
+      dateRange: esc.dateRange,
+      escalatedTo: esc.escalatedTo,
+      status: esc.status,
+      notes: esc.notes,
+      createdAt: esc.createdAt
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: escalationsWithDetails,
+      count: escalationsWithDetails.length
+    });
+  } catch (err) {
+    console.error('Error fetching escalations:', err);
+    return res.status(500).json({ message: 'Error fetching escalations' });
+  }
+};
+
+/**
+ * Export attendance report
+ * @route GET /api/supervisor/export-attendance-report
+ */
+export const exportAttendanceReport = async (req, res) => {
+  try {
+    const { projectId, date, format = 'json' } = req.query;
+
+    if (!projectId) {
+      return res.status(400).json({ message: 'projectId is required' });
+    }
+
+    const workDate = date || new Date().toISOString().split('T')[0];
+
+    // Get attendance data
+    const project = await Project.findOne({ id: Number(projectId) });
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const assignments = await WorkerTaskAssignment.find({
+      projectId: Number(projectId),
+      date: workDate
+    });
+
+    const employeeIds = [...new Set(assignments.map(a => a.employeeId))];
+    const employees = await Employee.find({ id: { $in: employeeIds } });
+    const employeeMap = employees.reduce((map, emp) => {
+      map[emp.id] = emp;
+      return map;
+    }, {});
+
+    const startOfDay = new Date(workDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    startOfDay.setHours(startOfDay.getHours() - 24);
+    
+    const endOfDay = new Date(workDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    endOfDay.setHours(endOfDay.getHours() + 24);
+    
+    const attendanceRecords = await Attendance.find({
+      employeeId: { $in: employeeIds },
+      date: {
+        $gte: startOfDay,
+        $lte: endOfDay
+      }
+    });
+
+    const filteredAttendance = attendanceRecords.filter(att => {
+      const attDate = new Date(att.date);
+      const attDateString = attDate.toISOString().split('T')[0];
+      const workDateString = new Date(workDate).toISOString().split('T')[0];
+      const attLocalDate = new Date(attDate.getTime() - attDate.getTimezoneOffset() * 60000);
+      const attLocalDateString = attLocalDate.toISOString().split('T')[0];
+      return attDateString === workDateString || attLocalDateString === workDateString;
+    });
+
+    const attendanceMap = filteredAttendance.reduce((map, att) => {
+      const key = `${att.employeeId}-${att.projectId}`;
+      map[key] = att;
+      return map;
+    }, {});
+
+    // Build report data
+    const reportData = assignments.map(assignment => {
+      const employee = employeeMap[assignment.employeeId];
+      const attendanceKey = `${assignment.employeeId}-${assignment.projectId}`;
+      const attendance = attendanceMap[attendanceKey];
+
+      let status = 'ABSENT';
+      let regularHours = 0;
+      let otHours = 0;
+      let lunchDuration = 0;
+
+      if (attendance) {
+        if (attendance.checkOut) {
+          status = 'CHECKED_OUT';
+        } else if (attendance.checkIn) {
+          status = 'CHECKED_IN';
+        }
+
+        // Calculate hours
+        if (attendance.checkIn) {
+          const checkInTime = new Date(attendance.checkIn);
+          const checkOutTime = attendance.checkOut ? new Date(attendance.checkOut) : new Date();
+          const totalMinutes = (checkOutTime - checkInTime) / (1000 * 60);
+
+          // Calculate lunch duration
+          if (attendance.lunchStartTime && attendance.lunchEndTime) {
+            const lunchStart = new Date(attendance.lunchStartTime);
+            const lunchEnd = new Date(attendance.lunchEndTime);
+            lunchDuration = (lunchEnd - lunchStart) / (1000 * 60);
+          }
+
+          const workMinutes = totalMinutes - lunchDuration;
+          const workHours = workMinutes / 60;
+
+          // Regular hours (up to 8 hours)
+          regularHours = Math.min(workHours, 8);
+          // OT hours (anything over 8 hours)
+          otHours = Math.max(workHours - 8, 0);
+        }
+      }
+
+      return {
+        employeeId: assignment.employeeId,
+        employeeName: employee?.fullName || 'Unknown',
+        role: employee?.role || 'Worker',
+        phone: employee?.phone || '',
+        status,
+        checkIn: attendance?.checkIn ? new Date(attendance.checkIn).toLocaleTimeString() : '--:--',
+        checkOut: attendance?.checkOut ? new Date(attendance.checkOut).toLocaleTimeString() : '--:--',
+        lunchStart: attendance?.lunchStartTime ? new Date(attendance.lunchStartTime).toLocaleTimeString() : '--:--',
+        lunchEnd: attendance?.lunchEndTime ? new Date(attendance.lunchEndTime).toLocaleTimeString() : '--:--',
+        regularHours: regularHours.toFixed(2),
+        otHours: otHours.toFixed(2),
+        totalHours: (regularHours + otHours).toFixed(2),
+        absenceReason: attendance?.absenceReason || 'N/A',
+        insideGeofence: attendance?.insideGeofenceAtCheckin ? 'Yes' : 'No',
+        taskAssigned: assignment.taskName || 'No task'
+      };
+    });
+
+    // Calculate summary
+    const summary = {
+      projectName: project.projectName || project.name,
+      date: workDate,
+      totalWorkers: reportData.length,
+      present: reportData.filter(r => r.status !== 'ABSENT').length,
+      absent: reportData.filter(r => r.status === 'ABSENT').length,
+      totalRegularHours: reportData.reduce((sum, r) => sum + parseFloat(r.regularHours), 0).toFixed(2),
+      totalOTHours: reportData.reduce((sum, r) => sum + parseFloat(r.otHours), 0).toFixed(2),
+      generatedAt: new Date().toISOString()
+    };
+
+    if (format === 'csv') {
+      // Generate CSV
+      const csvHeaders = [
+        'Employee ID', 'Name', 'Role', 'Phone', 'Status', 
+        'Check In', 'Check Out', 'Lunch Start', 'Lunch End',
+        'Regular Hours', 'OT Hours', 'Total Hours', 
+        'Absence Reason', 'Inside Geofence', 'Task Assigned'
+      ].join(',');
+
+      const csvRows = reportData.map(row => [
+        row.employeeId,
+        `"${row.employeeName}"`,
+        row.role,
+        row.phone,
+        row.status,
+        row.checkIn,
+        row.checkOut,
+        row.lunchStart,
+        row.lunchEnd,
+        row.regularHours,
+        row.otHours,
+        row.totalHours,
+        row.absenceReason,
+        row.insideGeofence,
+        `"${row.taskAssigned}"`
+      ].join(','));
+
+      const csv = [csvHeaders, ...csvRows].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="attendance-report-${workDate}.csv"`);
+      return res.status(200).send(csv);
+    }
+
+    // Return JSON format
+    return res.status(200).json({
+      success: true,
+      summary,
+      data: reportData
+    });
+  } catch (err) {
+    console.error('Error exporting attendance report:', err);
+    return res.status(500).json({ message: 'Error exporting attendance report' });
+  }
+};
+
+/**
+ * Create general issue escalation to manager
+ * @route POST /api/supervisor/issue-escalation
+ * @desc Escalate site issues like material delays, equipment breakdowns, site instruction changes
+ */
+export const createIssueEscalation = async (req, res) => {
+  try {
+    const {
+      issueType,
+      severity,
+      title,
+      description,
+      escalateTo,
+      photos = [],
+      projectId,
+      notes,
+      immediateActionRequired,
+      estimatedImpact,
+      suggestedSolution,
+      supervisorId,
+      supervisorName,
+    } = req.body;
+
+    // Validation
+    if (!issueType || !severity || !title || !description || !escalateTo || !projectId) {
+      return res.status(400).json({
+        success: false,
+        errors: ['Missing required fields: issueType, severity, title, description, escalateTo, projectId'],
+      });
+    }
+
+    // Get project name
+    const project = await Project.findOne({ id: Number(projectId) });
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Project not found'],
+      });
+    }
+
+    // Import the model
+    const IssueEscalation = (await import('./models/IssueEscalation.js')).default;
+
+    // Create escalation
+    const escalation = new IssueEscalation({
+      issueType,
+      severity,
+      title,
+      description,
+      escalateTo,
+      photos,
+      projectId: Number(projectId),
+      projectName: project.name,
+      supervisorId: supervisorId || req.user?.employeeId || 0,
+      supervisorName: supervisorName || req.user?.name || 'Unknown',
+      notes,
+      immediateActionRequired: immediateActionRequired || false,
+      estimatedImpact,
+      suggestedSolution,
+      status: 'PENDING',
+    });
+
+    await escalation.save();
+
+    // TODO: Send notifications to manager/admin/boss based on escalateTo
+    // This would integrate with your notification service
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        escalationId: escalation._id,
+        issueType: escalation.issueType,
+        severity: escalation.severity,
+        status: escalation.status,
+        escalatedTo: escalation.escalateTo,
+        createdAt: escalation.createdAt,
+        message: `Issue escalated to ${escalation.escalateTo.toLowerCase()} successfully`,
+      },
+    });
+  } catch (err) {
+    console.error('Error creating issue escalation:', err);
+    return res.status(500).json({
+      success: false,
+      errors: ['Failed to create issue escalation'],
+    });
+  }
+};
+
+/**
+ * Get issue escalations for a project
+ * @route GET /api/supervisor/issue-escalations
+ * @desc Get list of issue escalations with filtering and pagination
+ */
+export const getIssueEscalations = async (req, res) => {
+  try {
+    const {
+      projectId,
+      status,
+      issueType,
+      severity,
+      limit = 50,
+      offset = 0,
+    } = req.query;
+
+    // Import the model
+    const IssueEscalation = (await import('./models/IssueEscalation.js')).default;
+
+    // Build query
+    const query = {};
+    if (projectId) query.projectId = Number(projectId);
+    if (status) query.status = status;
+    if (issueType) query.issueType = issueType;
+    if (severity) query.severity = severity;
+
+    // Get escalations with pagination
+    const [escalations, total] = await Promise.all([
+      IssueEscalation.find(query)
+        .sort({ createdAt: -1 })
+        .limit(Number(limit))
+        .skip(Number(offset))
+        .lean(),
+      IssueEscalation.countDocuments(query),
+    ]);
+
+    // Get summary statistics
+    const summary = await IssueEscalation.getStatistics(projectId ? Number(projectId) : null);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        escalations,
+        summary: {
+          total,
+          pending: summary.byStatus?.pending || 0,
+          acknowledged: summary.byStatus?.acknowledged || 0,
+          inProgress: summary.byStatus?.in_progress || 0,
+          resolved: summary.byStatus?.resolved || 0,
+          bySeverity: {
+            critical: summary.bySeverity?.critical || 0,
+            high: summary.bySeverity?.high || 0,
+            medium: summary.bySeverity?.medium || 0,
+            low: summary.bySeverity?.low || 0,
+          },
+          byType: summary.byType || {},
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Error getting issue escalations:', err);
+    return res.status(500).json({
+      success: false,
+      errors: ['Failed to get issue escalations'],
+    });
+  }
+};
+
+/**
+ * Update issue escalation status
+ * @route PUT /api/supervisor/issue-escalation/:escalationId
+ * @desc Update status of an issue escalation (for managers/admin)
+ */
+export const updateIssueEscalation = async (req, res) => {
+  try {
+    const { escalationId } = req.params;
+    const { status, notes, resolution } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        errors: ['Status is required'],
+      });
+    }
+
+    // Import the model
+    const IssueEscalation = (await import('./models/IssueEscalation.js')).default;
+
+    const escalation = await IssueEscalation.findById(escalationId);
+    if (!escalation) {
+      return res.status(404).json({
+        success: false,
+        errors: ['Escalation not found'],
+      });
+    }
+
+    // Update status using the model method
+    escalation.addStatusChange(
+      status,
+      req.user?.employeeId || req.user?.userId || 0,
+      req.user?.name || 'Unknown',
+      notes
+    );
+
+    if (resolution) {
+      escalation.resolution = resolution;
+    }
+
+    await escalation.save();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        escalationId: escalation._id,
+        status: escalation.status,
+        updatedAt: escalation.updatedAt,
+        message: 'Issue escalation updated successfully',
+      },
+    });
+  } catch (err) {
+    console.error('Error updating issue escalation:', err);
+    return res.status(500).json({
+      success: false,
+      errors: ['Failed to update issue escalation'],
     });
   }
 };

@@ -115,7 +115,7 @@ const TaskAssignmentCard: React.FC<TaskAssignmentCardProps> = ({
 
             return (
               <TouchableOpacity
-                key={`task-project-${project.id}-${index}`}
+                key={`task-assignment-project-${project.id}-${index}`}
                 style={styles.projectCard}
                 onPress={() => onViewTaskDetails?.(project.id)}
                 activeOpacity={0.7}

@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useOffline } from '../../store/context/OfflineContext';
@@ -524,15 +526,17 @@ const AttendanceHistoryScreen: React.FC = () => {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView style={styles.loadingContainer}>
+        <StatusBar barStyle="light-content" />
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>Loading attendance history...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <OfflineIndicator />
       
       <ScrollView
@@ -563,7 +567,7 @@ const AttendanceHistoryScreen: React.FC = () => {
           )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 

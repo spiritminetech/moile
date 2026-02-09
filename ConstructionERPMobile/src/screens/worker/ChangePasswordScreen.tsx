@@ -9,6 +9,8 @@ import {
   ScrollView,
   Alert,
   TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { workerApiService } from '../../services/api/WorkerApiService';
@@ -126,7 +128,8 @@ const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ navigation,
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <LoadingOverlay visible={isLoading} message="Changing password..." />
       
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
@@ -195,7 +198,7 @@ const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ navigation,
           style={styles.submitButton}
         />
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 

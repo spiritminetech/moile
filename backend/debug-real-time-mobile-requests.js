@@ -132,7 +132,7 @@ const debugRealTimeMobileRequests = async () => {
   app.listen(PORT, () => {
     console.log(`🚀 Debug server running on port ${PORT}`);
     console.log(`\n📋 INSTRUCTIONS:`);
-    console.log(`1. Update your mobile app's API base URL to: http://192.168.0.3:${PORT}`);
+    console.log(`1. Update your mobile app's API base URL to: http://192.168.1.8:${PORT}`);
     console.log(`2. Try the attendance action that's failing`);
     console.log(`3. Watch the logs here to see exactly what's being sent`);
     console.log(`4. Press Ctrl+C to stop debugging\n`);

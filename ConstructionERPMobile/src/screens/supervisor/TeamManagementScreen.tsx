@@ -418,6 +418,58 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
           </View>
         </ConstructionCard>
 
+        {/* Attendance Monitoring Quick Access */}
+        <ConstructionCard 
+          title="📊 Attendance Monitoring" 
+          variant="elevated" 
+          style={styles.attendanceCard}
+        >
+          <View style={styles.attendanceCardContent}>
+            <Text style={styles.attendanceDescription}>
+              Monitor worker attendance, track late/absent workers, and review geofence violations in real-time
+            </Text>
+            
+            {/* Alert Indicators */}
+            {(teamSummary.late > 0 || teamSummary.absent > 0 || teamSummary.geofenceViolations > 0) && (
+              <View style={styles.attendanceAlerts}>
+                {teamSummary.late > 0 && (
+                  <View style={[styles.alertBadge, styles.alertBadgeWarning]}>
+                    <Text style={styles.alertIcon}>⚠️</Text>
+                    <Text style={styles.alertText}>{teamSummary.late} Late</Text>
+                  </View>
+                )}
+                {teamSummary.absent > 0 && (
+                  <View style={[styles.alertBadge, styles.alertBadgeError]}>
+                    <Text style={styles.alertIcon}>❌</Text>
+                    <Text style={styles.alertText}>{teamSummary.absent} Absent</Text>
+                  </View>
+                )}
+                {teamSummary.geofenceViolations > 0 && (
+                  <View style={[styles.alertBadge, styles.alertBadgeError]}>
+                    <Text style={styles.alertIcon}>📍</Text>
+                    <Text style={styles.alertText}>{teamSummary.geofenceViolations} Violations</Text>
+                  </View>
+                )}
+              </View>
+            )}
+            
+            <ConstructionButton
+              title="Open Attendance Monitoring"
+              onPress={() => {
+                if (navigation) {
+                  navigation.navigate('AttendanceMonitoring', {
+                    projectId: supervisorState.assignedProjects[0]?.id,
+                    date: new Date().toISOString().split('T')[0]
+                  });
+                }
+              }}
+              variant="primary"
+              size="large"
+              style={styles.attendanceButton}
+            />
+          </View>
+        </ConstructionCard>
+
         {/* Project-based Team Overview */}
         {projectTeamSummary.length > 0 && (
           <ConstructionCard title="Projects Overview" variant="elevated" style={styles.summaryCard}>
@@ -537,7 +589,7 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {member.attendanceStatus.replace('_', ' ').toUpperCase()}
+                        {(member.attendanceStatus || 'unknown').replace('_', ' ').toUpperCase()}
                       </Text>
                     </View>
                   </View>
@@ -754,7 +806,7 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                     <View style={styles.statusBadge}>
                       <Text style={styles.statusIcon}>{getStatusIcon(selectedMember.attendanceStatus)}</Text>
                       <Text style={[styles.statusBadgeText, { color: getStatusColor(selectedMember.attendanceStatus) }]}>
-                        {selectedMember.attendanceStatus.replace('_', ' ').toUpperCase()}
+                        {(selectedMember.attendanceStatus || 'unknown').replace('_', ' ').toUpperCase()}
                       </Text>
                     </View>
                   </View>
@@ -829,7 +881,7 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                     selectedMember.certifications.map((cert, index) => (
                       <View key={index} style={styles.certificationItem}>
                         <View style={styles.certificationHeader}>
-                          <Text style={styles.certificationName}>{cert.name}</Text>
+                          <Text style={styles.certificationName}>{cert.name || 'Unknown Certification'}</Text>
                           <View style={[
                             styles.certificationStatusBadge,
                             { backgroundColor: cert.status === 'active' ? ConstructionTheme.colors.success : 
@@ -837,12 +889,12 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                                                ConstructionTheme.colors.error }
                           ]}>
                             <Text style={styles.certificationStatusText}>
-                              {cert.status.toUpperCase()}
+                              {(cert.status || 'unknown').toUpperCase()}
                             </Text>
                           </View>
                         </View>
                         <Text style={styles.certificationExpiry}>
-                          Expires: {new Date(cert.expiryDate).toLocaleDateString()}
+                          Expires: {cert.expiryDate ? new Date(cert.expiryDate).toLocaleDateString() : 'N/A'}
                         </Text>
                       </View>
                     ))
@@ -1090,6 +1142,52 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.labelMedium,
     color: ConstructionTheme.colors.warning,
     fontWeight: 'bold',
+  },
+  // Attendance Monitoring Quick Access Card styles
+  attendanceCard: {
+    marginHorizontal: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.md,
+    backgroundColor: ConstructionTheme.colors.primaryContainer,
+    borderLeftWidth: 4,
+    borderLeftColor: ConstructionTheme.colors.primary,
+  },
+  attendanceCardContent: {
+    gap: ConstructionTheme.spacing.md,
+  },
+  attendanceDescription: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    lineHeight: 20,
+  },
+  attendanceAlerts: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: ConstructionTheme.spacing.sm,
+  },
+  alertBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    gap: ConstructionTheme.spacing.xs,
+  },
+  alertBadgeWarning: {
+    backgroundColor: ConstructionTheme.colors.warningContainer,
+  },
+  alertBadgeError: {
+    backgroundColor: ConstructionTheme.colors.errorContainer,
+  },
+  alertIcon: {
+    fontSize: 16,
+  },
+  alertText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+  },
+  attendanceButton: {
+    marginTop: ConstructionTheme.spacing.sm,
   },
   // Project summary styles
   projectSummaryCard: {

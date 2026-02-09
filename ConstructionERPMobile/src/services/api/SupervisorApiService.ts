@@ -77,6 +77,75 @@ export class SupervisorApiService {
   }
 
   /**
+   * Create and assign a new task to a worker (convenience method for mobile app)
+   * Body: { taskName, description, employeeId, projectId, priority, estimatedHours, instructions, date }
+   */
+  async createAndAssignTask(taskData: {
+    taskName: string;
+    description?: string;
+    employeeId: number;
+    projectId: number;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    estimatedHours?: number;
+    instructions?: string;
+    date?: string;
+    // NEW FIELDS
+    trade?: string;
+    siteLocation?: string;
+    toolsRequired?: string;
+    materialsRequired?: string;
+    startTime?: string;
+    endTime?: string;
+  }): Promise<ApiResponse<{
+    taskId: number;
+    assignmentId: number;
+    taskName: string;
+    sequence: number;
+  }>> {
+    return apiClient.post('/supervisor/create-and-assign-task', taskData);
+  }
+
+  /**
+   * NEW: Create and assign a task to multiple workers (group assignment)
+   * Body: { taskName, description, employeeIds, projectId, priority, estimatedHours, instructions, date, ... }
+   */
+  async createAndAssignTaskGroup(taskData: {
+    taskName: string;
+    description?: string;
+    employeeIds: number[];
+    projectId: number;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    estimatedHours?: number;
+    instructions?: string;
+    date?: string;
+    trade?: string;
+    siteLocation?: string;
+    toolsRequired?: string;
+    materialsRequired?: string;
+    startTime?: string;
+    endTime?: string;
+  }): Promise<ApiResponse<{
+    taskId: number;
+    assignmentIds: number[];
+    taskName: string;
+    workersAssigned: number;
+  }>> {
+    return apiClient.post('/supervisor/create-and-assign-task-group', taskData);
+  }
+
+  /**
+   * NEW: Verify task completion by supervisor
+   * POST /api/supervisor/verify-task-completion/:assignmentId
+   */
+  async verifyTaskCompletion(assignmentId: number): Promise<ApiResponse<{
+    assignmentId: number;
+    verifiedAt: string;
+    verifiedBy: number;
+  }>> {
+    return apiClient.post(`/supervisor/verify-task-completion/${assignmentId}`, {});
+  }
+
+  /**
    * Update task assignment - uses existing endpoint
    * Body: { assignmentId, changes }
    */
@@ -200,6 +269,43 @@ export class SupervisorApiService {
   }
 
   /**
+   * Get pending attendance corrections for review
+   */
+  async getPendingAttendanceCorrections(params?: {
+    projectId?: string;
+    status?: string;
+  }): Promise<ApiResponse<{
+    data: Array<{
+      correctionId: number;
+      workerId: number;
+      workerName: string;
+      requestType: 'check_in' | 'check_out' | 'lunch_start' | 'lunch_end';
+      originalTime: string;
+      requestedTime: string;
+      reason: string;
+      requestedAt: string;
+      status: 'pending' | 'approved' | 'rejected';
+    }>;
+    count: number;
+  }>> {
+    return apiClient.get('/supervisor/pending-attendance-corrections', { params });
+  }
+
+  /**
+   * Approve or reject attendance correction
+   */
+  async approveAttendanceCorrection(
+    correctionId: number,
+    data: {
+      action: 'approve' | 'reject';
+      notes?: string;
+      correctedTime?: string;
+    }
+  ): Promise<ApiResponse<any>> {
+    return apiClient.post(`/supervisor/attendance-correction/${correctionId}/review`, data);
+  }
+
+  /**
    * Submit manual attendance override - uses existing endpoint
    */
   async submitManualAttendanceOverride(data: {
@@ -285,6 +391,8 @@ export class SupervisorApiService {
   
   /**
    * Get supervisor dashboard data with team overview and key metrics
+   * This is the OPTIMIZED single-call endpoint that replaces multiple N+1 queries
+   * Returns all dashboard data in one response
    */
   async getDashboardData(date?: string): Promise<ApiResponse<SupervisorDashboardResponse>> {
     const params = date ? { date } : {};
@@ -1230,6 +1338,550 @@ export class SupervisorApiService {
     message: string;
   }>> {
     return apiClient.post('/supervisor/materials/allocate', allocationData);
+  }
+
+  /**
+   * Get task assignments with filtering
+   * Returns list of task assignments for workers
+   */
+  async getTaskAssignments(params?: {
+    projectId?: number;
+    status?: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    workerId?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<ApiResponse<{
+    assignments: Array<{
+      assignmentId: number;
+      taskId: number;
+      taskName: string;
+      workerId: number;
+      workerName: string;
+      status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+      priority: 'low' | 'normal' | 'high' | 'urgent';
+      progress: number;
+      assignedAt: string;
+      startedAt: string | null;
+      completedAt: string | null;
+      estimatedHours: number;
+      actualHours: number | null;
+      dependencies: number[];
+      canStart: boolean;
+      instructions?: string;
+    }>;
+    summary: {
+      totalAssignments: number;
+      pending: number;
+      inProgress: number;
+      completed: number;
+      cancelled: number;
+    };
+    pagination: {
+      total: number;
+      limit: number;
+      offset: number;
+      hasMore: boolean;
+    };
+  }>> {
+    return apiClient.get('/supervisor/task-assignments', { params });
+  }
+
+  /**
+   * Reassign task to a different worker
+   */
+  async reassignTask(assignmentId: number, data: {
+    newWorkerId: number;
+    reason: string;
+    priority: 'low' | 'normal' | 'high' | 'urgent';
+    instructions: string;
+  }): Promise<ApiResponse<{
+    assignmentId: number;
+    newWorkerId: number;
+    reassignedAt: string;
+    message: string;
+  }>> {
+    return apiClient.post(`/supervisor/task-assignments/${assignmentId}/reassign`, data);
+  }
+
+  /**
+   * Update task priority
+   */
+  async updateTaskPriority(assignmentId: number, data: {
+    priority: 'low' | 'normal' | 'high' | 'urgent';
+    instructions: string;
+    estimatedHours: number;
+  }): Promise<ApiResponse<{
+    assignmentId: number;
+    priority: string;
+    updatedAt: string;
+    message: string;
+  }>> {
+    return apiClient.put(`/supervisor/task-assignments/${assignmentId}/priority`, data);
+  }
+
+  /**
+   * Mark absence reason for a worker
+   */
+  async markAbsenceReason(data: {
+    employeeId: number;
+    projectId: number;
+    date: string;
+    reason: 'LEAVE_APPROVED' | 'LEAVE_NOT_INFORMED' | 'MEDICAL' | 'UNAUTHORIZED' | 'PRESENT';
+    notes?: string;
+  }): Promise<ApiResponse<{
+    attendanceId: number;
+    absenceReason: string;
+    absenceNotes: string;
+  }>> {
+    return apiClient.post('/supervisor/mark-absence-reason', data);
+  }
+
+  /**
+   * Create attendance escalation
+   */
+  async createEscalation(data: {
+    employeeId: number;
+    projectId: number;
+    escalationType: 'REPEATED_LATE' | 'REPEATED_ABSENCE' | 'GEOFENCE_VIOLATION' | 'UNAUTHORIZED_ABSENCE' | 'OTHER';
+    severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    description: string;
+    occurrenceCount?: number;
+    dateRange: {
+      from: string;
+      to: string;
+    };
+    escalatedTo: 'ADMIN' | 'MANAGER' | 'HR';
+    notes?: string;
+    relatedAttendanceIds?: number[];
+  }): Promise<ApiResponse<{
+    escalationId: number;
+    employeeName: string;
+    escalationType: string;
+    severity: string;
+    status: string;
+  }>> {
+    return apiClient.post('/supervisor/create-escalation', data);
+  }
+
+  /**
+   * Get escalations for a project
+   */
+  async getEscalations(params: {
+    projectId: number;
+    status?: 'PENDING' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED';
+    employeeId?: number;
+  }): Promise<ApiResponse<Array<{
+    id: number;
+    employeeId: number;
+    employeeName: string;
+    escalationType: string;
+    severity: string;
+    description: string;
+    occurrenceCount: number;
+    dateRange: {
+      from: string;
+      to: string;
+    };
+    escalatedTo: string;
+    status: string;
+    notes: string;
+    createdAt: string;
+  }>>> {
+    return apiClient.get('/supervisor/escalations', { params });
+  }
+
+  /**
+   * Export attendance report
+   */
+  async exportAttendanceReport(params: {
+    projectId: number;
+    date?: string;
+    format?: 'json' | 'csv';
+  }): Promise<ApiResponse<{
+    summary: {
+      projectName: string;
+      date: string;
+      totalWorkers: number;
+      present: number;
+      absent: number;
+      totalRegularHours: string;
+      totalOTHours: string;
+      generatedAt: string;
+    };
+    data: Array<{
+      employeeId: number;
+      employeeName: string;
+      role: string;
+      phone: string;
+      status: string;
+      checkIn: string;
+      checkOut: string;
+      lunchStart: string;
+      lunchEnd: string;
+      regularHours: string;
+      otHours: string;
+      totalHours: string;
+      absenceReason: string;
+      insideGeofence: string;
+      taskAssigned: string;
+    }>;
+  }>> {
+    return apiClient.get('/supervisor/export-attendance-report', { params });
+  }
+
+  /**
+   * Create general issue escalation to manager
+   * For material delays, equipment breakdowns, site instruction changes, etc.
+   */
+  async createIssueEscalation(data: {
+    issueType: 'MANPOWER_SHORTAGE' | 'SAFETY_INCIDENT' | 'MATERIAL_DELAY' | 
+                'MATERIAL_DAMAGE' | 'WORKER_MISCONDUCT' | 'EQUIPMENT_BREAKDOWN' | 
+                'SITE_INSTRUCTION_CHANGE' | 'OTHER';
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    title: string;
+    description: string;
+    escalateTo: 'MANAGER' | 'ADMIN' | 'BOSS';
+    photos: string[];
+    projectId: number;
+    notes: string;
+    immediateActionRequired: boolean;
+    estimatedImpact?: string;
+    suggestedSolution?: string;
+    supervisorId: number;
+    supervisorName: string;
+    timestamp: string;
+  }): Promise<ApiResponse<{
+    escalationId: number;
+    issueType: string;
+    severity: string;
+    status: string;
+    escalatedTo: string;
+    createdAt: string;
+    message: string;
+  }>> {
+    return apiClient.post('/supervisor/issue-escalation', data);
+  }
+
+  /**
+   * Get issue escalations for a project
+   */
+  async getIssueEscalations(params: {
+    projectId?: number;
+    status?: 'PENDING' | 'ACKNOWLEDGED' | 'IN_PROGRESS' | 'RESOLVED' | 'DISMISSED';
+    issueType?: string;
+    severity?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ApiResponse<{
+    escalations: Array<{
+      id: number;
+      issueType: string;
+      severity: string;
+      title: string;
+      description: string;
+      escalateTo: string;
+      status: string;
+      projectId: number;
+      projectName: string;
+      supervisorId: number;
+      supervisorName: string;
+      immediateActionRequired: boolean;
+      estimatedImpact: string;
+      suggestedSolution: string;
+      photos: string[];
+      notes: string;
+      createdAt: string;
+      acknowledgedAt?: string;
+      acknowledgedBy?: string;
+      resolvedAt?: string;
+      resolvedBy?: string;
+      resolution?: string;
+    }>;
+    summary: {
+      total: number;
+      pending: number;
+      acknowledged: number;
+      inProgress: number;
+      resolved: number;
+      bySeverity: {
+        critical: number;
+        high: number;
+        medium: number;
+        low: number;
+      };
+      byType: Record<string, number>;
+    };
+  }>> {
+    return apiClient.get('/supervisor/issue-escalations', { params });
+  }
+
+  /**
+   * Update issue escalation status (for managers/admin)
+   */
+  async updateIssueEscalation(escalationId: number, data: {
+    status: 'ACKNOWLEDGED' | 'IN_PROGRESS' | 'RESOLVED' | 'DISMISSED';
+    notes?: string;
+    resolution?: string;
+  }): Promise<ApiResponse<{
+    escalationId: number;
+    status: string;
+    updatedAt: string;
+    message: string;
+  }>> {
+    return apiClient.put(`/supervisor/issue-escalation/${escalationId}`, data);
+  }
+
+  // ========================================
+  // MATERIALS & TOOLS MANAGEMENT
+  // ========================================
+
+  /**
+   * Request materials for a project
+   * POST /api/supervisor/request-materials
+   */
+  async requestMaterials(data: {
+    projectId: number;
+    requestType: 'MATERIAL' | 'TOOL';
+    itemName: string;
+    itemCategory?: string;
+    quantity: number;
+    unit?: string;
+    urgency?: 'NORMAL' | 'HIGH' | 'URGENT';
+    requiredDate: Date;
+    purpose: string;
+    justification?: string;
+    specifications?: string;
+    estimatedCost?: number;
+  }): Promise<ApiResponse<{
+    requestId: number;
+    itemName: string;
+    status: string;
+    message: string;
+  }>> {
+    return apiClient.post('/supervisor/request-materials', data);
+  }
+
+  /**
+   * Allocate tool to worker
+   * POST /api/supervisor/allocate-tool
+   */
+  async allocateTool(data: {
+    toolId: number;
+    toolName: string;
+    allocatedTo: number;
+    allocatedToName: string;
+    allocationDate: Date;
+    expectedReturnDate: Date;
+    condition: string;
+    location: string;
+  }): Promise<ApiResponse<{
+    allocationId: number;
+    toolName: string;
+    allocatedTo: string;
+    message: string;
+  }>> {
+    return apiClient.post('/supervisor/allocate-tool', data);
+  }
+
+  /**
+   * Return tool from worker
+   * POST /api/supervisor/return-tool/:allocationId
+   */
+  async returnTool(allocationId: number, condition: string, notes?: string): Promise<ApiResponse<{
+    allocationId: number;
+    returnedAt: string;
+    condition: string;
+    message: string;
+  }>> {
+    return apiClient.post(`/supervisor/return-tool/${allocationId}`, { condition, notes });
+  }
+
+  /**
+   * Get materials and tools data
+   * GET /api/supervisor/materials-tools
+   */
+  async getMaterialsAndTools(projectId?: number): Promise<ApiResponse<{
+    materialRequests: MaterialRequest[];
+    toolAllocations: ToolAllocation[];
+  }>> {
+    const queryString = projectId ? `?projectId=${projectId}` : '';
+    return apiClient.get(`/supervisor/materials-tools${queryString}`);
+  }
+
+  /**
+   * Acknowledge material/tool delivery
+   * POST /api/supervisor/acknowledge-delivery/:requestId
+   */
+  async acknowledgeDelivery(requestId: number, data: {
+    deliveredQuantity?: number;
+    deliveryCondition?: 'good' | 'partial' | 'damaged' | 'wrong';
+    receivedBy?: string;
+    deliveryNotes?: string;
+    deliveryPhotos?: string[];
+  }): Promise<ApiResponse<{
+    requestId: number;
+    deliveredQuantity: number;
+    deliveryCondition: string;
+    message: string;
+  }>> {
+    return apiClient.post(`/supervisor/acknowledge-delivery/${requestId}`, data);
+  }
+
+  /**
+   * Return materials to store
+   * POST /api/supervisor/return-materials
+   */
+  async returnMaterials(data: {
+    requestId: number;
+    returnQuantity: number;
+    returnReason: 'excess' | 'defect' | 'scope_change' | 'completion';
+    returnCondition?: 'unused' | 'damaged';
+    returnNotes?: string;
+    returnPhotos?: string[];
+  }): Promise<ApiResponse<{
+    requestId: number;
+    returnQuantity: number;
+    returnCondition: string;
+    message: string;
+  }>> {
+    return apiClient.post('/supervisor/return-materials', data);
+  }
+
+  /**
+   * Get tool usage log
+   * GET /api/supervisor/tool-usage-log
+   */
+  async getToolUsageLog(params?: {
+    projectId?: number;
+    toolId?: number;
+    status?: string;
+  }): Promise<ApiResponse<{
+    tools: Array<{
+      toolId: number;
+      toolName: string;
+      category: string;
+      totalQuantity: number;
+      status: string;
+      condition: string;
+      location: string;
+      allocated: boolean;
+      serialNumber?: string;
+      lastMaintenanceDate?: string;
+      nextMaintenanceDate?: string;
+      allocationHistory: Array<{
+        requestId: number;
+        employeeId: number;
+        quantity: number;
+        requestedDate: string;
+        approvedDate?: string;
+        fulfilledDate?: string;
+        status: string;
+        purpose: string;
+      }>;
+      updatedAt: string;
+    }>;
+    count: number;
+    projectId: number | string;
+  }>> {
+    return apiClient.get('/supervisor/tool-usage-log', { params });
+  }
+
+  /**
+   * Log tool usage (check-out/check-in)
+   * POST /api/supervisor/log-tool-usage
+   */
+  async logToolUsage(data: {
+    toolId: number;
+    action: 'check_out' | 'check_in';
+    employeeId: number;
+    quantity?: number;
+    condition?: 'good' | 'fair' | 'needs_maintenance' | 'damaged';
+    location?: string;
+    notes?: string;
+  }): Promise<ApiResponse<{
+    action: string;
+    toolId: number;
+    toolName: string;
+    employeeName: string;
+    quantity: number;
+    condition?: string;
+    message: string;
+  }>> {
+    return apiClient.post('/supervisor/log-tool-usage', data);
+  }
+
+  /**
+   * Get material inventory
+   * GET /api/supervisor/materials/inventory
+   */
+  async getMaterialInventory(params?: {
+    projectId?: number;
+    lowStock?: boolean;
+  }): Promise<ApiResponse<{
+    inventory: Array<{
+      id: number;
+      type: 'MATERIAL' | 'TOOL';
+      name: string;
+      category: string;
+      quantity: number;
+      unit: string;
+      allocated: number;
+      available: number;
+      status: string;
+      projectId: number;
+      projectName: string;
+      location?: string;
+      minQuantity: number;
+      isLowStock: boolean;
+      lastUpdated: string;
+    }>;
+    alerts: Array<{
+      type: string;
+      itemType: string;
+      itemId: number;
+      itemName: string;
+      projectName: string;
+      currentQuantity?: number;
+      minQuantity?: number;
+      condition?: string;
+      message: string;
+    }>;
+    summary: {
+      totalMaterials: number;
+      totalTools: number;
+      lowStockItems: number;
+      maintenanceRequired: number;
+    };
+  }>> {
+    return apiClient.get('/supervisor/materials/inventory', { params });
+  }
+
+  /**
+   * Get material returns history
+   * GET /api/supervisor/material-returns
+   */
+  async getMaterialReturns(params?: {
+    projectId?: number;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<ApiResponse<{
+    returns: Array<{
+      id: number;
+      requestId: number;
+      itemName: string;
+      returnQuantity: number;
+      returnReason: string;
+      returnCondition: string;
+      returnDate: string;
+      returnedBy: string;
+      status: string;
+      notes?: string;
+    }>;
+    count: number;
+  }>> {
+    return apiClient.get('/supervisor/material-returns', { params });
   }
 }
 

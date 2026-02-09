@@ -8,6 +8,8 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { TEST_CREDENTIALS } from '../../services/api/mockApi';
@@ -56,7 +58,8 @@ const LoginScreenSimple: React.FC = () => {
   const isLoading = Boolean(state.isLoading);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <View style={styles.content}>
         <Text style={styles.title}>Construction ERP</Text>
         <Text style={styles.subtitle}>Sign in to continue</Text>
@@ -157,7 +160,7 @@ const LoginScreenSimple: React.FC = () => {
           </TouchableOpacity>
         </Modal>
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 

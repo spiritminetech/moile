@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { workerApiService } from '../../services/api/WorkerApiService';
@@ -167,7 +169,9 @@ const RequestHistoryScreen: React.FC = () => {
   const counts = getRequestCounts();
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Request History</Text>
@@ -264,7 +268,7 @@ const RequestHistoryScreen: React.FC = () => {
                     ]}
                   >
                     <Text style={styles.statusText}>
-                      {request.status.toUpperCase()}
+                      {(request.status || 'pending').toUpperCase()}
                     </Text>
                   </View>
                 </View>
@@ -300,7 +304,8 @@ const RequestHistoryScreen: React.FC = () => {
           </View>
         )}
       </ScrollView>
-    </View>
+      </View>
+    </SafeAreaView>
   );
 };
 

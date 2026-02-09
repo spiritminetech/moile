@@ -43,6 +43,9 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
       activeWorkers: initialData?.manpowerUtilization?.activeWorkers || 0,
       productivity: initialData?.manpowerUtilization?.productivity || 0,
       efficiency: initialData?.manpowerUtilization?.efficiency || 0,
+      overtimeHours: 0,
+      absentWorkers: 0,
+      lateWorkers: 0,
     },
     progressMetrics: {
       overallProgress: initialData?.progressMetrics?.overallProgress || 0,
@@ -61,6 +64,8 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
     description: '',
     severity: 'medium' as const,
     status: 'open' as const,
+    location: '',
+    actionTaken: '',
   });
   const [currentMaterial, setCurrentMaterial] = useState({
     materialId: 0,
@@ -68,6 +73,9 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
     consumed: 0,
     remaining: 0,
     unit: '',
+    plannedConsumption: 0,
+    wastage: 0,
+    notes: '',
   });
 
   const validateForm = (): boolean => {
@@ -142,7 +150,11 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
   };
 
   const addIssue = () => {
+    console.log('🔵 Add Issue button pressed!');
+    console.log('🔵 Current issue data:', currentIssue);
+    
     if (!currentIssue.description.trim()) {
+      console.log('🔵 Validation failed: No description');
       Alert.alert('Error', 'Please provide issue description');
       return;
     }
@@ -152,16 +164,22 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
       description: currentIssue.description.trim(),
     };
 
+    console.log('🔵 Adding issue to list:', newIssue);
+    
     setFormData(prev => ({
       ...prev,
       issues: [...prev.issues, newIssue],
     }));
 
+    console.log('🔵 Issue added successfully, resetting form');
+    
     setCurrentIssue({
       type: 'quality',
       description: '',
       severity: 'medium',
       status: 'open',
+      location: '',
+      actionTaken: '',
     });
   };
 
@@ -173,7 +191,11 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
   };
 
   const addMaterial = () => {
+    console.log('🟢 Add Material button pressed!');
+    console.log('🟢 Current material data:', currentMaterial);
+    
     if (!currentMaterial.name.trim() || currentMaterial.consumed <= 0) {
+      console.log('🟢 Validation failed: Missing name or consumed <= 0');
       Alert.alert('Error', 'Please provide material name and consumed quantity');
       return;
     }
@@ -184,17 +206,24 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
       name: currentMaterial.name.trim(),
     };
 
+    console.log('🟢 Adding material to list:', newMaterial);
+    
     setFormData(prev => ({
       ...prev,
       materialConsumption: [...prev.materialConsumption, newMaterial],
     }));
 
+    console.log('🟢 Material added successfully, resetting form');
+    
     setCurrentMaterial({
       materialId: 0,
       name: '',
       consumed: 0,
       remaining: 0,
       unit: '',
+      plannedConsumption: 0,
+      wastage: 0,
+      notes: '',
     });
   };
 
@@ -325,6 +354,40 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
             />
           </View>
 
+          <View style={styles.row}>
+            <ConstructionInput
+              label="Overtime Hours"
+              value={formData.manpowerUtilization.overtimeHours.toString()}
+              onChangeText={(text) => {
+                const value = parseFloat(text) || 0;
+                handleFieldChange('manpowerUtilization.overtimeHours', value);
+              }}
+              keyboardType="numeric"
+              style={styles.halfInput}
+            />
+
+            <ConstructionInput
+              label="Absent Workers"
+              value={formData.manpowerUtilization.absentWorkers.toString()}
+              onChangeText={(text) => {
+                const value = parseInt(text) || 0;
+                handleFieldChange('manpowerUtilization.absentWorkers', value);
+              }}
+              keyboardType="numeric"
+              style={styles.halfInput}
+            />
+          </View>
+
+          <ConstructionInput
+            label="Late Workers"
+            value={formData.manpowerUtilization.lateWorkers.toString()}
+            onChangeText={(text) => {
+              const value = parseInt(text) || 0;
+              handleFieldChange('manpowerUtilization.lateWorkers', value);
+            }}
+            keyboardType="numeric"
+          />
+
           {/* Progress Metrics */}
           <Text style={styles.sectionTitle}>📊 Progress Metrics</Text>
 
@@ -399,6 +462,12 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.issueDescription}>{issue.description}</Text>
+                  {issue.location && (
+                    <Text style={styles.issueLocation}>📍 Location: {issue.location}</Text>
+                  )}
+                  {issue.actionTaken && (
+                    <Text style={styles.issueAction}>✅ Action: {issue.actionTaken}</Text>
+                  )}
                 </ConstructionCard>
               ))}
             </View>
@@ -431,6 +500,22 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
               numberOfLines={3}
             />
 
+            <ConstructionInput
+              label="Location (Optional)"
+              value={currentIssue.location}
+              onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, location: text }))}
+              placeholder="e.g., Block A, Floor 3, Zone 2"
+            />
+
+            <ConstructionInput
+              label="Action Taken (Optional)"
+              value={currentIssue.actionTaken}
+              onChangeText={(text) => setCurrentIssue(prev => ({ ...prev, actionTaken: text }))}
+              placeholder="Describe action taken..."
+              multiline
+              numberOfLines={2}
+            />
+
             <ConstructionButton
               title="Add Issue"
               onPress={addIssue}
@@ -459,7 +544,12 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
                   </View>
                   <Text style={styles.materialDetails}>
                     Consumed: {material.consumed} {material.unit} | Remaining: {material.remaining} {material.unit}
+                    {material.plannedConsumption > 0 && ` | Planned: ${material.plannedConsumption} ${material.unit}`}
+                    {material.wastage > 0 && ` | Wastage: ${material.wastage} ${material.unit}`}
                   </Text>
+                  {material.notes && (
+                    <Text style={styles.materialNotes}>Note: {material.notes}</Text>
+                  )}
                 </ConstructionCard>
               ))}
             </View>
@@ -507,6 +597,39 @@ const ProgressReportForm: React.FC<ProgressReportFormProps> = ({
                 style={styles.thirdInput}
               />
             </View>
+
+            <View style={styles.row}>
+              <ConstructionInput
+                label="Planned (Optional)"
+                value={currentMaterial.plannedConsumption.toString()}
+                onChangeText={(text) => {
+                  const value = parseFloat(text) || 0;
+                  setCurrentMaterial(prev => ({ ...prev, plannedConsumption: value }));
+                }}
+                keyboardType="numeric"
+                style={styles.halfInput}
+              />
+
+              <ConstructionInput
+                label="Wastage (Optional)"
+                value={currentMaterial.wastage.toString()}
+                onChangeText={(text) => {
+                  const value = parseFloat(text) || 0;
+                  setCurrentMaterial(prev => ({ ...prev, wastage: value }));
+                }}
+                keyboardType="numeric"
+                style={styles.halfInput}
+              />
+            </View>
+
+            <ConstructionInput
+              label="Notes (Optional)"
+              value={currentMaterial.notes}
+              onChangeText={(text) => setCurrentMaterial(prev => ({ ...prev, notes: text }))}
+              placeholder="Additional notes about material usage..."
+              multiline
+              numberOfLines={2}
+            />
 
             <ConstructionButton
               title="Add Material"
@@ -677,6 +800,22 @@ const styles = StyleSheet.create({
   materialDetails: {
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+  materialNotes: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    fontStyle: 'italic',
+    marginTop: ConstructionTheme.spacing.xs,
+  },
+  issueLocation: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginTop: ConstructionTheme.spacing.xs,
+  },
+  issueAction: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.success,
+    marginTop: ConstructionTheme.spacing.xs,
   },
   addMaterialCard: {
     marginTop: ConstructionTheme.spacing.md,

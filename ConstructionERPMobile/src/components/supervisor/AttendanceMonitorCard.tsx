@@ -1,7 +1,7 @@
 // AttendanceMonitorCard Component - Real-time attendance tracking for supervisors
 // Requirements: 2.2, 3.1, 3.2, 3.3
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -13,21 +13,42 @@ import { SupervisorDashboardResponse } from '../../types';
 import ConstructionCard from '../common/ConstructionCard';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
+interface WorkerAttendanceDetail {
+  employeeId: number;
+  workerName: string;
+  role: string;
+  status: string;
+  morningCheckIn: string | null;
+  morningCheckOut: string | null;
+  afternoonCheckIn: string | null;
+  afternoonCheckOut: string | null;
+  totalHours: number;
+  overtimeHours: number;
+  isLate: boolean;
+  minutesLate: number;
+  flags: string[];
+}
+
 interface AttendanceMonitorCardProps {
   projects: SupervisorDashboardResponse['projects'];
   alerts?: SupervisorDashboardResponse['alerts'];
+  workerDetails?: WorkerAttendanceDetail[];
   isLoading: boolean;
   onViewAttendanceDetails?: (projectId: number) => void;
   onResolveAlert?: (alertId: number) => void;
+  highContrast?: boolean;
 }
 
 const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
   projects,
   alerts = [],
+  workerDetails = [],
   isLoading,
   onViewAttendanceDetails,
   onResolveAlert,
+  highContrast = false,
 }) => {
+  const [expandedWorkers, setExpandedWorkers] = useState(false);
   if (isLoading) {
     return (
       <ConstructionCard title="Attendance Monitor" variant="default">
@@ -135,7 +156,7 @@ const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
             
             return (
               <TouchableOpacity
-                key={`attendance-project-${project.id}-${index}`}
+                key={`attendance-monitor-project-${project.id}-${index}`}
                 style={styles.projectItem}
                 onPress={() => onViewAttendanceDetails?.(project.id)}
                 activeOpacity={0.7}
@@ -167,6 +188,135 @@ const AttendanceMonitorCard: React.FC<AttendanceMonitorCardProps> = ({
           })}
         </ScrollView>
       </View>
+
+      {/* Worker-wise Attendance Details (Expandable) */}
+      {workerDetails.length > 0 && (
+        <View style={styles.workerDetailsContainer}>
+          <TouchableOpacity 
+            style={styles.workerDetailsHeader}
+            onPress={() => setExpandedWorkers(!expandedWorkers)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.workerDetailsTitle}>
+              Worker Attendance Details ({workerDetails.length})
+            </Text>
+            <Text style={styles.expandIcon}>
+              {expandedWorkers ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+
+          {expandedWorkers && (
+            <ScrollView style={styles.workerDetailsList} nestedScrollEnabled>
+              {workerDetails.slice(0, 10).map((worker, index) => (
+                <View 
+                  key={`worker-detail-${worker.employeeId}-${index}`}
+                  style={styles.workerDetailItem}
+                >
+                  <View style={styles.workerDetailHeader}>
+                    <Text style={styles.workerName}>{worker.workerName}</Text>
+                    <View style={[
+                      styles.workerStatusBadge,
+                      styles[`status_${worker.status}`]
+                    ]}>
+                      <Text style={styles.workerStatusText}>
+                        {worker.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {worker.status !== 'absent' && (
+                    <>
+                      {/* Morning Session */}
+                      <View style={styles.sessionRow}>
+                        <Text style={styles.sessionLabel}>Morning:</Text>
+                        <Text style={styles.sessionTime}>
+                          {worker.morningCheckIn 
+                            ? new Date(worker.morningCheckIn).toLocaleTimeString('en-US', { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                              })
+                            : '-'}
+                        </Text>
+                        <Text style={styles.sessionSeparator}>→</Text>
+                        <Text style={styles.sessionTime}>
+                          {worker.morningCheckOut 
+                            ? new Date(worker.morningCheckOut).toLocaleTimeString('en-US', { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                              })
+                            : '-'}
+                        </Text>
+                      </View>
+
+                      {/* Afternoon Session */}
+                      {(worker.afternoonCheckIn || worker.afternoonCheckOut) && (
+                        <View style={styles.sessionRow}>
+                          <Text style={styles.sessionLabel}>Afternoon:</Text>
+                          <Text style={styles.sessionTime}>
+                            {worker.afternoonCheckIn 
+                              ? new Date(worker.afternoonCheckIn).toLocaleTimeString('en-US', { 
+                                  hour: '2-digit', 
+                                  minute: '2-digit' 
+                                })
+                              : '-'}
+                          </Text>
+                          <Text style={styles.sessionSeparator}>→</Text>
+                          <Text style={styles.sessionTime}>
+                            {worker.afternoonCheckOut 
+                              ? new Date(worker.afternoonCheckOut).toLocaleTimeString('en-US', { 
+                                  hour: '2-digit', 
+                                  minute: '2-digit' 
+                                })
+                              : '-'}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Hours Summary */}
+                      <View style={styles.hoursRow}>
+                        <Text style={styles.hoursLabel}>
+                          Total: {worker.totalHours.toFixed(1)}h
+                        </Text>
+                        {worker.overtimeHours > 0 && (
+                          <Text style={styles.overtimeLabel}>
+                            OT: {worker.overtimeHours.toFixed(1)}h
+                          </Text>
+                        )}
+                        {worker.isLate && (
+                          <Text style={styles.lateLabel}>
+                            Late: {worker.minutesLate}min
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* Flags */}
+                      {worker.flags.length > 0 && (
+                        <View style={styles.flagsRow}>
+                          {worker.flags.map((flag, flagIndex) => (
+                            <View 
+                              key={`flag-${worker.employeeId}-${flagIndex}`}
+                              style={styles.flagBadge}
+                            >
+                              <Text style={styles.flagText}>
+                                {flag.replace('_', ' ').toUpperCase()}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              ))}
+              {workerDetails.length > 10 && (
+                <Text style={styles.moreWorkersText}>
+                  +{workerDetails.length - 10} more workers
+                </Text>
+              )}
+            </ScrollView>
+          )}
+        </View>
+      )}
 
       {/* Action Buttons */}
       <View style={styles.actionsContainer}>
@@ -370,6 +520,141 @@ const styles = StyleSheet.create({
   actionButtonText: {
     ...ConstructionTheme.typography.buttonMedium,
     color: ConstructionTheme.colors.onPrimary,
+  },
+  workerDetailsContainer: {
+    marginBottom: ConstructionTheme.spacing.md,
+    paddingTop: ConstructionTheme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+  },
+  workerDetailsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: ConstructionTheme.spacing.sm,
+  },
+  workerDetailsTitle: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+  },
+  expandIcon: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.primary,
+  },
+  workerDetailsList: {
+    maxHeight: 400,
+  },
+  workerDetailItem: {
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    padding: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  workerDetailHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  workerName: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  workerStatusBadge: {
+    paddingHorizontal: ConstructionTheme.spacing.xs,
+    paddingVertical: 2,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  status_present: {
+    backgroundColor: ConstructionTheme.colors.success,
+  },
+  status_checked_in: {
+    backgroundColor: ConstructionTheme.colors.info,
+  },
+  status_on_break: {
+    backgroundColor: ConstructionTheme.colors.warning,
+  },
+  status_absent: {
+    backgroundColor: ConstructionTheme.colors.error,
+  },
+  workerStatusText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+    fontSize: 9,
+  },
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  sessionLabel: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    width: 70,
+  },
+  sessionTime: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: '500',
+  },
+  sessionSeparator: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginHorizontal: ConstructionTheme.spacing.xs,
+  },
+  hoursRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: ConstructionTheme.spacing.xs,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  hoursLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: 'bold',
+    marginRight: ConstructionTheme.spacing.sm,
+  },
+  overtimeLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: '#9C27B0',
+    fontWeight: 'bold',
+    marginRight: ConstructionTheme.spacing.sm,
+  },
+  lateLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.warning,
+    fontWeight: 'bold',
+  },
+  flagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: ConstructionTheme.spacing.xs,
+  },
+  flagBadge: {
+    backgroundColor: ConstructionTheme.colors.error,
+    paddingHorizontal: ConstructionTheme.spacing.xs,
+    paddingVertical: 2,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    marginRight: ConstructionTheme.spacing.xs,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  flagText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onPrimary,
+    fontSize: 9,
+    fontWeight: 'bold',
+  },
+  moreWorkersText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginTop: ConstructionTheme.spacing.sm,
   },
 });
 

@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { workerApiService } from '../../services/api/WorkerApiService';
@@ -152,12 +154,14 @@ const RequestsScreen: React.FC = () => {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
-      }
-    >
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView
+        style={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+        }
+      >
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Submit New Request</Text>
@@ -231,12 +235,12 @@ const RequestsScreen: React.FC = () => {
                     ]}
                   >
                     <Text style={styles.statusText}>
-                      {request.status.toUpperCase()}
+                      {(request.status || 'pending').toUpperCase()}
                     </Text>
                   </View>
                 </View>
                 <Text style={styles.recentRequestType}>
-                  {request.type.replace('_', ' ').toUpperCase()}
+                  {(request.type || 'unknown').replace('_', ' ').toUpperCase()}
                 </Text>
                 <Text style={styles.recentRequestDate}>
                   Submitted: {formatDate(request.requestDate)}
@@ -247,6 +251,7 @@ const RequestsScreen: React.FC = () => {
         )}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

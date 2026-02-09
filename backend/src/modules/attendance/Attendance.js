@@ -38,9 +38,35 @@ const attendanceSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    overtimeHours: {
+      type: Number,
+      default: 0,
+    },
+    regularHours: {
+      type: Number,
+      default: 0,
+    },
     pendingCheckout: {
       type: Boolean,
       default: false,
+    },
+    // Absence tracking
+    absenceReason: {
+      type: String,
+      enum: ['LEAVE_APPROVED', 'LEAVE_NOT_INFORMED', 'MEDICAL', 'UNAUTHORIZED', 'PRESENT', null],
+      default: null,
+    },
+    absenceNotes: {
+      type: String,
+      default: '',
+    },
+    absenceMarkedBy: {
+      type: Number, // Supervisor ID
+      default: null,
+    },
+    absenceMarkedAt: {
+      type: Date,
+      default: null,
     },
     insideGeofenceAtCheckin: {
       type: Boolean,

@@ -149,7 +149,10 @@ const ConstructionButton: React.FC<ConstructionButtonProps> = ({
   return (
     <TouchableOpacity
       style={[getButtonStyle(), style]}
-      onPress={onPress}
+      onPress={() => {
+        console.log(`🔘 ConstructionButton pressed: "${title}"`);
+        onPress();
+      }}
       disabled={disabled || loading}
       activeOpacity={0.8}
     >

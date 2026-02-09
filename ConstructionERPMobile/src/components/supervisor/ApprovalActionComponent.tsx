@@ -92,9 +92,10 @@ const ApprovalActionComponent: React.FC<ApprovalActionComponentProps> = ({
     }
   };
 
-  const formatRequestDate = (date: Date): string => {
+  const formatRequestDate = (date: Date | string): string => {
+    const requestDate = date instanceof Date ? date : new Date(date);
     const now = new Date();
-    const diffTime = now.getTime() - date.getTime();
+    const diffTime = now.getTime() - requestDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     
     if (diffDays === 0) {
@@ -104,13 +105,16 @@ const ApprovalActionComponent: React.FC<ApprovalActionComponentProps> = ({
     } else if (diffDays < 7) {
       return `${diffDays} days ago`;
     } else {
-      return date.toLocaleDateString();
+      return requestDate.toLocaleDateString();
     }
   };
 
   const isOverdue = (): boolean => {
     if (!approval.approvalDeadline) return false;
-    return new Date() > approval.approvalDeadline;
+    const deadline = approval.approvalDeadline instanceof Date 
+      ? approval.approvalDeadline 
+      : new Date(approval.approvalDeadline);
+    return new Date() > deadline;
   };
 
   const handleApprove = async () => {
@@ -313,7 +317,10 @@ const ApprovalActionComponent: React.FC<ApprovalActionComponentProps> = ({
                 styles.metaText,
                 isOverdue() && styles.overdueText
               ]}>
-                Deadline: {approval.approvalDeadline.toLocaleDateString()}
+                Deadline: {(approval.approvalDeadline instanceof Date 
+                  ? approval.approvalDeadline 
+                  : new Date(approval.approvalDeadline)
+                ).toLocaleDateString()}
                 {isOverdue() && ' (OVERDUE)'}
               </Text>
             )}

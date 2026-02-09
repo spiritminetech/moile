@@ -19,6 +19,7 @@ interface ApprovalQueueCardProps {
   onViewApproval?: (approvalType: string) => void;
   onQuickApprove?: (approvalType: string) => void;
   onViewAllApprovals?: () => void;
+  highContrast?: boolean;
 }
 
 const ApprovalQueueCard: React.FC<ApprovalQueueCardProps> = ({
@@ -27,6 +28,7 @@ const ApprovalQueueCard: React.FC<ApprovalQueueCardProps> = ({
   onViewApproval,
   onQuickApprove,
   onViewAllApprovals,
+  highContrast = false,
 }) => {
   if (isLoading) {
     return (

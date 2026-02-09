@@ -11,6 +11,8 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
@@ -206,7 +208,9 @@ const ReimbursementRequestScreen: React.FC = () => {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={styles.container}>
       <View style={styles.content}>
         {/* Header */}
         <View style={styles.header}>
@@ -394,6 +398,7 @@ const ReimbursementRequestScreen: React.FC = () => {
         />
       )}
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

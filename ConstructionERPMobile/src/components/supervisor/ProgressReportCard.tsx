@@ -174,7 +174,7 @@ const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
 
             return (
               <TouchableOpacity
-                key={`project-${project.id}-${index}`}
+                key={`progress-report-project-${project.id}-${index}`}
                 style={styles.projectCard}
                 onPress={() => onViewProgressDetails?.(project.id)}
                 activeOpacity={0.7}

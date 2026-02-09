@@ -12,6 +12,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../store/context/AuthContext';
@@ -814,7 +816,8 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
@@ -862,7 +865,7 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
         {renderAchievements()}
         {renderHelpSupport()}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 

@@ -11,7 +11,9 @@ import {
   FlatList,
   TextInput,
   Modal,
-  Picker
+  Picker,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
@@ -460,7 +462,7 @@ export default TaskManagementScreen;sm,
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -739,7 +741,8 @@ const styles = StyleSheet.create({
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Task Management</Text>
@@ -855,11 +858,11 @@ const styles = StyleSheet.create({
           Estimated: {item.timeEstimate.hours}h {item.timeEstimate.minutes}m
        mentStatus}>
           <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-            <Text style={styles.statusText}>{item.status.replace('_', ' ').toUpperCase()}</Text>
+            <Text style={styles.statusText}>{(item.status || 'pending').replace('_', ' ').toUpperCase()}</Text>
           </View>
           {item.priority && (
             <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(item.priority) }]}>
-              <Text style={styles.priorityText}>{item.priority}</Text>
+              <Text style={styles.priorityText}>{item.priority || 'normal'}</Text>
             </View>
           )}
         </View>

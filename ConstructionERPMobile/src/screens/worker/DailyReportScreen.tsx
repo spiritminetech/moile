@@ -12,6 +12,8 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useLocation } from '../../store/context/LocationContext';
@@ -362,7 +364,9 @@ const DailyReportScreen: React.FC = () => {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={styles.container}>
       <ConstructionCard title="Daily Job Report">
         {/* Basic Information */}
         <View style={styles.section}>
@@ -663,6 +667,7 @@ const DailyReportScreen: React.FC = () => {
         </View>
       </ConstructionCard>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

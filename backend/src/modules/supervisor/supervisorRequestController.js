@@ -699,3 +699,560 @@ export const escalateIssue = async (req, res) => {
     }
 };
 
+
+/* ===============================
+   Unified Approval Processing (Mobile App)
+   POST /api/supervisor/approvals/:approvalId/process
+   Body: { action: 'approve' | 'reject' | 'request_more_info', notes?, conditions?, escalate? }
+================================ */
+export const processApproval = async (req, res) => {
+    try {
+        const { approvalId } = req.params;
+        const { action, notes, conditions, escalate } = req.body;
+        const userId = req.user?.id || req.user?.userId;
+
+        // Validate action
+        if (!action || !['approve', 'reject', 'request_more_info'].includes(action)) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Invalid action. Must be "approve", "reject", or "request_more_info"' 
+            });
+        }
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Supervisor not found' 
+            });
+        }
+
+        // Try to find the request in different collections
+        let request = null;
+        let requestType = null;
+        let model = null;
+
+        // Check LeaveRequest
+        request = await LeaveRequest.findOne({ id: parseInt(approvalId) });
+        if (request) {
+            requestType = 'leave';
+            model = LeaveRequest;
+        }
+
+        // Check PaymentRequest (advance payment)
+        if (!request) {
+            request = await PaymentRequest.findOne({ id: parseInt(approvalId) });
+            if (request) {
+                requestType = 'advance_payment';
+                model = PaymentRequest;
+            }
+        }
+
+        // Check MaterialRequest
+        if (!request) {
+            request = await MaterialRequest.findOne({ id: parseInt(approvalId) });
+            if (request) {
+                requestType = request.requestType === 'TOOL' ? 'tool' : 'material';
+                model = MaterialRequest;
+            }
+        }
+
+        if (!request) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Approval request not found' 
+            });
+        }
+
+        // Check if already processed
+        if (request.status !== 'PENDING') {
+            return res.status(400).json({ 
+                success: false,
+                message: `Request already ${request.status.toLowerCase()}` 
+            });
+        }
+
+        // Determine new status based on action
+        let newStatus;
+        let responseStatus;
+        if (action === 'approve') {
+            newStatus = 'APPROVED';
+            responseStatus = 'approved';
+        } else if (action === 'reject') {
+            newStatus = 'REJECTED';
+            responseStatus = 'rejected';
+        } else if (action === 'request_more_info') {
+            newStatus = 'PENDING';
+            responseStatus = 'pending_info';
+        }
+
+        // Handle escalation
+        if (escalate) {
+            newStatus = 'ESCALATED';
+            responseStatus = 'escalated';
+        }
+
+        // Update the request
+        const updateData = {
+            status: newStatus,
+            currentApproverId: userId,
+            remarks: notes || request.remarks
+        };
+
+        if (action === 'approve') {
+            updateData.approvedAt = new Date();
+        }
+
+        if (conditions && conditions.length > 0) {
+            updateData.conditions = conditions.join('; ');
+        }
+
+        await model.findOneAndUpdate(
+            { id: parseInt(approvalId) },
+            updateData
+        );
+
+        // Send notification to worker
+        try {
+            if (requestType === 'leave') {
+                await ApprovalStatusNotificationService.notifyLeaveRequestStatus(
+                    parseInt(approvalId),
+                    newStatus,
+                    userId,
+                    notes
+                );
+            } else if (requestType === 'advance_payment') {
+                await ApprovalStatusNotificationService.notifyAdvanceRequestStatus(
+                    parseInt(approvalId),
+                    newStatus,
+                    userId,
+                    notes
+                );
+            } else if (requestType === 'material' || requestType === 'tool') {
+                await ApprovalStatusNotificationService.notifyMaterialRequestStatus(
+                    parseInt(approvalId),
+                    newStatus,
+                    userId,
+                    notes
+                );
+            }
+        } catch (notificationError) {
+            console.error('❌ Error sending approval notification:', notificationError);
+        }
+
+        res.json({ 
+            success: true,
+            data: {
+                approvalId: parseInt(approvalId),
+                status: responseStatus,
+                processedAt: new Date().toISOString(),
+                message: `Request ${action}d successfully`,
+                nextSteps: action === 'approve' 
+                    ? 'Worker has been notified of approval' 
+                    : action === 'reject'
+                    ? 'Worker has been notified of rejection'
+                    : 'Worker has been asked for more information'
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error processing approval:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};
+
+/* ===============================
+   Batch Process Approvals (Mobile App)
+   POST /api/supervisor/approvals/batch-process
+   Body: { decisions: [{ approvalId, action, notes }] }
+================================ */
+export const batchProcessApprovals = async (req, res) => {
+    try {
+        const { decisions } = req.body;
+        const userId = req.user?.id || req.user?.userId;
+
+        if (!decisions || !Array.isArray(decisions) || decisions.length === 0) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'Decisions array is required' 
+            });
+        }
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Supervisor not found' 
+            });
+        }
+
+        const results = [];
+        let successful = 0;
+        let failed = 0;
+
+        for (const decision of decisions) {
+            try {
+                const { approvalId, action, notes } = decision;
+
+                // Process each approval
+                let request = null;
+                let requestType = null;
+                let model = null;
+
+                // Check LeaveRequest
+                request = await LeaveRequest.findOne({ id: parseInt(approvalId) });
+                if (request) {
+                    requestType = 'leave';
+                    model = LeaveRequest;
+                }
+
+                // Check PaymentRequest
+                if (!request) {
+                    request = await PaymentRequest.findOne({ id: parseInt(approvalId) });
+                    if (request) {
+                        requestType = 'advance_payment';
+                        model = PaymentRequest;
+                    }
+                }
+
+                // Check MaterialRequest
+                if (!request) {
+                    request = await MaterialRequest.findOne({ id: parseInt(approvalId) });
+                    if (request) {
+                        requestType = request.requestType === 'TOOL' ? 'tool' : 'material';
+                        model = MaterialRequest;
+                    }
+                }
+
+                if (!request || request.status !== 'PENDING') {
+                    results.push({
+                        approvalId: parseInt(approvalId),
+                        status: 'failed',
+                        message: !request ? 'Request not found' : 'Request already processed'
+                    });
+                    failed++;
+                    continue;
+                }
+
+                const newStatus = action === 'approve' ? 'APPROVED' : 'REJECTED';
+
+                await model.findOneAndUpdate(
+                    { id: parseInt(approvalId) },
+                    { 
+                        status: newStatus,
+                        currentApproverId: userId,
+                        approvedAt: action === 'approve' ? new Date() : undefined,
+                        remarks: notes || request.remarks
+                    }
+                );
+
+                // Send notification
+                try {
+                    if (requestType === 'leave') {
+                        await ApprovalStatusNotificationService.notifyLeaveRequestStatus(
+                            parseInt(approvalId), newStatus, userId, notes
+                        );
+                    } else if (requestType === 'advance_payment') {
+                        await ApprovalStatusNotificationService.notifyAdvanceRequestStatus(
+                            parseInt(approvalId), newStatus, userId, notes
+                        );
+                    } else if (requestType === 'material' || requestType === 'tool') {
+                        await ApprovalStatusNotificationService.notifyMaterialRequestStatus(
+                            parseInt(approvalId), newStatus, userId, notes
+                        );
+                    }
+                } catch (notificationError) {
+                    console.error('❌ Error sending batch approval notification:', notificationError);
+                }
+
+                results.push({
+                    approvalId: parseInt(approvalId),
+                    status: 'success',
+                    message: `Request ${action}d successfully`
+                });
+                successful++;
+
+            } catch (error) {
+                console.error(`❌ Error processing approval ${decision.approvalId}:`, error);
+                results.push({
+                    approvalId: parseInt(decision.approvalId),
+                    status: 'failed',
+                    message: error.message
+                });
+                failed++;
+            }
+        }
+
+        res.json({ 
+            success: true,
+            data: {
+                processed: decisions.length,
+                successful,
+                failed,
+                results
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error batch processing approvals:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};
+
+/* ===============================
+   Get Approval History (Mobile App)
+   GET /api/supervisor/approvals/history
+   Query: { requesterId?, type?, status?, dateFrom?, dateTo?, limit?, offset? }
+================================ */
+export const getApprovalHistory = async (req, res) => {
+    try {
+        const userId = req.user?.id || req.user?.userId;
+        const { requesterId, type, status, dateFrom, dateTo, limit = 20, offset = 0 } = req.query;
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Supervisor not found' 
+            });
+        }
+
+        // Get supervisor's projects
+        const projects = await Project.find({ supervisorId: supervisor.id }).lean();
+        const projectIds = projects.map(p => p.id);
+
+        // Get employees assigned to supervisor's projects
+        const employees = await Employee.find({ 
+            currentProjectId: { $in: projectIds } 
+        }).lean();
+        const employeeIds = employees.map(e => e.id);
+
+        // Build query filter
+        const baseFilter = {
+            employeeId: { $in: employeeIds }
+        };
+
+        if (requesterId) {
+            baseFilter.employeeId = parseInt(requesterId);
+        }
+
+        if (status && status !== 'all') {
+            baseFilter.status = status.toUpperCase();
+        } else {
+            baseFilter.status = { $in: ['APPROVED', 'REJECTED', 'ESCALATED'] };
+        }
+
+        if (dateFrom || dateTo) {
+            baseFilter.approvedAt = {};
+            if (dateFrom) baseFilter.approvedAt.$gte = new Date(dateFrom);
+            if (dateTo) baseFilter.approvedAt.$lte = new Date(dateTo);
+        }
+
+        // Collect approvals from all sources
+        const approvals = [];
+
+        // Get leave requests
+        if (!type || type === 'leave') {
+            const leaveRequests = await LeaveRequest.find(baseFilter)
+                .sort({ approvedAt: -1 })
+                .limit(parseInt(limit))
+                .skip(parseInt(offset))
+                .lean();
+
+            leaveRequests.forEach(req => {
+                const employee = employees.find(e => e.id === req.employeeId);
+                approvals.push({
+                    id: req.id,
+                    requestType: 'leave',
+                    requesterName: employee?.fullName || 'Unknown',
+                    requestDate: req.requestedAt || req.createdAt,
+                    status: req.status.toLowerCase(),
+                    processedDate: req.approvedAt,
+                    approverNotes: req.remarks,
+                    amount: null
+                });
+            });
+        }
+
+        // Get payment requests
+        if (!type || type === 'advance_payment') {
+            const paymentRequests = await PaymentRequest.find(baseFilter)
+                .sort({ approvedAt: -1 })
+                .limit(parseInt(limit))
+                .skip(parseInt(offset))
+                .lean();
+
+            paymentRequests.forEach(req => {
+                const employee = employees.find(e => e.id === req.employeeId);
+                approvals.push({
+                    id: req.id,
+                    requestType: 'advance_payment',
+                    requesterName: employee?.fullName || 'Unknown',
+                    requestDate: req.createdAt,
+                    status: req.status.toLowerCase(),
+                    processedDate: req.approvedAt,
+                    approverNotes: req.remarks,
+                    amount: req.amount
+                });
+            });
+        }
+
+        // Get material/tool requests
+        if (!type || type === 'material' || type === 'tool') {
+            const materialFilter = { ...baseFilter };
+            if (type === 'material') {
+                materialFilter.requestType = 'MATERIAL';
+            } else if (type === 'tool') {
+                materialFilter.requestType = 'TOOL';
+            }
+
+            const materialRequests = await MaterialRequest.find(materialFilter)
+                .sort({ approvedAt: -1 })
+                .limit(parseInt(limit))
+                .skip(parseInt(offset))
+                .lean();
+
+            materialRequests.forEach(req => {
+                const employee = employees.find(e => e.id === req.employeeId);
+                approvals.push({
+                    id: req.id,
+                    requestType: req.requestType === 'TOOL' ? 'tool' : 'material',
+                    requesterName: employee?.fullName || 'Unknown',
+                    requestDate: req.createdAt,
+                    status: req.status.toLowerCase(),
+                    processedDate: req.approvedAt,
+                    approverNotes: req.remarks,
+                    amount: req.estimatedCost
+                });
+            });
+        }
+
+        // Sort by processed date
+        approvals.sort((a, b) => {
+            const dateA = a.processedDate ? new Date(a.processedDate) : new Date(0);
+            const dateB = b.processedDate ? new Date(b.processedDate) : new Date(0);
+            return dateB - dateA;
+        });
+
+        res.json({ 
+            success: true,
+            data: {
+                approvals: approvals.slice(0, parseInt(limit)),
+                total: approvals.length,
+                limit: parseInt(limit),
+                offset: parseInt(offset)
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error getting approval history:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};
+
+/* ===============================
+   Get Approval Details (Mobile App)
+   GET /api/supervisor/approvals/:approvalId/details
+================================ */
+export const getApprovalDetails = async (req, res) => {
+    try {
+        const { approvalId } = req.params;
+        const userId = req.user?.id || req.user?.userId;
+
+        // Find supervisor
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Supervisor not found' 
+            });
+        }
+
+        // Try to find the request in different collections
+        let request = null;
+        let requestType = null;
+        let employee = null;
+
+        // Check LeaveRequest
+        request = await LeaveRequest.findOne({ id: parseInt(approvalId) }).lean();
+        if (request) {
+            requestType = 'leave';
+            employee = await Employee.findOne({ id: request.employeeId }).lean();
+        }
+
+        // Check PaymentRequest
+        if (!request) {
+            request = await PaymentRequest.findOne({ id: parseInt(approvalId) }).lean();
+            if (request) {
+                requestType = 'advance_payment';
+                employee = await Employee.findOne({ id: request.employeeId }).lean();
+            }
+        }
+
+        // Check MaterialRequest
+        if (!request) {
+            request = await MaterialRequest.findOne({ id: parseInt(approvalId) }).lean();
+            if (request) {
+                requestType = request.requestType === 'TOOL' ? 'tool' : 'material';
+                employee = await Employee.findOne({ id: request.employeeId }).lean();
+            }
+        }
+
+        if (!request) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Approval request not found' 
+            });
+        }
+
+        // Get project info
+        const project = employee ? await Project.findOne({ id: employee.currentProjectId }).lean() : null;
+
+        // Build response
+        const details = {
+            requestId: request.id,
+            requestType,
+            status: request.status,
+            requesterInfo: {
+                id: employee?.id,
+                name: employee?.fullName || 'Unknown',
+                department: project?.projectName || 'N/A',
+                position: employee?.position || 'Worker'
+            },
+            requestDetails: request,
+            approvalHistory: [],
+            requesterInfo: {
+                ...details.requesterInfo,
+                recentPerformance: {
+                    attendanceRate: 0.95,
+                    taskCompletionRate: 0.88,
+                    qualityScore: 0.92
+                }
+            }
+        };
+
+        res.json({ 
+            success: true,
+            data: details
+        });
+
+    } catch (err) {
+        console.error('❌ Error getting approval details:', err);
+        res.status(500).json({ 
+            success: false,
+            message: err.message 
+        });
+    }
+};

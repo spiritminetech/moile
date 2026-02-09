@@ -8,6 +8,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Linking,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import ConstructionCard from '../../components/common/ConstructionCard';
 import ConstructionButton from '../../components/common/ConstructionButton';
@@ -226,10 +228,12 @@ const SafetyIncidentScreen: React.FC<SafetyIncidentScreenProps> = ({ navigation 
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <ScrollView style={styles.scrollView}>
         <View style={styles.content}>
           {/* Emergency Actions */}
@@ -367,6 +371,7 @@ const SafetyIncidentScreen: React.FC<SafetyIncidentScreenProps> = ({ navigation 
         </View>
       )}
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 

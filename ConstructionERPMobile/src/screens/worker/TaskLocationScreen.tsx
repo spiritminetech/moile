@@ -11,6 +11,8 @@ import {
   Linking,
   Platform,
   ScrollView,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { TaskAssignment, GeoLocation } from '../../types';
 import { useLocation } from '../../store/context/LocationContext';
@@ -185,7 +187,9 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Task Information */}
       <View style={styles.taskInfoContainer}>
         <View style={styles.taskHeader}>
@@ -313,6 +317,7 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
         </Text>
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

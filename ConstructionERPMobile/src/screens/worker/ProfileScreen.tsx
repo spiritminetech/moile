@@ -10,6 +10,8 @@ import {
   RefreshControl,
   Alert,
   TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { workerApiService } from '../../services/api/WorkerApiService';
 import LoadingOverlay from '../../components/common/LoadingOverlay';
@@ -314,7 +316,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               { backgroundColor: getWorkPassStatusColor(profileData.workPass.status) }
             ]}>
               <Text style={styles.statusText}>
-                {profileData.workPass.status.toUpperCase()}
+                {(profileData.workPass?.status || 'unknown').toUpperCase()}
               </Text>
             </View>
           </View>
@@ -437,22 +439,25 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
 
   if (error && !profileData) {
     return (
-      <View style={styles.errorContainer}>
+      <SafeAreaView style={styles.errorContainer}>
+        <StatusBar barStyle="light-content" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={() => loadProfileData()}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
-      }
-    >
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView
+        style={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
+        }
+      >
       {renderCertificationAlerts()}
       {renderPersonalInfo()}
       {renderCertifications()}
@@ -460,6 +465,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
       {renderSalaryInfo()}
       {renderHelpSupport()}
     </ScrollView>
+    </SafeAreaView>
   );
 };
 

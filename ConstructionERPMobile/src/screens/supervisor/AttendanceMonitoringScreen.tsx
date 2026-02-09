@@ -13,6 +13,8 @@ import {
   TextInput,
   Modal,
   ActivityIndicator,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
@@ -28,38 +30,61 @@ import { useErrorHandler } from '../../hooks/useErrorHandler';
 
 // Types for attendance monitoring data
 interface AttendanceRecord {
-  workerId: number;
+  employeeId: number;
   workerName: string;
+  role: string;
+  phone?: string;
+  email?: string;
+  projectId: number;
+  projectName: string;
+  projectLocation: string;
+  status: 'CHECKED_IN' | 'CHECKED_OUT' | 'ABSENT';
   checkInTime: string | null;
   checkOutTime: string | null;
-  lunchStartTime: string | null;
-  lunchEndTime: string | null;
-  status: 'present' | 'absent' | 'late' | 'on_break';
-  location: {
+  lunchStartTime?: string | null;
+  lunchEndTime?: string | null;
+  lunchDuration?: number;
+  workingHours: number;
+  regularHours?: number;
+  otHours?: number;
+  isLate: boolean;
+  minutesLate: number;
+  insideGeofence: boolean;
+  insideGeofenceAtCheckout: boolean;
+  taskAssigned: string;
+  supervisorId?: number;
+  lastLocationUpdate: string | null;
+  lastKnownLocation: {
     latitude: number;
     longitude: number;
     insideGeofence: boolean;
-    lastUpdated: string;
-  };
-  hoursWorked: number;
-  issues: Array<{
-    type: 'geofence_violation' | 'late_arrival' | 'missing_checkout' | 'extended_break';
-    description: string;
-    timestamp: string;
-    severity: 'low' | 'medium' | 'high';
-  }>;
+  } | null;
+  hasManualOverride: boolean;
+  attendanceId: number | null;
+  absenceReason?: 'LEAVE_APPROVED' | 'LEAVE_NOT_INFORMED' | 'MEDICAL' | 'UNAUTHORIZED' | 'PRESENT' | null;
+  absenceNotes?: string;
+  absenceMarkedBy?: number | null;
+  absenceMarkedAt?: string | null;
 }
 
 interface AttendanceMonitoringData {
-  attendanceRecords: AttendanceRecord[];
+  workers: AttendanceRecord[];
   summary: {
     totalWorkers: number;
-    presentCount: number;
-    absentCount: number;
-    lateCount: number;
-    geofenceViolations: number;
-    averageHoursWorked: number;
+    checkedIn: number;
+    checkedOut: number;
+    absent: number;
+    late: number;
+    onTime: number;
+    lastUpdated: string;
+    date: string;
   };
+  projects: Array<{
+    id: number;
+    name: string;
+    location: string;
+    geofenceRadius?: number;
+  }>;
 }
 
 interface AttendanceCorrection {
@@ -99,6 +124,34 @@ const AttendanceMonitoringScreen: React.FC = () => {
   const [showCorrectionModal, setShowCorrectionModal] = useState(false);
   const [selectedCorrection, setSelectedCorrection] = useState<AttendanceCorrection | null>(null);
   const [correctionNotes, setCorrectionNotes] = useState('');
+
+  // New modal states
+  const [showAbsenceModal, setShowAbsenceModal] = useState(false);
+  const [selectedWorkerForAbsence, setSelectedWorkerForAbsence] = useState<AttendanceRecord | null>(null);
+  const [absenceReason, setAbsenceReason] = useState<'LEAVE_APPROVED' | 'LEAVE_NOT_INFORMED' | 'MEDICAL' | 'UNAUTHORIZED' | 'PRESENT'>('LEAVE_NOT_INFORMED');
+  const [absenceNotes, setAbsenceNotes] = useState('');
+
+  const [showEscalationModal, setShowEscalationModal] = useState(false);
+  const [selectedWorkerForEscalation, setSelectedWorkerForEscalation] = useState<AttendanceRecord | null>(null);
+  const [escalationType, setEscalationType] = useState<'REPEATED_LATE' | 'REPEATED_ABSENCE' | 'GEOFENCE_VIOLATION' | 'UNAUTHORIZED_ABSENCE' | 'OTHER'>('REPEATED_LATE');
+  const [escalationSeverity, setEscalationSeverity] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('MEDIUM');
+  const [escalationDescription, setEscalationDescription] = useState('');
+  const [escalatedTo, setEscalatedTo] = useState<'ADMIN' | 'MANAGER' | 'HR'>('MANAGER');
+  const [escalationNotes, setEscalationNotes] = useState('');
+
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Auto-select first project when projects are loaded
+  useEffect(() => {
+    if (attendanceData?.projects && attendanceData.projects.length > 0 && selectedProjectId === null) {
+      // Find project with id 1 (where test data is), or use first project
+      const targetProject = attendanceData.projects.find(p => p.id === 1) || attendanceData.projects[0];
+      if (targetProject?.id) {
+        console.log('🎯 Auto-selecting project:', targetProject.id, targetProject.name);
+        setSelectedProjectId(targetProject.id);
+      }
+    }
+  }, [attendanceData?.projects, selectedProjectId]);
 
   // Auto-refresh interval
   useEffect(() => {
@@ -144,13 +197,33 @@ const AttendanceMonitoringScreen: React.FC = () => {
   // Load pending attendance corrections
   const loadPendingCorrections = useCallback(async () => {
     try {
-      // This would be a separate API endpoint for pending corrections
-      // For now, we'll simulate with empty array
-      setPendingCorrections([]);
+      const response = await supervisorApiService.getPendingAttendanceCorrections({
+        projectId: selectedProjectId?.toString(),
+        status: 'pending'
+      });
+
+      console.log('📋 Pending corrections response:', {
+        success: response.success,
+        hasData: !!response.data,
+        dataType: typeof response.data,
+        dataKeys: response.data ? Object.keys(response.data) : [],
+        fullResponse: JSON.stringify(response, null, 2)
+      });
+
+      if (response.success && response.data) {
+        // Backend returns { success: true, data: [...corrections], count }
+        const corrections = response.data.data || [];
+        console.log('✅ Setting pending corrections:', corrections.length, 'items');
+        setPendingCorrections(corrections);
+      } else {
+        console.log('⚠️ No data in response');
+        setPendingCorrections([]);
+      }
     } catch (error) {
-      console.error('Failed to load pending corrections:', error);
+      console.error('❌ Failed to load pending corrections:', error);
+      setPendingCorrections([]);
     }
-  }, []);
+  }, [selectedProjectId]);
 
   // Handle refresh
   const handleRefresh = useCallback(async () => {
@@ -169,9 +242,9 @@ const AttendanceMonitoringScreen: React.FC = () => {
 
   // Filter and sort attendance records
   const filteredAndSortedRecords = useMemo(() => {
-    if (!attendanceData) return [];
+    if (!attendanceData || !attendanceData.workers) return [];
 
-    let filtered = attendanceData.attendanceRecords;
+    let filtered = [...attendanceData.workers];
 
     // Apply search filter
     if (searchText.trim()) {
@@ -184,9 +257,19 @@ const AttendanceMonitoringScreen: React.FC = () => {
     // Apply status filter
     if (filterStatus !== 'all') {
       if (filterStatus === 'issues') {
-        filtered = filtered.filter(record => record.issues.length > 0);
-      } else {
-        filtered = filtered.filter(record => record.status === filterStatus);
+        // Filter for workers with issues (late, absent, or outside geofence)
+        filtered = filtered.filter(record => 
+          record.isLate || 
+          record.status === 'ABSENT' || 
+          !record.insideGeofence ||
+          (record.lastKnownLocation && !record.lastKnownLocation.insideGeofence)
+        );
+      } else if (filterStatus === 'present') {
+        filtered = filtered.filter(record => record.status === 'CHECKED_IN' || record.status === 'CHECKED_OUT');
+      } else if (filterStatus === 'absent') {
+        filtered = filtered.filter(record => record.status === 'ABSENT');
+      } else if (filterStatus === 'late') {
+        filtered = filtered.filter(record => record.isLate);
       }
     }
 
@@ -203,7 +286,7 @@ const AttendanceMonitoringScreen: React.FC = () => {
           if (!b.checkInTime) return -1;
           return new Date(a.checkInTime).getTime() - new Date(b.checkInTime).getTime();
         case 'hoursWorked':
-          return b.hoursWorked - a.hoursWorked;
+          return b.workingHours - a.workingHours;
         default:
           return 0;
       }
@@ -245,6 +328,111 @@ const AttendanceMonitoringScreen: React.FC = () => {
     }
   }, [handleApiError, loadPendingCorrections]);
 
+  // Handle marking absence reason
+  const handleMarkAbsence = useCallback(async () => {
+    if (!selectedWorkerForAbsence) return;
+
+    try {
+      const response = await supervisorApiService.markAbsenceReason({
+        employeeId: selectedWorkerForAbsence.employeeId,
+        projectId: selectedWorkerForAbsence.projectId,
+        date: attendanceData?.summary.date || new Date().toISOString().split('T')[0],
+        reason: absenceReason,
+        notes: absenceNotes
+      });
+
+      if (response.success) {
+        Alert.alert('Success', 'Absence reason marked successfully');
+        loadAttendanceData();
+        setShowAbsenceModal(false);
+        setSelectedWorkerForAbsence(null);
+        setAbsenceNotes('');
+      } else {
+        Alert.alert('Error', response.message || 'Failed to mark absence reason');
+      }
+    } catch (error) {
+      handleApiError(error, 'Mark Absence');
+    }
+  }, [selectedWorkerForAbsence, absenceReason, absenceNotes, attendanceData, handleApiError, loadAttendanceData]);
+
+  // Handle creating escalation
+  const handleCreateEscalation = useCallback(async () => {
+    if (!selectedWorkerForEscalation) return;
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const response = await supervisorApiService.createEscalation({
+        employeeId: selectedWorkerForEscalation.employeeId,
+        projectId: selectedWorkerForEscalation.projectId,
+        escalationType,
+        severity: escalationSeverity,
+        description: escalationDescription || `${escalationType} for ${selectedWorkerForEscalation.workerName}`,
+        occurrenceCount: 1,
+        dateRange: {
+          from: sevenDaysAgo,
+          to: today
+        },
+        escalatedTo,
+        notes: escalationNotes,
+        relatedAttendanceIds: selectedWorkerForEscalation.attendanceId ? [selectedWorkerForEscalation.attendanceId] : []
+      });
+
+      if (response.success) {
+        Alert.alert('Success', 'Escalation created successfully');
+        setShowEscalationModal(false);
+        setSelectedWorkerForEscalation(null);
+        setEscalationDescription('');
+        setEscalationNotes('');
+      } else {
+        Alert.alert('Error', response.message || 'Failed to create escalation');
+      }
+    } catch (error) {
+      handleApiError(error, 'Create Escalation');
+    }
+  }, [selectedWorkerForEscalation, escalationType, escalationSeverity, escalationDescription, escalatedTo, escalationNotes, handleApiError]);
+
+  // Handle export report
+  const handleExportReport = useCallback(async (format: 'json' | 'csv' = 'json') => {
+    if (!selectedProjectId) {
+      Alert.alert('Error', 'Please select a project first');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const response = await supervisorApiService.exportAttendanceReport({
+        projectId: selectedProjectId,
+        date: attendanceData?.summary.date || new Date().toISOString().split('T')[0],
+        format
+      });
+
+      if (response.success && response.data) {
+        // For JSON format, show summary
+        if (format === 'json') {
+          const summary = response.data.summary;
+          Alert.alert(
+            'Report Generated',
+            `Project: ${summary.projectName}\nDate: ${summary.date}\nTotal Workers: ${summary.totalWorkers}\nPresent: ${summary.present}\nAbsent: ${summary.absent}\nTotal Hours: ${summary.totalRegularHours}\nOT Hours: ${summary.totalOTHours}`,
+            [
+              { text: 'OK' }
+            ]
+          );
+        } else {
+          // For CSV, would need to implement file download/share
+          Alert.alert('Success', 'Report exported successfully');
+        }
+      } else {
+        Alert.alert('Error', response.message || 'Failed to export report');
+      }
+    } catch (error) {
+      handleApiError(error, 'Export Report');
+    } finally {
+      setIsExporting(false);
+    }
+  }, [selectedProjectId, attendanceData, handleApiError]);
+
   // Format time display
   const formatTime = (dateString: string | null) => {
     if (!dateString) return '--:--';
@@ -264,8 +452,12 @@ const AttendanceMonitoringScreen: React.FC = () => {
   // Get status color
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'CHECKED_IN':
       case 'present':
         return ConstructionTheme.colors.success;
+      case 'CHECKED_OUT':
+        return ConstructionTheme.colors.info;
+      case 'ABSENT':
       case 'absent':
         return ConstructionTheme.colors.error;
       case 'late':
@@ -291,13 +483,41 @@ const AttendanceMonitoringScreen: React.FC = () => {
     }
   };
 
+  // Get escalation severity color
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'CRITICAL':
+        return ConstructionTheme.colors.error;
+      case 'HIGH':
+        return '#FF6B6B';
+      case 'MEDIUM':
+        return ConstructionTheme.colors.warning;
+      case 'LOW':
+        return ConstructionTheme.colors.info;
+      default:
+        return ConstructionTheme.colors.onSurfaceVariant;
+    }
+  };
+
   // Render attendance summary
   const renderSummary = () => {
     if (!attendanceData) return null;
 
     const { summary } = attendanceData;
+    const checkedInCount = summary.checkedIn || 0;
     const attendanceRate = summary.totalWorkers > 0 
-      ? Math.round((summary.presentCount / summary.totalWorkers) * 100)
+      ? Math.round(((checkedInCount + summary.checkedOut) / summary.totalWorkers) * 100)
+      : 0;
+
+    // Calculate geofence violations from workers data
+    const geofenceViolations = attendanceData.workers?.filter(w => 
+      !w.insideGeofence || (w.lastKnownLocation && !w.lastKnownLocation.insideGeofence)
+    ).length || 0;
+
+    // Calculate average hours worked
+    const workersWithHours = attendanceData.workers?.filter(w => w.workingHours > 0) || [];
+    const averageHoursWorked = workersWithHours.length > 0
+      ? workersWithHours.reduce((sum, w) => sum + w.workingHours, 0) / workersWithHours.length
       : 0;
 
     return (
@@ -309,19 +529,19 @@ const AttendanceMonitoringScreen: React.FC = () => {
           </View>
           <View style={styles.summaryItem}>
             <Text style={[styles.summaryValue, { color: ConstructionTheme.colors.success }]}>
-              {summary.presentCount}
+              {checkedInCount}
             </Text>
             <Text style={styles.summaryLabel}>Present</Text>
           </View>
           <View style={styles.summaryItem}>
             <Text style={[styles.summaryValue, { color: ConstructionTheme.colors.error }]}>
-              {summary.absentCount}
+              {summary.absent}
             </Text>
             <Text style={styles.summaryLabel}>Absent</Text>
           </View>
           <View style={styles.summaryItem}>
             <Text style={[styles.summaryValue, { color: ConstructionTheme.colors.warning }]}>
-              {summary.lateCount}
+              {summary.late}
             </Text>
             <Text style={styles.summaryLabel}>Late</Text>
           </View>
@@ -337,13 +557,13 @@ const AttendanceMonitoringScreen: React.FC = () => {
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Avg. Hours Worked</Text>
             <Text style={styles.metricValue}>
-              {formatDuration(summary.averageHoursWorked)}
+              {formatDuration(averageHoursWorked)}
             </Text>
           </View>
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Geofence Issues</Text>
-            <Text style={[styles.metricValue, { color: summary.geofenceViolations > 0 ? ConstructionTheme.colors.error : ConstructionTheme.colors.success }]}>
-              {summary.geofenceViolations}
+            <Text style={[styles.metricValue, { color: geofenceViolations > 0 ? ConstructionTheme.colors.error : ConstructionTheme.colors.success }]}>
+              {geofenceViolations}
             </Text>
           </View>
         </View>
@@ -423,134 +643,266 @@ const AttendanceMonitoringScreen: React.FC = () => {
   );
 
   // Render attendance record item
-  const renderAttendanceRecord = (record: AttendanceRecord) => (
-    <ConstructionCard
-      key={record.workerId}
-      variant="outlined"
-      style={[
-        styles.recordCard,
-        ...(record.issues.length > 0 ? [styles.recordCardWithIssues] : []),
-      ]}
-    >
-      {/* Worker Header */}
-      <View style={styles.recordHeader}>
-        <View style={styles.workerInfo}>
-          <Text style={styles.workerName}>{record.workerName}</Text>
-          <View style={styles.statusContainer}>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: getStatusColor(record.status) },
-              ]}
-            />
-            <Text style={[styles.statusText, { color: getStatusColor(record.status) }]}>
-              {record.status.replace('_', ' ').toUpperCase()}
-            </Text>
-          </View>
-        </View>
-        
-        {/* Location Status */}
-        <View style={styles.locationStatus}>
-          <Text style={styles.locationLabel}>Location:</Text>
-          <View style={styles.geofenceStatus}>
-            <View
-              style={[
-                styles.geofenceDot,
-                {
-                  backgroundColor: record.location.insideGeofence
-                    ? ConstructionTheme.colors.success
-                    : ConstructionTheme.colors.error,
-                },
-              ]}
-            />
-            <Text
-              style={[
-                styles.geofenceText,
-                {
-                  color: record.location.insideGeofence
-                    ? ConstructionTheme.colors.success
-                    : ConstructionTheme.colors.error,
-                },
-              ]}
-            >
-              {record.location.insideGeofence ? 'Inside Site' : 'Outside Site'}
-            </Text>
-          </View>
-        </View>
-      </View>
+  const renderAttendanceRecord = (record: AttendanceRecord) => {
+    // Determine if worker has issues
+    const hasIssues = record.isLate || 
+                      record.status === 'ABSENT' || 
+                      !record.insideGeofence ||
+                      (record.lastKnownLocation && !record.lastKnownLocation.insideGeofence);
 
-      {/* Time Information */}
-      <View style={styles.timeInfo}>
-        <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>Check-in:</Text>
-          <Text style={styles.timeValue}>{formatTime(record.checkInTime)}</Text>
-        </View>
-        <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>Check-out:</Text>
-          <Text style={styles.timeValue}>{formatTime(record.checkOutTime)}</Text>
-        </View>
-        <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>Lunch:</Text>
-          <Text style={styles.timeValue}>
-            {record.lunchStartTime && record.lunchEndTime
-              ? `${formatTime(record.lunchStartTime)} - ${formatTime(record.lunchEndTime)}`
-              : record.lunchStartTime
-              ? `Started ${formatTime(record.lunchStartTime)}`
-              : '--:-- - --:--'}
-          </Text>
-        </View>
-        <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>Hours Worked:</Text>
-          <Text style={[styles.timeValue, styles.hoursWorked]}>
-            {formatDuration(record.hoursWorked)}
-          </Text>
-        </View>
-      </View>
-
-      {/* Issues Section */}
-      {record.issues.length > 0 && (
-        <View style={styles.issuesSection}>
-          <Text style={styles.issuesTitle}>Issues ({record.issues.length})</Text>
-          {record.issues.map((issue, index) => (
-            <View key={index} style={styles.issueItem}>
+    return (
+      <ConstructionCard
+        key={record.employeeId}
+        variant="outlined"
+        style={[
+          styles.recordCard,
+          ...(hasIssues ? [styles.recordCardWithIssues] : []),
+        ]}
+      >
+        {/* Worker Header */}
+        <View style={styles.recordHeader}>
+          <View style={styles.workerInfo}>
+            <Text style={styles.workerName}>{record.workerName}</Text>
+            <Text style={styles.workerRole}>{record.role}</Text>
+            <View style={styles.statusContainer}>
               <View
                 style={[
-                  styles.issueSeverityDot,
-                  { backgroundColor: getIssueSeverityColor(issue.severity) },
+                  styles.statusDot,
+                  { backgroundColor: getStatusColor(record.status) },
                 ]}
               />
-              <View style={styles.issueContent}>
-                <Text style={styles.issueType}>
-                  {issue.type.replace(/_/g, ' ').toUpperCase()}
-                </Text>
-                <Text style={styles.issueDescription}>{issue.description}</Text>
-                <Text style={styles.issueTime}>
-                  {new Date(issue.timestamp).toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </Text>
-              </View>
+              <Text style={[styles.statusText, { color: getStatusColor(record.status) }]}>
+                {record.status.replace('_', ' ')}
+              </Text>
             </View>
-          ))}
+          </View>
+          
+          {/* Location Status */}
+          <View style={styles.locationStatus}>
+            <Text style={styles.locationLabel}>Location:</Text>
+            <View style={styles.geofenceStatus}>
+              <View
+                style={[
+                  styles.geofenceDot,
+                  {
+                    backgroundColor: record.insideGeofence
+                      ? ConstructionTheme.colors.success
+                      : ConstructionTheme.colors.error,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.geofenceText,
+                  {
+                    color: record.insideGeofence
+                      ? ConstructionTheme.colors.success
+                      : ConstructionTheme.colors.error,
+                  },
+                ]}
+              >
+                {record.insideGeofence ? 'Inside Site' : 'Outside Site'}
+              </Text>
+            </View>
+          </View>
         </View>
-      )}
 
-      {/* Location Coordinates */}
-      <View style={styles.coordinatesSection}>
-        <Text style={styles.coordinatesLabel}>Last Known Location:</Text>
-        <Text style={styles.coordinatesText}>
-          {record.location.latitude.toFixed(6)}, {record.location.longitude.toFixed(6)}
-        </Text>
-        <Text style={styles.lastUpdatedText}>
-          Updated: {new Date(record.location.lastUpdated).toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
-      </View>
-    </ConstructionCard>
-  );
+        {/* Project Information */}
+        <View style={styles.projectInfo}>
+          <Text style={styles.projectLabel}>Project:</Text>
+          <Text style={styles.projectValue}>{record.projectName}</Text>
+        </View>
+
+        {/* Time Information */}
+        <View style={styles.timeInfo}>
+          <View style={styles.timeRow}>
+            <Text style={styles.timeLabel}>Check-in:</Text>
+            <Text style={styles.timeValue}>{formatTime(record.checkInTime)}</Text>
+          </View>
+          <View style={styles.timeRow}>
+            <Text style={styles.timeLabel}>Check-out:</Text>
+            <Text style={styles.timeValue}>{formatTime(record.checkOutTime)}</Text>
+          </View>
+          
+          {/* Lunch Break Display */}
+          {record.lunchStartTime && record.lunchEndTime && (
+            <>
+              <View style={styles.timeRow}>
+                <Text style={styles.timeLabel}>Lunch Start:</Text>
+                <Text style={styles.timeValue}>{formatTime(record.lunchStartTime)}</Text>
+              </View>
+              <View style={styles.timeRow}>
+                <Text style={styles.timeLabel}>Lunch End:</Text>
+                <Text style={styles.timeValue}>{formatTime(record.lunchEndTime)}</Text>
+              </View>
+              <View style={styles.timeRow}>
+                <Text style={styles.timeLabel}>Lunch Duration:</Text>
+                <Text style={styles.timeValue}>{formatDuration(record.lunchDuration || 0)}</Text>
+              </View>
+            </>
+          )}
+          
+          {/* Regular Hours */}
+          {record.regularHours !== undefined && (
+            <View style={styles.timeRow}>
+              <Text style={styles.timeLabel}>Regular Hours:</Text>
+              <Text style={[styles.timeValue, styles.regularHours]}>
+                {formatDuration(record.regularHours)}
+              </Text>
+            </View>
+          )}
+          
+          {/* OT Hours */}
+          {record.otHours !== undefined && record.otHours > 0 && (
+            <View style={styles.timeRow}>
+              <Text style={[styles.timeLabel, { color: ConstructionTheme.colors.warning }]}>
+                OT Hours:
+              </Text>
+              <Text style={[styles.timeValue, { color: ConstructionTheme.colors.warning, fontWeight: 'bold' }]}>
+                {formatDuration(record.otHours)}
+              </Text>
+            </View>
+          )}
+          
+          <View style={styles.timeRow}>
+            <Text style={styles.timeLabel}>Total Hours:</Text>
+            <Text style={[styles.timeValue, styles.hoursWorked]}>
+              {formatDuration(record.workingHours)}
+            </Text>
+          </View>
+          
+          {record.isLate && (
+            <View style={styles.timeRow}>
+              <Text style={[styles.timeLabel, { color: ConstructionTheme.colors.warning }]}>
+                Late by:
+              </Text>
+              <Text style={[styles.timeValue, { color: ConstructionTheme.colors.warning, fontWeight: 'bold' }]}>
+                {record.minutesLate} minutes
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Task Assignment */}
+        <View style={styles.taskInfo}>
+          <Text style={styles.taskLabel}>Task Assigned:</Text>
+          <Text style={styles.taskValue}>{record.taskAssigned}</Text>
+        </View>
+
+        {/* Absence Reason Display */}
+        {record.absenceReason && record.absenceReason !== 'PRESENT' && (
+          <View style={styles.absenceReasonSection}>
+            <Text style={styles.absenceReasonLabel}>Absence Reason:</Text>
+            <Text style={[styles.absenceReasonValue, {
+              color: record.absenceReason === 'LEAVE_APPROVED' 
+                ? ConstructionTheme.colors.success 
+                : ConstructionTheme.colors.error
+            }]}>
+              {record.absenceReason.replace(/_/g, ' ')}
+            </Text>
+            {record.absenceNotes && (
+              <Text style={styles.absenceNotes}>{record.absenceNotes}</Text>
+            )}
+          </View>
+        )}
+
+        {/* Issues Section */}
+        {hasIssues && (
+          <View style={styles.issuesSection}>
+            <Text style={styles.issuesTitle}>Issues</Text>
+            {record.isLate && (
+              <View style={styles.issueItem}>
+                <View style={[styles.issueSeverityDot, { backgroundColor: ConstructionTheme.colors.warning }]} />
+                <View style={styles.issueContent}>
+                  <Text style={styles.issueType}>LATE ARRIVAL</Text>
+                  <Text style={styles.issueDescription}>
+                    Worker arrived {record.minutesLate} minutes late
+                  </Text>
+                </View>
+              </View>
+            )}
+            {record.status === 'ABSENT' && (
+              <View style={styles.issueItem}>
+                <View style={[styles.issueSeverityDot, { backgroundColor: ConstructionTheme.colors.error }]} />
+                <View style={styles.issueContent}>
+                  <Text style={styles.issueType}>ABSENT</Text>
+                  <Text style={styles.issueDescription}>Worker has not checked in today</Text>
+                </View>
+              </View>
+            )}
+            {!record.insideGeofence && record.status !== 'ABSENT' && (
+              <View style={styles.issueItem}>
+                <View style={[styles.issueSeverityDot, { backgroundColor: ConstructionTheme.colors.error }]} />
+                <View style={styles.issueContent}>
+                  <Text style={styles.issueType}>GEOFENCE VIOLATION</Text>
+                  <Text style={styles.issueDescription}>
+                    Worker checked in outside designated site boundary
+                  </Text>
+                </View>
+              </View>
+            )}
+            {record.lastKnownLocation && !record.lastKnownLocation.insideGeofence && record.status === 'CHECKED_IN' && (
+              <View style={styles.issueItem}>
+                <View style={[styles.issueSeverityDot, { backgroundColor: ConstructionTheme.colors.warning }]} />
+                <View style={styles.issueContent}>
+                  <Text style={styles.issueType}>CURRENT LOCATION VIOLATION</Text>
+                  <Text style={styles.issueDescription}>
+                    Worker's current location is outside site boundary
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Location Coordinates */}
+        {record.lastKnownLocation && (
+          <View style={styles.coordinatesSection}>
+            <Text style={styles.coordinatesLabel}>Last Known Location:</Text>
+            <Text style={styles.coordinatesText}>
+              {record.lastKnownLocation.latitude.toFixed(6)}, {record.lastKnownLocation.longitude.toFixed(6)}
+            </Text>
+            {record.lastLocationUpdate && (
+              <Text style={styles.lastUpdatedText}>
+                Updated: {new Date(record.lastLocationUpdate).toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          {record.status === 'ABSENT' && (
+            <ConstructionButton
+              title="Mark Reason"
+              variant="secondary"
+              size="small"
+              onPress={() => {
+                setSelectedWorkerForAbsence(record);
+                setShowAbsenceModal(true);
+              }}
+              style={styles.actionButton}
+            />
+          )}
+          {hasIssues && (
+            <ConstructionButton
+              title="Escalate"
+              variant="error"
+              size="small"
+              onPress={() => {
+                setSelectedWorkerForEscalation(record);
+                setShowEscalationModal(true);
+              }}
+              style={styles.actionButton}
+            />
+          )}
+        </View>
+      </ConstructionCard>
+    );
+  };
 
   // Render correction approval modal
   const renderCorrectionModal = () => (
@@ -574,7 +926,7 @@ const AttendanceMonitoringScreen: React.FC = () => {
               <View style={styles.correctionDetails}>
                 <Text style={styles.correctionLabel}>Request Type:</Text>
                 <Text style={styles.correctionValue}>
-                  {selectedCorrection.requestType.replace('_', ' ').toUpperCase()}
+                  {(selectedCorrection.requestType || 'unknown').replace('_', ' ').toUpperCase()}
                 </Text>
               </View>
               
@@ -638,19 +990,234 @@ const AttendanceMonitoringScreen: React.FC = () => {
     </Modal>
   );
 
+  // Render absence reason modal
+  const renderAbsenceModal = () => (
+    <Modal
+      visible={showAbsenceModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowAbsenceModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Mark Absence Reason</Text>
+          
+          {selectedWorkerForAbsence && (
+            <>
+              <Text style={styles.modalSubtitle}>
+                {selectedWorkerForAbsence.workerName}
+              </Text>
+              
+              <Text style={styles.inputLabel}>Reason:</Text>
+              <View style={styles.reasonButtons}>
+                {(['LEAVE_APPROVED', 'LEAVE_NOT_INFORMED', 'MEDICAL', 'UNAUTHORIZED'] as const).map((reason) => (
+                  <TouchableOpacity
+                    key={reason}
+                    style={[
+                      styles.reasonButton,
+                      absenceReason === reason && styles.reasonButtonActive
+                    ]}
+                    onPress={() => setAbsenceReason(reason)}
+                  >
+                    <Text style={[
+                      styles.reasonButtonText,
+                      absenceReason === reason && styles.reasonButtonTextActive
+                    ]}>
+                      {reason.replace(/_/g, ' ')}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.inputLabel}>Notes (optional):</Text>
+              <TextInput
+                style={styles.notesInput}
+                placeholder="Add notes..."
+                value={absenceNotes}
+                onChangeText={setAbsenceNotes}
+                multiline
+                numberOfLines={3}
+                placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+              />
+
+              <View style={styles.modalActions}>
+                <ConstructionButton
+                  title="Cancel"
+                  variant="secondary"
+                  size="medium"
+                  onPress={() => {
+                    setShowAbsenceModal(false);
+                    setSelectedWorkerForAbsence(null);
+                    setAbsenceNotes('');
+                  }}
+                  style={styles.modalButton}
+                />
+                <ConstructionButton
+                  title="Save"
+                  variant="primary"
+                  size="medium"
+                  onPress={handleMarkAbsence}
+                  style={styles.modalButton}
+                />
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Render escalation modal
+  const renderEscalationModal = () => (
+    <Modal
+      visible={showEscalationModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowEscalationModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <ScrollView contentContainerStyle={styles.modalScrollContent}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Create Escalation</Text>
+            
+            {selectedWorkerForEscalation && (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  {selectedWorkerForEscalation.workerName}
+                </Text>
+                
+                <Text style={styles.inputLabel}>Escalation Type:</Text>
+                <View style={styles.reasonButtons}>
+                  {(['REPEATED_LATE', 'REPEATED_ABSENCE', 'GEOFENCE_VIOLATION', 'UNAUTHORIZED_ABSENCE'] as const).map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.reasonButton,
+                        escalationType === type && styles.reasonButtonActive
+                      ]}
+                      onPress={() => setEscalationType(type)}
+                    >
+                      <Text style={[
+                        styles.reasonButtonText,
+                        escalationType === type && styles.reasonButtonTextActive
+                      ]}>
+                        {type.replace(/_/g, ' ')}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.inputLabel}>Severity:</Text>
+                <View style={styles.severityButtons}>
+                  {(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const).map((severity) => (
+                    <TouchableOpacity
+                      key={severity}
+                      style={[
+                        styles.severityButton,
+                        escalationSeverity === severity && styles.severityButtonActive,
+                        { borderColor: getSeverityColor(severity) }
+                      ]}
+                      onPress={() => setEscalationSeverity(severity)}
+                    >
+                      <Text style={[
+                        styles.severityButtonText,
+                        escalationSeverity === severity && { color: getSeverityColor(severity) }
+                      ]}>
+                        {severity}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.inputLabel}>Escalate To:</Text>
+                <View style={styles.escalateToButtons}>
+                  {(['ADMIN', 'MANAGER', 'HR'] as const).map((to) => (
+                    <TouchableOpacity
+                      key={to}
+                      style={[
+                        styles.escalateToButton,
+                        escalatedTo === to && styles.escalateToButtonActive
+                      ]}
+                      onPress={() => setEscalatedTo(to)}
+                    >
+                      <Text style={[
+                        styles.escalateToButtonText,
+                        escalatedTo === to && styles.escalateToButtonTextActive
+                      ]}>
+                        {to}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.inputLabel}>Description:</Text>
+                <TextInput
+                  style={styles.notesInput}
+                  placeholder="Describe the issue..."
+                  value={escalationDescription}
+                  onChangeText={setEscalationDescription}
+                  multiline
+                  numberOfLines={3}
+                  placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                />
+
+                <Text style={styles.inputLabel}>Notes (optional):</Text>
+                <TextInput
+                  style={styles.notesInput}
+                  placeholder="Additional notes..."
+                  value={escalationNotes}
+                  onChangeText={setEscalationNotes}
+                  multiline
+                  numberOfLines={2}
+                  placeholderTextColor={ConstructionTheme.colors.onSurfaceVariant}
+                />
+
+                <View style={styles.modalActions}>
+                  <ConstructionButton
+                    title="Cancel"
+                    variant="secondary"
+                    size="medium"
+                    onPress={() => {
+                      setShowEscalationModal(false);
+                      setSelectedWorkerForEscalation(null);
+                      setEscalationDescription('');
+                      setEscalationNotes('');
+                    }}
+                    style={styles.modalButton}
+                  />
+                  <ConstructionButton
+                    title="Escalate"
+                    variant="error"
+                    size="medium"
+                    onPress={handleCreateEscalation}
+                    style={styles.modalButton}
+                  />
+                </View>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+
   if (isLoading && !attendanceData) {
     return (
-      <ConstructionLoadingIndicator
-        visible={true}
-        message="Loading attendance data..."
-        variant="card"
-        size="large"
-      />
+      <SafeAreaView style={{ flex: 1 }}>
+        <StatusBar barStyle="light-content" />
+        <ConstructionLoadingIndicator
+          visible={true}
+          message="Loading attendance data..."
+          variant="card"
+          size="large"
+        />
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Attendance Monitoring</Text>
@@ -692,7 +1259,11 @@ const AttendanceMonitoringScreen: React.FC = () => {
 
         {/* Pending Corrections Alert */}
         {pendingCorrections.length > 0 && (
-          <ConstructionCard title="Pending Corrections" variant="warning" style={styles.correctionsCard}>
+          <ConstructionCard 
+            title="⚠️ Pending Corrections" 
+            variant="warning" 
+            style={styles.correctionsCard}
+          >
             <Text style={styles.correctionsText}>
               {pendingCorrections.length} attendance correction{pendingCorrections.length > 1 ? 's' : ''} awaiting approval
             </Text>
@@ -708,6 +1279,19 @@ const AttendanceMonitoringScreen: React.FC = () => {
               }}
               style={styles.reviewButton}
             />
+          </ConstructionCard>
+        )}
+
+        {/* Debug: Show when no corrections */}
+        {pendingCorrections.length === 0 && __DEV__ && (
+          <ConstructionCard 
+            title="ℹ️ Debug Info" 
+            variant="outlined" 
+            style={styles.correctionsCard}
+          >
+            <Text style={styles.correctionsText}>
+              No pending corrections found. Check console logs for API response details.
+            </Text>
           </ConstructionCard>
         )}
 
@@ -740,9 +1324,17 @@ const AttendanceMonitoringScreen: React.FC = () => {
             variant="secondary"
             size="medium"
             onPress={() => {
-              // TODO: Implement export functionality
-              Alert.alert('Export', 'Export functionality coming soon');
+              Alert.alert(
+                'Export Format',
+                'Choose export format:',
+                [
+                  { text: 'JSON', onPress: () => handleExportReport('json') },
+                  { text: 'CSV', onPress: () => handleExportReport('csv') },
+                  { text: 'Cancel', style: 'cancel' }
+                ]
+              );
             }}
+            loading={isExporting}
             style={styles.actionButton}
           />
           <ConstructionButton
@@ -756,9 +1348,15 @@ const AttendanceMonitoringScreen: React.FC = () => {
         </View>
       </ScrollView>
 
+      {/* Absence Reason Modal */}
+      {renderAbsenceModal()}
+
+      {/* Escalation Modal */}
+      {renderEscalationModal()}
+
       {/* Correction Approval Modal */}
       {renderCorrectionModal()}
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -921,6 +1519,45 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onSurface,
     fontWeight: 'bold',
     marginBottom: ConstructionTheme.spacing.xs,
+  },
+  workerRole: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  projectInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.sm,
+    paddingBottom: ConstructionTheme.spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: ConstructionTheme.colors.outline,
+  },
+  projectLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginRight: ConstructionTheme.spacing.xs,
+  },
+  projectValue: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: '600',
+    flex: 1,
+  },
+  taskInfo: {
+    marginTop: ConstructionTheme.spacing.sm,
+    paddingTop: ConstructionTheme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+  },
+  taskLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  taskValue: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurface,
   },
   statusContainer: {
     flexDirection: 'row',
@@ -1129,6 +1766,134 @@ const styles = StyleSheet.create({
   cancelButton: {
     alignSelf: 'center',
     minWidth: 120,
+  },
+  absenceReasonSection: {
+    marginTop: ConstructionTheme.spacing.sm,
+    paddingTop: ConstructionTheme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.outline,
+    backgroundColor: '#FFF3E0',
+    padding: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  absenceReasonLabel: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  absenceReasonValue: {
+    ...ConstructionTheme.typography.bodyMedium,
+    fontWeight: 'bold',
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  absenceNotes: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontStyle: 'italic',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: ConstructionTheme.spacing.md,
+    gap: ConstructionTheme.spacing.sm,
+  },
+  actionButton: {
+    minWidth: 100,
+  },
+  regularHours: {
+    color: ConstructionTheme.colors.success,
+    fontWeight: '600',
+  },
+  modalSubtitle: {
+    ...ConstructionTheme.typography.bodyLarge,
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.md,
+    textAlign: 'center',
+  },
+  inputLabel: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.xs,
+    marginTop: ConstructionTheme.spacing.sm,
+  },
+  reasonButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: ConstructionTheme.spacing.xs,
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  reasonButton: {
+    paddingHorizontal: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.outline,
+    backgroundColor: ConstructionTheme.colors.surface,
+  },
+  reasonButtonActive: {
+    backgroundColor: ConstructionTheme.colors.primary,
+    borderColor: ConstructionTheme.colors.primary,
+  },
+  reasonButtonText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurface,
+  },
+  reasonButtonTextActive: {
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  severityButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: ConstructionTheme.spacing.xs,
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  severityButton: {
+    flex: 1,
+    paddingVertical: ConstructionTheme.spacing.xs,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderWidth: 2,
+    alignItems: 'center',
+  },
+  severityButtonActive: {
+    backgroundColor: '#FFF3E0',
+  },
+  severityButtonText: {
+    ...ConstructionTheme.typography.labelSmall,
+    color: ConstructionTheme.colors.onSurface,
+    fontWeight: '600',
+  },
+  escalateToButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: ConstructionTheme.spacing.xs,
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  escalateToButton: {
+    flex: 1,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: ConstructionTheme.colors.outline,
+    backgroundColor: ConstructionTheme.colors.surface,
+    alignItems: 'center',
+  },
+  escalateToButtonActive: {
+    backgroundColor: ConstructionTheme.colors.error,
+    borderColor: ConstructionTheme.colors.error,
+  },
+  escalateToButtonText: {
+    ...ConstructionTheme.typography.labelMedium,
+    color: ConstructionTheme.colors.onSurface,
+  },
+  escalateToButtonTextActive: {
+    color: ConstructionTheme.colors.onPrimary,
+    fontWeight: 'bold',
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: ConstructionTheme.spacing.lg,
   },
 });
 

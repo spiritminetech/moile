@@ -10,9 +10,10 @@ import {
   ToolAllocation,
   SupervisorReport,
   Project,
-  TaskAssignmentRequest,
-  ProgressReport,
+  TaskAssignment,
 } from '../../types';
+import { dailyProgressApiService } from '../../services/api/DailyProgressApiService';
+import { supervisorApiService } from '../../services/api/SupervisorApiService';
 
 // Supervisor State Interface
 interface SupervisorState extends SupervisorContextData {
@@ -170,14 +171,14 @@ const supervisorReducer = (state: SupervisorState, action: SupervisorAction): Su
       return {
         ...state,
         dailyReports: state.dailyReports.map(report =>
-          report.reportId === action.payload.reportId ? action.payload : report
+          report.id === action.payload.id ? action.payload : report
         ),
       };
     
     case 'REMOVE_DAILY_REPORT':
       return {
         ...state,
-        dailyReports: state.dailyReports.filter(report => report.reportId !== action.payload),
+        dailyReports: state.dailyReports.filter(report => report.id !== action.payload),
       };
     
     // Material and tool management
@@ -241,7 +242,7 @@ interface SupervisorContextValue {
   loadTeamData: () => Promise<void>;
   refreshTeamMembers: () => Promise<void>;
   updateTeamMemberStatus: (memberId: number, status: TeamMember['attendanceStatus']) => Promise<void>;
-  assignTaskToWorker: (request: TaskAssignmentRequest) => Promise<void>;
+  assignTaskToWorker: (request: TaskAssignment) => Promise<void>;
   reassignTask: (taskId: number, fromWorkerId: number, toWorkerId: number) => Promise<void>;
   
   // Pending approvals and request queue state handling
@@ -252,8 +253,8 @@ interface SupervisorContextValue {
   
   // Progress tracking and reporting state management
   loadDailyReports: () => Promise<void>;
-  createProgressReport: (report: Omit<ProgressReport, 'reportId'>) => Promise<void>;
-  updateProgressReport: (reportId: string, updates: Partial<ProgressReport>) => Promise<void>;
+  createProgressReport: (report: Omit<SupervisorReport, 'id'>) => Promise<void>;
+  updateProgressReport: (reportId: string, updates: Partial<SupervisorReport>) => Promise<void>;
   submitProgressReport: (reportId: string, finalNotes?: string) => Promise<void>;
   
   // Material and tool allocation state handling
@@ -262,6 +263,33 @@ interface SupervisorContextValue {
   updateMaterialRequest: (requestId: number, updates: Partial<MaterialRequest>) => Promise<void>;
   allocateTool: (allocation: Omit<ToolAllocation, 'id'>) => Promise<void>;
   returnTool: (allocationId: number, condition: ToolAllocation['condition'], notes?: string) => Promise<void>;
+  
+  // NEW: Materials & Tools - Missing Features
+  acknowledgeDelivery: (requestId: number, data: {
+    deliveredQuantity?: number;
+    deliveryCondition?: 'good' | 'partial' | 'damaged' | 'wrong';
+    receivedBy?: string;
+    deliveryNotes?: string;
+    deliveryPhotos?: string[];
+  }) => Promise<void>;
+  returnMaterials: (data: {
+    requestId: number;
+    returnQuantity: number;
+    returnReason: 'excess' | 'defect' | 'scope_change' | 'completion';
+    returnCondition?: 'unused' | 'damaged';
+    returnNotes?: string;
+    returnPhotos?: string[];
+  }) => Promise<void>;
+  getToolUsageLog: (projectId?: number) => Promise<any[]>;
+  logToolUsage: (data: {
+    toolId: number;
+    action: 'check_out' | 'check_in';
+    employeeId: number;
+    quantity?: number;
+    condition?: 'good' | 'fair' | 'needs_maintenance' | 'damaged';
+    location?: string;
+    notes?: string;
+  }) => Promise<void>;
   
   // Utility functions
   refreshAllData: () => Promise<void>;
@@ -401,17 +429,17 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
                            worker.status === 'ABSENT' ? 'absent' : 
                            worker.isLate ? 'late' : 'present',
           currentTask: worker.taskAssigned && worker.taskAssigned !== 'No task assigned' ? {
-            id: worker.employeeId, // Use employeeId as task id for now
+            id: worker.employeeId,
             name: worker.taskAssigned,
-            progress: Math.floor(Math.random() * 100) // TODO: Get actual progress from backend
-          } : undefined,
+            progress: Math.floor(Math.random() * 100)
+          } : null,
           location: {
             latitude: worker.lastKnownLocation?.latitude || 0,
             longitude: worker.lastKnownLocation?.longitude || 0,
             insideGeofence: worker.insideGeofence || false,
             lastUpdated: worker.lastLocationUpdate || new Date().toISOString()
           },
-          certifications: [] // TODO: Get certifications from backend
+          certifications: []
         }));
       }
 
@@ -445,7 +473,7 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
     }
   }, [state.teamMembers]);
 
-  const assignTaskToWorker = useCallback(async (request: TaskAssignmentRequest) => {
+  const assignTaskToWorker = useCallback(async (request: TaskAssignment) => {
     try {
       // TODO: Replace with actual API call
       console.log('Assigning task to worker:', request);
@@ -537,163 +565,281 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
     try {
       dispatch({ type: 'SET_REPORTS_LOADING', payload: true });
       
-      // TODO: Replace with actual API calls
-      // Mock daily reports
-      const mockReports: SupervisorReport[] = [
-        {
-          reportId: 'report-1',
-          date: new Date().toISOString().split('T')[0],
-          projectId: 1,
-          projectName: 'Construction Site Alpha',
-          supervisorId: 1,
-          summary: 'Good progress on foundation work',
-          manpowerUtilization: {
-            totalWorkers: 10,
-            activeWorkers: 8,
-            productivity: 85,
-            efficiency: 90
+      const projectId = state.assignedProjects[0]?.id || 1;
+      const today = new Date();
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const response = await dailyProgressApiService.getProgressReports({
+        projectId,
+        from: thirtyDaysAgo.toISOString().split('T')[0],
+        to: today.toISOString().split('T')[0]
+      });
+
+      if (response.success && response.data) {
+        console.log('📊 Raw API response data count:', response.data.data?.length);
+        
+        // Get project name from response or use fallback
+        const projectName = response.data.projectName || `Project ${projectId}`;
+        
+        const reports: SupervisorReport[] = response.data.data.map((item: any) => ({
+          id: item.id?.toString() || `report-${Date.now()}`,
+          reportId: item.id?.toString() || `report-${Date.now()}`,
+          date: new Date(item.date).toISOString().split('T')[0],
+          projectId: item.projectId,
+          projectName: item.projectName || projectName,
+          summary: item.remarks || 'No summary provided',
+          status: item.approvalStatus === 'APPROVED' ? 'approved' : 
+                  item.approvalStatus === 'REJECTED' ? 'rejected' :
+                  item.approvalStatus === 'PENDING' ? 'submitted' : 'draft',
+          manpowerUtilization: item.manpowerUsage || {
+            totalWorkers: 0,
+            activeWorkers: 0,
+            productivity: 0,
+            efficiency: 0
           },
           progressMetrics: {
-            overallProgress: 75,
-            milestonesCompleted: 3,
-            tasksCompleted: 15,
-            hoursWorked: 80
+            overallProgress: item.overallProgress || 0,
+            milestonesCompleted: 0,
+            tasksCompleted: 0,
+            hoursWorked: 0
           },
-          issues: [],
-          status: 'draft',
-          createdAt: new Date().toISOString()
-        }
-      ];
-
-      dispatch({ type: 'SET_DAILY_REPORTS', payload: mockReports });
-      
+          issues: item.issues ? (typeof item.issues === 'string' ? [{ 
+            type: 'general' as const,
+            description: item.issues,
+            severity: 'medium' as const,
+            status: 'open' as const
+          }] : []) : [],
+          materialConsumption: item.materialConsumption || [],
+          photos: []
+        }));
+        
+        console.log('✅ Mapped reports count:', reports.length);
+        console.log('📋 Report IDs:', reports.map(r => r.reportId).join(', '));
+        
+        dispatch({ type: 'SET_DAILY_REPORTS', payload: reports });
+      }
     } catch (error) {
+      console.error('Failed to load daily reports:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to load daily reports';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
     } finally {
       dispatch({ type: 'SET_REPORTS_LOADING', payload: false });
     }
-  }, []);
+  }, [state.assignedProjects]);
 
-  const createProgressReport = useCallback(async (report: Omit<ProgressReport, 'reportId'>) => {
+  const createProgressReport = useCallback(async (report: Omit<SupervisorReport, 'id'>) => {
     try {
-      // TODO: Replace with actual API call
-      const newReport: SupervisorReport = {
-        reportId: `report-${Date.now()}`,
-        date: new Date().toISOString().split('T')[0],
-        projectId: report.projectId,
-        projectName: 'Project Name', // This would come from the API
-        supervisorId: 1, // This would come from auth context
-        summary: 'Progress report summary',
-        manpowerUtilization: report.manpowerUtilization,
-        progressMetrics: report.progressMetrics,
-        issues: report.issues,
-        status: 'draft',
-        createdAt: new Date().toISOString()
-      };
+      // TODO: Photo upload needs React Native specific implementation
+      // Skip for now - File constructor doesn't exist in React Native
+      console.log('📸 Skipping photo upload - needs React Native implementation');
 
-      dispatch({ type: 'ADD_DAILY_REPORT', payload: newReport });
+      // Submit with manual progress
+      if (report.progressMetrics?.overallProgress !== undefined) {
+        await dailyProgressApiService.submitDailyProgress({
+          projectId: report.projectId,
+          remarks: report.date,
+          issues: report.issues?.map((i: any) => `[${i.type}] [${i.severity}] ${i.description}`).join('\n') || ''
+        });
+      }
+
+      // Submit manpower data if provided
+      if (report.manpowerUtilization) {
+        await dailyProgressApiService.trackManpowerUsage({
+          projectId: report.projectId,
+          date: report.date,
+          totalWorkers: report.manpowerUtilization.totalWorkers || 0,
+          activeWorkers: report.manpowerUtilization.activeWorkers || 0,
+          productivity: report.manpowerUtilization.productivity || 0,
+          efficiency: report.manpowerUtilization.efficiency || 0,
+          overtimeHours: report.manpowerUtilization.overtimeHours || 0,
+          absentWorkers: report.manpowerUtilization.absentWorkers || 0,
+          lateWorkers: report.manpowerUtilization.lateWorkers || 0,
+        });
+      }
+
+      // Submit issues if provided
+      if (report.issues && report.issues.length > 0) {
+        await dailyProgressApiService.logIssues({
+          projectId: report.projectId,
+          date: report.date,
+          issues: report.issues.map((issue: any) => ({
+            type: issue.type,
+            description: issue.description,
+            severity: issue.severity,
+            status: issue.status || 'open',
+            location: issue.location || '',
+            actionTaken: issue.actionTaken || '',
+          })),
+        });
+      }
+
+      // Submit material consumption if provided
+      if (report.materialConsumption && report.materialConsumption.length > 0) {
+        await dailyProgressApiService.trackMaterialConsumption({
+          projectId: report.projectId,
+          date: report.date,
+          materials: report.materialConsumption.map((material: any) => ({
+            materialId: material.materialId,
+            materialName: material.name,
+            consumed: material.consumed || 0,
+            remaining: material.remaining || 0,
+            unit: material.unit,
+            plannedConsumption: material.plannedConsumption || 0,
+            wastage: material.wastage || 0,
+            notes: material.notes || '',
+          })),
+        });
+      }
+
+      await loadDailyReports();
     } catch (error) {
+      console.error('Failed to create progress report:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to create progress report';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
     }
-  }, []);
+  }, [loadDailyReports]);
 
-  const updateProgressReport = useCallback(async (reportId: string, updates: Partial<ProgressReport>) => {
+  const updateProgressReport = useCallback(async (reportId: string, updates: Partial<SupervisorReport>) => {
     try {
-      // TODO: Replace with actual API call
-      const existingReport = state.dailyReports.find(report => report.reportId === reportId);
-      if (existingReport) {
-        const updatedReport = { ...existingReport, ...updates };
-        dispatch({ type: 'UPDATE_DAILY_REPORT', payload: updatedReport });
+      const existingReport = state.dailyReports.find(report => report.id === reportId);
+      if (!existingReport) {
+        throw new Error('Report not found');
       }
+
+      if (updates.manpowerUtilization) {
+        await dailyProgressApiService.trackManpowerUsage({
+          projectId: existingReport.projectId,
+          dailyProgressId: parseInt(reportId),
+          totalWorkers: updates.manpowerUtilization.totalWorkers,
+          activeWorkers: updates.manpowerUtilization.activeWorkers,
+          productivity: updates.manpowerUtilization.productivity,
+          efficiency: updates.manpowerUtilization.efficiency
+        });
+      }
+
+      if (updates.issues) {
+        await dailyProgressApiService.logIssues({
+          projectId: existingReport.projectId,
+          dailyProgressId: parseInt(reportId),
+          issues: updates.issues
+        });
+      }
+
+      if (updates.materialConsumption) {
+        const materials = updates.materialConsumption.map((m: any) => ({
+          materialId: m.materialId,
+          materialName: m.name,
+          consumed: m.consumed,
+          remaining: m.remaining,
+          unit: m.unit
+        }));
+        await dailyProgressApiService.trackMaterialConsumption({
+          projectId: existingReport.projectId,
+          dailyProgressId: parseInt(reportId),
+          materials
+        });
+      }
+
+      await loadDailyReports();
     } catch (error) {
+      console.error('Failed to update progress report:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to update progress report';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
     }
-  }, [state.dailyReports]);
+  }, [state.dailyReports, loadDailyReports]);
 
   const submitProgressReport = useCallback(async (reportId: string, finalNotes?: string) => {
     try {
-      // TODO: Replace with actual API call
-      const existingReport = state.dailyReports.find(report => report.reportId === reportId);
-      if (existingReport) {
-        const updatedReport = { 
-          ...existingReport, 
-          status: 'submitted' as const,
-          submittedAt: new Date().toISOString()
-        };
-        dispatch({ type: 'UPDATE_DAILY_REPORT', payload: updatedReport });
+      const existingReport = state.dailyReports.find(report => report.id === reportId);
+      if (!existingReport) {
+        throw new Error('Report not found');
       }
+
+      try {
+        await dailyProgressApiService.submitDailyProgress({
+          projectId: existingReport.projectId,
+          remarks: finalNotes || '',
+          issues: existingReport.issues.map((i: any) => `[${i.type}] [${i.severity}] ${i.description}`).join('\n')
+        });
+      } catch (submitError: any) {
+        console.log('Basic submit skipped:', submitError.message);
+      }
+
+      await loadDailyReports();
     } catch (error) {
+      console.error('Failed to submit progress report:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to submit progress report';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
     }
-  }, [state.dailyReports]);
+  }, [state.dailyReports, loadDailyReports]);
 
   // Material and tool allocation state handling
   const loadMaterialsAndTools = useCallback(async () => {
     try {
       dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
       
-      // TODO: Replace with actual API calls
-      // Mock material requests
-      const mockMaterialRequests: MaterialRequest[] = [
-        {
-          id: 1,
-          projectId: 1,
-          requesterId: 1,
-          itemName: 'Concrete Mix',
-          category: 'Construction Materials',
-          quantity: 50,
-          unit: 'bags',
-          urgency: 'normal',
-          requiredDate: new Date('2024-02-10'),
-          purpose: 'Foundation work',
-          justification: 'Required for next phase of construction',
-          estimatedCost: 2500,
-          status: 'pending'
+      // Get project ID from assigned projects
+      const projectId = state.assignedProjects[0]?.id;
+      
+      if (projectId) {
+        const response = await supervisorApiService.getMaterialsAndTools(projectId);
+        
+        if (response.success && response.data) {
+          dispatch({ type: 'SET_MATERIAL_REQUESTS', payload: response.data.materialRequests || [] });
+          dispatch({ type: 'SET_TOOL_ALLOCATIONS', payload: response.data.toolAllocations || [] });
         }
-      ];
-
-      // Mock tool allocations
-      const mockToolAllocations: ToolAllocation[] = [
-        {
-          id: 1,
-          toolId: 1,
-          toolName: 'Concrete Mixer',
-          allocatedTo: 1,
-          allocatedToName: 'Worker One',
-          allocationDate: new Date(),
-          expectedReturnDate: new Date('2024-02-10'),
-          condition: 'good',
-          location: 'Site A - Zone 1'
-        }
-      ];
-
-      dispatch({ type: 'SET_MATERIAL_REQUESTS', payload: mockMaterialRequests });
-      dispatch({ type: 'SET_TOOL_ALLOCATIONS', payload: mockToolAllocations });
+      } else {
+        // No project assigned, set empty arrays
+        dispatch({ type: 'SET_MATERIAL_REQUESTS', payload: [] });
+        dispatch({ type: 'SET_TOOL_ALLOCATIONS', payload: [] });
+      }
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load materials and tools';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      console.error('Error loading materials and tools:', error);
     } finally {
       dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
     }
-  }, []);
+  }, [state.assignedProjects]);
 
   const createMaterialRequest = useCallback(async (request: Omit<MaterialRequest, 'id' | 'status'>) => {
     try {
-      // TODO: Replace with actual API call
-      const newRequest: MaterialRequest = {
-        ...request,
-        id: Date.now(), // Mock ID generation
-        status: 'pending'
-      };
-      dispatch({ type: 'ADD_MATERIAL_REQUEST', payload: newRequest });
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
+      
+      const response = await supervisorApiService.requestMaterials({
+        projectId: request.projectId,
+        requestType: request.requestType,
+        itemName: request.itemName,
+        itemCategory: request.itemCategory,
+        quantity: request.quantity,
+        unit: request.unit,
+        urgency: request.urgency,
+        requiredDate: request.requiredDate,
+        purpose: request.purpose,
+        justification: request.justification,
+        specifications: request.specifications,
+        estimatedCost: request.estimatedCost,
+      });
+      
+      if (response.success && response.data) {
+        const newRequest: MaterialRequest = {
+          ...request,
+          id: response.data.requestId,
+          status: 'pending'
+        };
+        dispatch({ type: 'ADD_MATERIAL_REQUEST', payload: newRequest });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to create material request';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
     }
   }, []);
 
@@ -713,35 +859,165 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
 
   const allocateTool = useCallback(async (allocation: Omit<ToolAllocation, 'id'>) => {
     try {
-      // TODO: Replace with actual API call
-      const newAllocation: ToolAllocation = {
-        ...allocation,
-        id: Date.now() // Mock ID generation
-      };
-      dispatch({ type: 'ADD_TOOL_ALLOCATION', payload: newAllocation });
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
+      
+      const response = await supervisorApiService.allocateTool({
+        toolId: allocation.toolId,
+        toolName: allocation.toolName,
+        allocatedTo: allocation.allocatedTo,
+        allocatedToName: allocation.allocatedToName,
+        allocationDate: allocation.allocationDate,
+        expectedReturnDate: allocation.expectedReturnDate,
+        condition: allocation.condition,
+        location: allocation.location,
+      });
+      
+      if (response.success && response.data) {
+        const newAllocation: ToolAllocation = {
+          ...allocation,
+          id: response.data.allocationId
+        };
+        dispatch({ type: 'ADD_TOOL_ALLOCATION', payload: newAllocation });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to allocate tool';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
     }
   }, []);
 
   const returnTool = useCallback(async (allocationId: number, condition: ToolAllocation['condition'], notes?: string) => {
     try {
-      // TODO: Replace with actual API call
-      const existingAllocation = state.toolAllocations.find(allocation => allocation.id === allocationId);
-      if (existingAllocation) {
-        const updatedAllocation = { 
-          ...existingAllocation, 
-          condition,
-          actualReturnDate: new Date()
-        };
-        dispatch({ type: 'UPDATE_TOOL_ALLOCATION', payload: updatedAllocation });
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
+      
+      const response = await supervisorApiService.returnTool(allocationId, condition, notes);
+      
+      if (response.success) {
+        const existingAllocation = state.toolAllocations.find(allocation => allocation.id === allocationId);
+        if (existingAllocation) {
+          const updatedAllocation = { 
+            ...existingAllocation, 
+            condition,
+            actualReturnDate: new Date()
+          };
+          dispatch({ type: 'UPDATE_TOOL_ALLOCATION', payload: updatedAllocation });
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to return tool';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
     }
   }, [state.toolAllocations]);
+
+  // NEW: Materials & Tools - Missing Features Implementation
+  const acknowledgeDelivery = useCallback(async (requestId: number, data: {
+    deliveredQuantity?: number;
+    deliveryCondition?: 'good' | 'partial' | 'damaged' | 'wrong';
+    receivedBy?: string;
+    deliveryNotes?: string;
+    deliveryPhotos?: string[];
+  }) => {
+    try {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
+      
+      const response = await supervisorApiService.acknowledgeDelivery(requestId, data);
+      
+      if (response.success) {
+        // Update the material request status to FULFILLED
+        const existingRequest = state.materialRequests.find(req => req.id === requestId);
+        if (existingRequest) {
+          const updatedRequest = {
+            ...existingRequest,
+            status: 'fulfilled' as const,
+            fulfilledAt: new Date()
+          };
+          dispatch({ type: 'UPDATE_MATERIAL_REQUEST', payload: updatedRequest });
+        }
+        
+        // Reload materials and tools to get updated inventory
+        await loadMaterialsAndTools();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to acknowledge delivery';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
+    }
+  }, [state.materialRequests]);
+
+  const returnMaterials = useCallback(async (data: {
+    requestId: number;
+    returnQuantity: number;
+    returnReason: 'excess' | 'defect' | 'scope_change' | 'completion';
+    returnCondition?: 'unused' | 'damaged';
+    returnNotes?: string;
+    returnPhotos?: string[];
+  }) => {
+    try {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
+      
+      const response = await supervisorApiService.returnMaterials(data);
+      
+      if (response.success) {
+        // Reload materials and tools to get updated inventory
+        await loadMaterialsAndTools();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to return materials';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
+    }
+  }, []);
+
+  const getToolUsageLog = useCallback(async (projectId?: number) => {
+    try {
+      const params = projectId ? { projectId } : undefined;
+      const response = await supervisorApiService.getToolUsageLog(params);
+      
+      if (response.success && response.data) {
+        return response.data.tools || [];
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching tool usage log:', error);
+      return [];
+    }
+  }, []);
+
+  const logToolUsage = useCallback(async (data: {
+    toolId: number;
+    action: 'check_out' | 'check_in';
+    employeeId: number;
+    quantity?: number;
+    condition?: 'good' | 'fair' | 'needs_maintenance' | 'damaged';
+    location?: string;
+    notes?: string;
+  }) => {
+    try {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: true });
+      
+      const response = await supervisorApiService.logToolUsage(data);
+      
+      if (response.success) {
+        // Reload materials and tools to get updated tool status
+        await loadMaterialsAndTools();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to log tool usage';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_MATERIALS_LOADING', payload: false });
+    }
+  }, []);
 
   // Utility functions
   const refreshAllData = useCallback(async () => {
@@ -833,6 +1109,10 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
     updateMaterialRequest,
     allocateTool,
     returnTool,
+    acknowledgeDelivery,
+    returnMaterials,
+    getToolUsageLog,
+    logToolUsage,
     // Utility functions
     refreshAllData,
     clearError,

@@ -11,6 +11,8 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
@@ -431,7 +433,8 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   });
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <OfflineIndicator />
       
       {/* Header */}
@@ -473,7 +476,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
           windowSize={10}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 };
 

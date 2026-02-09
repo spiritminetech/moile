@@ -14,6 +14,8 @@ import {
   FlatList,
   ActivityIndicator,
   Switch,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useSupervisorContext } from '../../store/context/SupervisorContext';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
@@ -50,15 +52,17 @@ interface InventoryAlert {
 }
 
 interface MaterialRequestFormData {
+  requestType: 'MATERIAL' | 'TOOL';
   itemName: string;
-  category: string;
+  itemCategory?: 'concrete' | 'steel' | 'wood' | 'electrical' | 'plumbing' | 'finishing' | 'hardware' | 'power_tools' | 'hand_tools' | 'safety_equipment' | 'measuring_tools' | 'other';
   quantity: number;
-  unit: string;
-  urgency: 'low' | 'normal' | 'high' | 'urgent';
+  unit?: string;
+  urgency?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   requiredDate: string;
   purpose: string;
-  justification: string;
-  estimatedCost: number;
+  justification?: string;
+  specifications?: string;
+  estimatedCost?: number;
 }
 
 interface ToolAllocationFormData {
@@ -71,7 +75,7 @@ interface ToolAllocationFormData {
   instructions: string;
 }
 const MaterialsToolsScreen: React.FC = () => {
-  const { state, loadMaterialsAndTools, createMaterialRequest, allocateTool, returnTool } = useSupervisorContext();
+  const { state, loadMaterialsAndTools, createMaterialRequest, allocateTool, returnTool, acknowledgeDelivery, returnMaterials, getToolUsageLog, logToolUsage } = useSupervisorContext();
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'materials' | 'tools' | 'inventory'>('materials');
   
@@ -80,16 +84,25 @@ const MaterialsToolsScreen: React.FC = () => {
   const [showToolAllocationModal, setShowToolAllocationModal] = useState(false);
   const [showToolReturnModal, setShowToolReturnModal] = useState(false);
   
+  // NEW: Additional modal states for missing features
+  const [showAcknowledgeDeliveryModal, setShowAcknowledgeDeliveryModal] = useState(false);
+  const [showReturnMaterialsModal, setShowReturnMaterialsModal] = useState(false);
+  const [showToolUsageLogModal, setShowToolUsageLogModal] = useState(false);
+  const [selectedMaterialRequest, setSelectedMaterialRequest] = useState<MaterialRequest | null>(null);
+  const [toolUsageLogData, setToolUsageLogData] = useState<any[]>([]);
+  
   // Form states
   const [materialRequestForm, setMaterialRequestForm] = useState<MaterialRequestFormData>({
+    requestType: 'MATERIAL',
     itemName: '',
-    category: '',
+    itemCategory: 'other', // Valid default enum value
     quantity: 0,
-    unit: '',
-    urgency: 'normal',
+    unit: 'pieces',
+    urgency: 'NORMAL',
     requiredDate: new Date().toISOString().split('T')[0],
     purpose: '',
     justification: '',
+    specifications: '',
     estimatedCost: 0,
   });
 
@@ -101,6 +114,23 @@ const MaterialsToolsScreen: React.FC = () => {
     expectedReturnDate: new Date().toISOString().split('T')[0],
     purpose: '',
     instructions: '',
+  });
+
+  // NEW: Form states for missing features
+  const [acknowledgeDeliveryForm, setAcknowledgeDeliveryForm] = useState({
+    deliveredQuantity: 0,
+    deliveryCondition: 'good' as 'good' | 'partial' | 'damaged' | 'wrong',
+    receivedBy: '',
+    deliveryNotes: '',
+    deliveryPhotos: [] as string[],
+  });
+
+  const [returnMaterialsForm, setReturnMaterialsForm] = useState({
+    returnQuantity: 0,
+    returnReason: 'excess' as 'excess' | 'defect' | 'scope_change' | 'completion',
+    returnCondition: 'unused' as 'unused' | 'damaged',
+    returnNotes: '',
+    returnPhotos: [] as string[],
   });
 
   // Inventory and alerts state
@@ -154,14 +184,16 @@ const MaterialsToolsScreen: React.FC = () => {
   // Reset material request form
   const resetMaterialRequestForm = useCallback(() => {
     setMaterialRequestForm({
+      requestType: 'MATERIAL',
       itemName: '',
-      category: '',
+      itemCategory: 'other', // Valid default enum value
       quantity: 0,
-      unit: '',
-      urgency: 'normal',
+      unit: 'pieces',
+      urgency: 'NORMAL',
       requiredDate: new Date().toISOString().split('T')[0],
       purpose: '',
       justification: '',
+      specifications: '',
       estimatedCost: 0,
     });
   }, []);
@@ -189,7 +221,6 @@ const MaterialsToolsScreen: React.FC = () => {
     try {
       const requestData = {
         projectId: state.assignedProjects[0]?.id || 1,
-        requesterId: 1, // This would come from auth context
         ...materialRequestForm,
         requiredDate: new Date(materialRequestForm.requiredDate),
       };
@@ -278,6 +309,93 @@ const MaterialsToolsScreen: React.FC = () => {
     );
   }, [loadMaterialsAndTools]);
 
+  // NEW: Acknowledge Delivery Handler
+  const handleAcknowledgeDelivery = useCallback(async () => {
+    if (!selectedMaterialRequest) return;
+
+    if (!acknowledgeDeliveryForm.deliveredQuantity || acknowledgeDeliveryForm.deliveredQuantity <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid delivered quantity.');
+      return;
+    }
+
+    try {
+      await acknowledgeDelivery(selectedMaterialRequest.id, {
+        deliveredQuantity: acknowledgeDeliveryForm.deliveredQuantity,
+        deliveryCondition: acknowledgeDeliveryForm.deliveryCondition,
+        receivedBy: acknowledgeDeliveryForm.receivedBy || 'Supervisor',
+        deliveryNotes: acknowledgeDeliveryForm.deliveryNotes,
+        deliveryPhotos: acknowledgeDeliveryForm.deliveryPhotos,
+      });
+
+      Alert.alert('Success', 'Delivery acknowledged successfully! Inventory updated.');
+      setShowAcknowledgeDeliveryModal(false);
+      setSelectedMaterialRequest(null);
+      setAcknowledgeDeliveryForm({
+        deliveredQuantity: 0,
+        deliveryCondition: 'good',
+        receivedBy: '',
+        deliveryNotes: '',
+        deliveryPhotos: [],
+      });
+    } catch (error) {
+      console.error('Error acknowledging delivery:', error);
+      Alert.alert('Error', 'Failed to acknowledge delivery. Please try again.');
+    }
+  }, [selectedMaterialRequest, acknowledgeDeliveryForm, acknowledgeDelivery]);
+
+  // NEW: Return Materials Handler
+  const handleReturnMaterials = useCallback(async () => {
+    if (!selectedMaterialRequest) return;
+
+    if (!returnMaterialsForm.returnQuantity || returnMaterialsForm.returnQuantity <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid return quantity.');
+      return;
+    }
+
+    if (returnMaterialsForm.returnQuantity > (selectedMaterialRequest.quantity || 0)) {
+      Alert.alert('Validation Error', 'Return quantity cannot exceed requested quantity.');
+      return;
+    }
+
+    try {
+      await returnMaterials({
+        requestId: selectedMaterialRequest.id,
+        returnQuantity: returnMaterialsForm.returnQuantity,
+        returnReason: returnMaterialsForm.returnReason,
+        returnCondition: returnMaterialsForm.returnCondition,
+        returnNotes: returnMaterialsForm.returnNotes,
+        returnPhotos: returnMaterialsForm.returnPhotos,
+      });
+
+      Alert.alert('Success', 'Materials returned successfully! Inventory updated.');
+      setShowReturnMaterialsModal(false);
+      setSelectedMaterialRequest(null);
+      setReturnMaterialsForm({
+        returnQuantity: 0,
+        returnReason: 'excess',
+        returnCondition: 'unused',
+        returnNotes: '',
+        returnPhotos: [],
+      });
+    } catch (error) {
+      console.error('Error returning materials:', error);
+      Alert.alert('Error', 'Failed to return materials. Please try again.');
+    }
+  }, [selectedMaterialRequest, returnMaterialsForm, returnMaterials]);
+
+  // NEW: Load Tool Usage Log
+  const handleLoadToolUsageLog = useCallback(async () => {
+    try {
+      const projectId = state.assignedProjects[0]?.id;
+      const tools = await getToolUsageLog(projectId);
+      setToolUsageLogData(tools);
+      setShowToolUsageLogModal(true);
+    } catch (error) {
+      console.error('Error loading tool usage log:', error);
+      Alert.alert('Error', 'Failed to load tool usage log.');
+    }
+  }, [state.assignedProjects, getToolUsageLog]);
+
   // Filter material requests
   const filteredMaterialRequests = useMemo(() => {
     let filtered = state.materialRequests;
@@ -290,7 +408,7 @@ const MaterialsToolsScreen: React.FC = () => {
         filtered = filtered.filter(request => request.status === 'approved');
         break;
       case 'urgent':
-        filtered = filtered.filter(request => request.urgency === 'urgent');
+        filtered = filtered.filter(request => request.urgency?.toUpperCase() === 'URGENT');
         break;
     }
     
@@ -332,7 +450,7 @@ const MaterialsToolsScreen: React.FC = () => {
     <ConstructionCard
       title={item.itemName}
       subtitle={`${item.quantity} ${item.unit} • ${item.category}`}
-      variant={item.urgency === 'urgent' ? 'warning' : 'default'}
+      variant={item.urgency?.toUpperCase() === 'URGENT' ? 'warning' : 'default'}
       style={styles.requestCard}
     >
       <View style={styles.requestContent}>
@@ -357,7 +475,7 @@ const MaterialsToolsScreen: React.FC = () => {
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Urgency</Text>
             <Text style={[styles.metricValue, { color: getUrgencyColor(item.urgency) }]}>
-              {item.urgency.toUpperCase()}
+              {(item.urgency || 'normal').toUpperCase()}
             </Text>
           </View>
         </View>
@@ -381,9 +499,39 @@ const MaterialsToolsScreen: React.FC = () => {
           </View>
         )}
 
+        {/* NEW: Acknowledge Delivery for Approved Requests */}
+        {item.status === 'approved' && (
+          <View style={styles.requestActions}>
+            <ConstructionButton
+              title="📦 Acknowledge Delivery"
+              onPress={() => {
+                setSelectedMaterialRequest(item);
+                setShowAcknowledgeDeliveryModal(true);
+              }}
+              variant="primary"
+              size="small"
+            />
+          </View>
+        )}
+
+        {/* NEW: Return Materials for Fulfilled Requests */}
+        {item.status === 'fulfilled' && (
+          <View style={styles.requestActions}>
+            <ConstructionButton
+              title="↩️ Return Materials"
+              onPress={() => {
+                setSelectedMaterialRequest(item);
+                setShowReturnMaterialsModal(true);
+              }}
+              variant="secondary"
+              size="small"
+            />
+          </View>
+        )}
+
         <View style={styles.requestStatus}>
           <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {item.status.toUpperCase()}
+            {(item.status || 'pending').toUpperCase()}
           </Text>
         </View>
       </View>
@@ -415,7 +563,7 @@ const MaterialsToolsScreen: React.FC = () => {
           <View style={styles.metricItem}>
             <Text style={styles.metricLabel}>Condition</Text>
             <Text style={[styles.metricValue, { color: getConditionColor(item.condition) }]}>
-              {item.condition.replace('_', ' ').toUpperCase()}
+              {(item.condition || 'good').replace('_', ' ').toUpperCase()}
             </Text>
           </View>
         </View>
@@ -488,14 +636,15 @@ const MaterialsToolsScreen: React.FC = () => {
 
   // Get urgency color
   const getUrgencyColor = (urgency: string): string => {
-    switch (urgency) {
-      case 'urgent':
+    const normalizedUrgency = urgency?.toUpperCase();
+    switch (normalizedUrgency) {
+      case 'URGENT':
         return ConstructionTheme.colors.error;
-      case 'high':
+      case 'HIGH':
         return ConstructionTheme.colors.warning;
-      case 'normal':
+      case 'NORMAL':
         return ConstructionTheme.colors.info;
-      case 'low':
+      case 'LOW':
         return ConstructionTheme.colors.success;
       default:
         return ConstructionTheme.colors.onSurface;
@@ -553,7 +702,8 @@ const MaterialsToolsScreen: React.FC = () => {
     );
   }
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header with tabs */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Materials & Tools</Text>
@@ -595,7 +745,7 @@ const MaterialsToolsScreen: React.FC = () => {
                 key={alert.materialId}
                 style={[styles.alertItem, styles[`alert_${alert.severity}`]]}
               >
-                <Text style={styles.alertType}>{alert.alertType.replace('_', ' ').toUpperCase()}</Text>
+                <Text style={styles.alertType}>{(alert.alertType || 'general').replace('_', ' ').toUpperCase()}</Text>
                 <Text style={styles.alertMessage} numberOfLines={2}>{alert.message}</Text>
               </TouchableOpacity>
             ))}
@@ -670,6 +820,13 @@ const MaterialsToolsScreen: React.FC = () => {
                 style={styles.filterSelector}
               />
             </View>
+            <ConstructionButton
+              title="📋 Usage Log"
+              onPress={handleLoadToolUsageLog}
+              variant="secondary"
+              size="small"
+              style={{ marginRight: ConstructionTheme.spacing.sm }}
+            />
             <ConstructionButton
               title="Allocate Tool"
               onPress={() => setShowToolAllocationModal(true)}
@@ -803,10 +960,10 @@ const MaterialsToolsScreen: React.FC = () => {
               value={materialRequestForm.urgency}
               onValueChange={(value) => setMaterialRequestForm(prev => ({ ...prev, urgency: value as any }))}
               options={[
-                { label: 'Low', value: 'low' },
-                { label: 'Normal', value: 'normal' },
-                { label: 'High', value: 'high' },
-                { label: 'Urgent', value: 'urgent' },
+                { label: 'Low', value: 'LOW' },
+                { label: 'Normal', value: 'NORMAL' },
+                { label: 'High', value: 'HIGH' },
+                { label: 'Urgent', value: 'URGENT' },
               ]}
             />
 
@@ -991,7 +1148,243 @@ const MaterialsToolsScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </View>
+
+      {/* NEW: Acknowledge Delivery Modal */}
+      <Modal
+        visible={showAcknowledgeDeliveryModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAcknowledgeDeliveryModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>📦 Acknowledge Delivery</Text>
+            <TouchableOpacity onPress={() => setShowAcknowledgeDeliveryModal(false)}>
+              <Text style={styles.closeButton}>×</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            {selectedMaterialRequest && (
+              <>
+                <ConstructionCard variant="outlined" style={{ marginBottom: ConstructionTheme.spacing.md }}>
+                  <Text style={styles.modalSubtitle}>Material Details</Text>
+                  <Text style={styles.modalInfoText}>Item: {selectedMaterialRequest.itemName}</Text>
+                  <Text style={styles.modalInfoText}>Requested: {selectedMaterialRequest.quantity} {selectedMaterialRequest.unit}</Text>
+                  <Text style={styles.modalInfoText}>Category: {selectedMaterialRequest.category}</Text>
+                </ConstructionCard>
+
+                <ConstructionInput
+                  label="Delivered Quantity *"
+                  value={acknowledgeDeliveryForm.deliveredQuantity.toString()}
+                  onChangeText={(text) => setAcknowledgeDeliveryForm(prev => ({ 
+                    ...prev, 
+                    deliveredQuantity: parseInt(text) || 0 
+                  }))}
+                  keyboardType="numeric"
+                  placeholder="Enter delivered quantity"
+                />
+
+                <ConstructionSelector
+                  label="Delivery Condition *"
+                  value={acknowledgeDeliveryForm.deliveryCondition}
+                  onValueChange={(value) => setAcknowledgeDeliveryForm(prev => ({ 
+                    ...prev, 
+                    deliveryCondition: value as any 
+                  }))}
+                  options={[
+                    { label: '✅ Received in Full (Good Condition)', value: 'good' },
+                    { label: '⚠️ Partial Delivery', value: 'partial' },
+                    { label: '❌ Damaged Items', value: 'damaged' },
+                    { label: '❌ Wrong Items Delivered', value: 'wrong' },
+                  ]}
+                />
+
+                <ConstructionInput
+                  label="Received By"
+                  value={acknowledgeDeliveryForm.receivedBy}
+                  onChangeText={(text) => setAcknowledgeDeliveryForm(prev => ({ ...prev, receivedBy: text }))}
+                  placeholder="Name of person who received delivery"
+                />
+
+                <ConstructionInput
+                  label="Delivery Notes"
+                  value={acknowledgeDeliveryForm.deliveryNotes}
+                  onChangeText={(text) => setAcknowledgeDeliveryForm(prev => ({ ...prev, deliveryNotes: text }))}
+                  placeholder="Any notes about the delivery condition, packaging, etc."
+                  multiline
+                  numberOfLines={3}
+                />
+
+                <Text style={styles.helperText}>
+                  💡 Tip: Take photos of delivery for documentation (feature coming soon)
+                </Text>
+              </>
+            )}
+
+            <View style={styles.modalActions}>
+              <ConstructionButton
+                title="Cancel"
+                onPress={() => setShowAcknowledgeDeliveryModal(false)}
+                variant="outline"
+                style={styles.actionButton}
+              />
+              <ConstructionButton
+                title="Confirm Delivery"
+                onPress={handleAcknowledgeDelivery}
+                variant="primary"
+                style={styles.actionButton}
+              />
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* NEW: Return Materials Modal */}
+      <Modal
+        visible={showReturnMaterialsModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowReturnMaterialsModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>↩️ Return Materials</Text>
+            <TouchableOpacity onPress={() => setShowReturnMaterialsModal(false)}>
+              <Text style={styles.closeButton}>×</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            {selectedMaterialRequest && (
+              <>
+                <ConstructionCard variant="outlined" style={{ marginBottom: ConstructionTheme.spacing.md }}>
+                  <Text style={styles.modalSubtitle}>Material Details</Text>
+                  <Text style={styles.modalInfoText}>Item: {selectedMaterialRequest.itemName}</Text>
+                  <Text style={styles.modalInfoText}>Delivered: {selectedMaterialRequest.quantity} {selectedMaterialRequest.unit}</Text>
+                  <Text style={styles.modalInfoText}>Category: {selectedMaterialRequest.category}</Text>
+                </ConstructionCard>
+
+                <ConstructionInput
+                  label="Return Quantity *"
+                  value={returnMaterialsForm.returnQuantity.toString()}
+                  onChangeText={(text) => setReturnMaterialsForm(prev => ({ 
+                    ...prev, 
+                    returnQuantity: parseInt(text) || 0 
+                  }))}
+                  keyboardType="numeric"
+                  placeholder="Enter quantity to return"
+                />
+
+                <ConstructionSelector
+                  label="Return Reason *"
+                  value={returnMaterialsForm.returnReason}
+                  onValueChange={(value) => setReturnMaterialsForm(prev => ({ 
+                    ...prev, 
+                    returnReason: value as any 
+                  }))}
+                  options={[
+                    { label: 'Excess Materials', value: 'excess' },
+                    { label: 'Defective/Damaged', value: 'defect' },
+                    { label: 'Scope Change', value: 'scope_change' },
+                    { label: 'Project Completion', value: 'completion' },
+                  ]}
+                />
+
+                <ConstructionSelector
+                  label="Return Condition *"
+                  value={returnMaterialsForm.returnCondition}
+                  onValueChange={(value) => setReturnMaterialsForm(prev => ({ 
+                    ...prev, 
+                    returnCondition: value as any 
+                  }))}
+                  options={[
+                    { label: 'Unused (Good Condition)', value: 'unused' },
+                    { label: 'Damaged/Defective', value: 'damaged' },
+                  ]}
+                />
+
+                <ConstructionInput
+                  label="Return Notes"
+                  value={returnMaterialsForm.returnNotes}
+                  onChangeText={(text) => setReturnMaterialsForm(prev => ({ ...prev, returnNotes: text }))}
+                  placeholder="Explain why materials are being returned..."
+                  multiline
+                  numberOfLines={3}
+                />
+
+                <Text style={styles.helperText}>
+                  💡 Tip: Document returned materials with photos (feature coming soon)
+                </Text>
+              </>
+            )}
+
+            <View style={styles.modalActions}>
+              <ConstructionButton
+                title="Cancel"
+                onPress={() => setShowReturnMaterialsModal(false)}
+                variant="outline"
+                style={styles.actionButton}
+              />
+              <ConstructionButton
+                title="Process Return"
+                onPress={handleReturnMaterials}
+                variant="primary"
+                style={styles.actionButton}
+              />
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* NEW: Tool Usage Log Modal */}
+      <Modal
+        visible={showToolUsageLogModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowToolUsageLogModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>🔧 Tool Usage Log</Text>
+            <TouchableOpacity onPress={() => setShowToolUsageLogModal(false)}>
+              <Text style={styles.closeButton}>×</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            {toolUsageLogData.length > 0 ? (
+              toolUsageLogData.map((tool, index) => (
+                <ConstructionCard key={index} variant="outlined" style={{ marginBottom: ConstructionTheme.spacing.md }}>
+                  <Text style={styles.toolLogName}>{tool.toolName}</Text>
+                  <Text style={styles.toolLogDetail}>Category: {tool.category}</Text>
+                  <Text style={styles.toolLogDetail}>Quantity: {tool.totalQuantity}</Text>
+                  <Text style={styles.toolLogDetail}>Status: {tool.status}</Text>
+                  <Text style={styles.toolLogDetail}>Condition: {tool.condition}</Text>
+                  <Text style={styles.toolLogDetail}>Location: {tool.location}</Text>
+                  
+                  {tool.allocationHistory && tool.allocationHistory.length > 0 && (
+                    <>
+                      <Text style={styles.toolLogSubtitle}>Allocation History:</Text>
+                      {tool.allocationHistory.slice(0, 3).map((history: any, idx: number) => (
+                        <View key={idx} style={styles.historyItem}>
+                          <Text style={styles.historyText}>
+                            • {new Date(history.requestedDate).toLocaleDateString()} - {history.purpose}
+                          </Text>
+                          <Text style={styles.historyStatus}>Status: {history.status}</Text>
+                        </View>
+                      ))}
+                    </>
+                  )}
+                </ConstructionCard>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>No tool usage data available</Text>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 };
 const styles = StyleSheet.create({
@@ -1295,6 +1688,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: ConstructionTheme.colors.onSurfaceVariant,
     marginBottom: ConstructionTheme.spacing.md,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  modalInfoText: {
+    fontSize: 14,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  helperText: {
+    fontSize: 12,
+    color: ConstructionTheme.colors.info,
+    fontStyle: 'italic',
+    marginTop: ConstructionTheme.spacing.md,
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  toolLogName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ConstructionTheme.colors.onSurface,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  toolLogDetail: {
+    fontSize: 14,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  toolLogSubtitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: ConstructionTheme.colors.onSurface,
+    marginTop: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  historyItem: {
+    marginLeft: ConstructionTheme.spacing.sm,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  historyText: {
+    fontSize: 12,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+  },
+  historyStatus: {
+    fontSize: 11,
+    color: ConstructionTheme.colors.info,
+    marginLeft: ConstructionTheme.spacing.md,
   },
 });
 

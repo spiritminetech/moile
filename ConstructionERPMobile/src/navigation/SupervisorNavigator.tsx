@@ -17,6 +17,7 @@ import ProgressReportScreen from '../screens/supervisor/ProgressReportScreen';
 import ApprovalsScreen from '../screens/supervisor/ApprovalsScreen';
 import MaterialsToolsScreen from '../screens/supervisor/MaterialsToolsScreen';
 import SupervisorProfileScreen from '../screens/supervisor/SupervisorProfileScreen';
+import IssueEscalationScreen from '../screens/supervisor/IssueEscalationScreen';
 
 // Import shared screens that supervisors can access
 import ChangePasswordScreen from '../screens/worker/ChangePasswordScreen';
@@ -350,6 +351,13 @@ const ProfileStackNavigator = () => {
         component={IssueReportScreen}
         options={{
           title: 'Report Issue',
+        }}
+      />
+      <Stack.Screen
+        name="IssueEscalation"
+        component={IssueEscalationScreen}
+        options={{
+          title: 'Escalate Issue to Manager',
         }}
       />
       <Stack.Screen

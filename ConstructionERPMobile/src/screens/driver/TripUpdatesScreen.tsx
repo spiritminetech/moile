@@ -11,6 +11,8 @@ import {
   Alert,
   TouchableOpacity,
   Linking,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useLocation } from '../../store/context/LocationContext';
@@ -468,7 +470,8 @@ const TripUpdatesScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
@@ -654,7 +657,7 @@ const TripUpdatesScreen: React.FC = () => {
         {/* Bottom spacing */}
         <View style={styles.bottomSpacing} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 

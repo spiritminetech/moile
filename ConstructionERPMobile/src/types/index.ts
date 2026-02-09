@@ -821,12 +821,14 @@ export interface DriverContextData {
   maintenanceAlerts: MaintenanceAlert[];
 }
 
-// Supervisor-Specific Context Data
+// Supervisor-Specific Context Data - Matches Backend Response
 export interface SupervisorDashboardResponse {
   projects: Array<{
     id: number;
     name: string;
     location: string;
+    client?: string; // NEW: Client name
+    status?: string; // NEW: Project status (Ongoing/Near Completion/Delayed)
     totalWorkers: number;
     presentWorkers: number;
     totalTasks: number;
@@ -847,6 +849,14 @@ export interface SupervisorDashboardResponse {
       queuedTasks: number;
       dailyTarget: number;
     };
+    alerts?: Array<{
+      id: string | number;
+      type: string;
+      priority: string;
+      message: string;
+      timestamp: string;
+      projectId: number;
+    }>;
   }>;
   teamOverview: {
     totalMembers: number;
@@ -854,6 +864,7 @@ export interface SupervisorDashboardResponse {
     absentToday: number;
     lateToday: number;
     onBreak: number;
+    overtimeWorkers: number; // NEW: OT workers count
   };
   taskMetrics: {
     totalTasks: number;
@@ -875,7 +886,7 @@ export interface SupervisorDashboardResponse {
     total: number;
   };
   alerts: Array<{
-    id: number;
+    id: number | string;
     type: string;
     title: string;
     message: string;
@@ -883,8 +894,12 @@ export interface SupervisorDashboardResponse {
     timestamp: string;
     severity: string;
     priority: string;
-    workerId: number;
-    workerName: string;
+    workerId?: number;
+    workerName?: string;
+    projectId?: number;
+    expectedWorkers?: number;
+    actualWorkers?: number;
+    shortfall?: number;
   }>;
   recentActivity: Array<{
     id: number;
@@ -897,6 +912,21 @@ export interface SupervisorDashboardResponse {
     workerName: string;
     taskId?: number;
     taskName?: string;
+  }>;
+  workerAttendanceDetails?: Array<{ // NEW: Detailed worker attendance
+    employeeId: number;
+    workerName: string;
+    role: string;
+    status: string;
+    morningCheckIn: string | null;
+    morningCheckOut: string | null;
+    afternoonCheckIn: string | null;
+    afternoonCheckOut: string | null;
+    totalHours: number;
+    overtimeHours: number;
+    isLate: boolean;
+    minutesLate: number;
+    flags: string[];
   }>;
   summary: {
     totalProjects: number;
@@ -954,8 +984,12 @@ export interface PendingApproval {
 
 export interface SupervisorReport {
   id: string;
+  reportId: string;
   date: string;
   projectId: number;
+  projectName: string;
+  summary: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
   manpowerUtilization: {
     totalWorkers: number;
     activeWorkers: number;
@@ -969,7 +1003,7 @@ export interface SupervisorReport {
     hoursWorked: number;
   };
   issues: Array<{
-    type: 'safety' | 'quality' | 'delay' | 'resource';
+    type: 'safety' | 'quality' | 'delay' | 'resource' | 'general';
     description: string;
     severity: 'low' | 'medium' | 'high' | 'critical';
     status: 'open' | 'in_progress' | 'resolved';
@@ -992,15 +1026,16 @@ export interface SupervisorReport {
 export interface MaterialRequest {
   id: number;
   projectId: number;
-  requesterId: number;
+  requestType: 'MATERIAL' | 'TOOL';
   itemName: string;
-  category: string;
+  itemCategory?: string;
   quantity: number;
-  unit: string;
-  urgency: 'low' | 'normal' | 'high' | 'urgent';
+  unit?: string;
+  urgency?: 'NORMAL' | 'HIGH' | 'URGENT';
   requiredDate: Date;
   purpose: string;
-  justification: string;
+  justification?: string;
+  specifications?: string;
   estimatedCost?: number;
   status: 'pending' | 'approved' | 'rejected' | 'delivered';
 }

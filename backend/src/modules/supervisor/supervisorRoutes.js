@@ -5,6 +5,7 @@ import {
   getCheckedInWorkers,
   getProjectTasks,
   assignTask,
+  createAndAssignTask,
   completeTask,
   getWorkerTasksForDay,
   getActiveTasks, 
@@ -25,7 +26,19 @@ import {
   changeSupervisorPassword,
   uploadSupervisorPhoto, 
   supervisorUpload, 
-  getPendingApprovalsSummary
+  getPendingApprovalsSummary,
+  getPendingAttendanceCorrections,
+  reviewAttendanceCorrection,
+  getTaskAssignments,
+  reassignTask,
+  updateTaskPriority,
+  markAbsenceReason,
+  createAttendanceEscalation,
+  getEscalations,
+  exportAttendanceReport,
+  createIssueEscalation,
+  getIssueEscalations,
+  updateIssueEscalation
 } from './supervisorController.js';
 import {getTodayWorkerSubmissions,reviewWorkerProgress} from "./submodules/supervisorReviewController.js";
 import {
@@ -37,7 +50,11 @@ import {
   approveMaterialRequest,
   getPendingToolRequests,
   approveToolRequest,
-  escalateIssue
+  escalateIssue,
+  processApproval,
+  batchProcessApprovals,
+  getApprovalHistory,
+  getApprovalDetails
 } from './supervisorRequestController.js';
 import {
   requestMaterials,
@@ -46,14 +63,17 @@ import {
   getToolUsageLog,
   logToolUsage,
   getMaterialReturns,
-  getMaterialInventory
+  getMaterialInventory,
+  getMaterialsAndTools,
+  allocateTool,
+  returnTool
 } from './supervisorMaterialsToolsController.js';
 import { verifyToken } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Dashboard endpoint
-router.get('/dashboard', getDashboardData);
+// Dashboard endpoint - requires authentication
+router.get('/dashboard', verifyToken, getDashboardData);
 
 /**
  * Route to get pending approvals summary for dashboard
@@ -62,6 +82,39 @@ router.get('/dashboard', getDashboardData);
  */
 router.get('/pending-approvals', verifyToken, getPendingApprovalsSummary);
 router.get('/approvals/pending', verifyToken, getPendingApprovalsSummary);
+
+/**
+ * Unified approval processing endpoint (Mobile App)
+ * POST /api/supervisor/approvals/:approvalId/process
+ * Body: { action: 'approve' | 'reject' | 'request_more_info', notes?, conditions?, escalate? }
+ */
+router.post('/approvals/:approvalId/process', verifyToken, processApproval);
+
+/**
+ * Batch process multiple approvals (Mobile App)
+ * POST /api/supervisor/approvals/batch-process
+ * Body: { decisions: [{ approvalId, action, notes }] }
+ */
+router.post('/approvals/batch-process', verifyToken, batchProcessApprovals);
+
+/**
+ * Get approval history (Mobile App)
+ * GET /api/supervisor/approvals/history
+ * Query: { requesterId?, type?, status?, dateFrom?, dateTo?, limit?, offset? }
+ */
+router.get('/approvals/history', verifyToken, getApprovalHistory);
+
+/**
+ * Get approval details by ID (Mobile App - primary endpoint)
+ * GET /api/supervisor/approvals/:approvalId
+ */
+router.get('/approvals/:approvalId', verifyToken, getApprovalDetails);
+
+/**
+ * Get approval details (Mobile App - alternative endpoint)
+ * GET /api/supervisor/approvals/:approvalId/details
+ */
+router.get('/approvals/:approvalId/details', verifyToken, getApprovalDetails);
 
 
 
@@ -77,33 +130,61 @@ router.get('/projects', getSupervisorProjects);
 
 /**
  * ========================================
- * TASK MANAGEMENT - 4 ESSENTIAL APIs ONLY
+ * TASK MANAGEMENT APIs
  * ========================================
  */
 
 /**
- * 1. Get active tasks for a project
+ * Get task assignments with filtering
+ * GET /api/supervisor/task-assignments
+ * Query: { projectId?, status?, priority?, workerId?, limit?, offset? }
+ */
+router.get('/task-assignments', verifyToken, getTaskAssignments);
+
+/**
+ * Reassign task to a different worker
+ * POST /api/supervisor/task-assignments/:assignmentId/reassign
+ * Body: { newWorkerId, reason, priority, instructions }
+ */
+router.post('/task-assignments/:assignmentId/reassign', verifyToken, reassignTask);
+
+/**
+ * Update task priority
+ * PUT /api/supervisor/task-assignments/:assignmentId/priority
+ * Body: { priority, instructions, estimatedHours }
+ */
+router.put('/task-assignments/:assignmentId/priority', verifyToken, updateTaskPriority);
+
+/**
+ * Get active tasks for a project
  * GET /api/supervisor/active-tasks/:projectId
  * Returns: Task completion status with worker details
  */
 router.get('/active-tasks/:projectId', getActiveTasks);
 
 /**
- * 2. Assign tasks to workers
+ * Assign tasks to workers
  * POST /api/supervisor/assign-task
  * Body: { employeeId, projectId, taskIds, date }
  */
 router.post('/assign-task', verifyToken, assignTask);
 
 /**
- * 3. Update task assignment (reassign workers, modify details)
+ * Create and assign a new task to a worker (mobile app convenience endpoint)
+ * POST /api/supervisor/create-and-assign-task
+ * Body: { taskName, description, employeeId, projectId, priority, estimatedHours, instructions, date }
+ */
+router.post('/create-and-assign-task', verifyToken, createAndAssignTask);
+
+/**
+ * Update task assignment (reassign workers, modify details)
  * PUT /api/supervisor/update-assignment
  * Body: { assignmentId, changes }
  */
 router.put('/update-assignment', verifyToken, updateTaskAssignment);
 
 /**
- * 4. Update daily targets for assignments
+ * Update daily targets for assignments
  * PUT /api/supervisor/daily-targets
  * Body: { assignmentUpdates: [{ assignmentId, dailyTarget }] }
  */
@@ -156,6 +237,18 @@ router.post('/manual-attendance-override', verifyToken, submitManualAttendanceOv
  * GET /api/supervisor/attendance-monitoring
  */
 router.get('/attendance-monitoring', getAttendanceMonitoring);
+
+/**
+ * Route to get pending attendance corrections for review
+ * GET /api/supervisor/pending-attendance-corrections
+ */
+router.get('/pending-attendance-corrections', getPendingAttendanceCorrections);
+
+/**
+ * Route to approve or reject attendance correction
+ * POST /api/supervisor/attendance-correction/:correctionId/review
+ */
+router.post('/attendance-correction/:correctionId/review', reviewAttendanceCorrection);
 
 /**
  * Route to export the daily attendance report (CSV/PDF)
@@ -254,6 +347,13 @@ router.post('/escalate-issue/:issueId', verifyToken, escalateIssue);
  */
 
 /**
+ * Route to get materials and tools combined data (Mobile App)
+ * GET /api/supervisor/materials-tools
+ * Query: { projectId?: number }
+ */
+router.get('/materials-tools', verifyToken, getMaterialsAndTools);
+
+/**
  * Route to get material inventory for supervisor's projects
  * GET /api/supervisor/materials/inventory
  * Query: { projectId?: number, lowStock?: boolean }
@@ -294,6 +394,20 @@ router.get('/tool-usage-log', verifyToken, getToolUsageLog);
  * Body: { toolId: number, action: 'check_out' | 'check_in', employeeId: number, quantity?: number, condition?: string, location?: string, notes?: string }
  */
 router.post('/log-tool-usage', verifyToken, logToolUsage);
+
+/**
+ * Route to allocate tool to worker
+ * POST /api/supervisor/allocate-tool
+ * Body: { toolId: number, toolName: string, allocatedTo: number, allocatedToName: string, allocationDate: Date, expectedReturnDate?: Date, condition?: string, location?: string }
+ */
+router.post('/allocate-tool', verifyToken, allocateTool);
+
+/**
+ * Route to return tool from worker
+ * POST /api/supervisor/return-tool/:allocationId
+ * Body: { condition?: string, notes?: string }
+ */
+router.post('/return-tool/:allocationId', verifyToken, returnTool);
 
 /**
  * Route to get material returns history
@@ -388,6 +502,52 @@ router.get('/team-list', verifyToken, getAssignedWorkers);
 //   "/supervisor/daily-progress/:projectId",
 //   getDailyProgressRange
 // );
+
+
+/**
+ * POST /api/supervisor/mark-absence-reason
+ * Mark absence reason for a worker
+ */
+router.post('/mark-absence-reason', markAbsenceReason);
+
+/**
+ * POST /api/supervisor/create-escalation
+ * Create attendance escalation
+ */
+router.post('/create-escalation', createAttendanceEscalation);
+
+/**
+ * GET /api/supervisor/escalations
+ * Get escalations for a project
+ */
+router.get('/escalations', getEscalations);
+
+/**
+ * POST /api/supervisor/issue-escalation
+ * Create general issue escalation to manager
+ * Body: { issueType, severity, title, description, escalateTo, photos, projectId, notes, immediateActionRequired, estimatedImpact, suggestedSolution, supervisorId, supervisorName }
+ */
+router.post('/issue-escalation', createIssueEscalation);
+
+/**
+ * GET /api/supervisor/issue-escalations
+ * Get issue escalations for a project
+ * Query: projectId?, status?, issueType?, severity?, limit?, offset?
+ */
+router.get('/issue-escalations', getIssueEscalations);
+
+/**
+ * PUT /api/supervisor/issue-escalation/:escalationId
+ * Update issue escalation status
+ * Body: { status, notes?, resolution? }
+ */
+router.put('/issue-escalation/:escalationId', updateIssueEscalation);
+
+/**
+ * GET /api/supervisor/export-attendance-report
+ * Export attendance report in JSON or CSV format
+ */
+router.get('/export-attendance-report', exportAttendanceReport);
 
 
 export default router; 

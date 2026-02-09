@@ -11,6 +11,8 @@ import {
   Alert,
   TouchableOpacity,
   Image,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useOffline } from '../../store/context/OfflineContext';
@@ -576,7 +578,8 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
@@ -628,7 +631,7 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
         {/* Bottom spacing */}
         <View style={styles.bottomSpacing} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 
