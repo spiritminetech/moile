@@ -249,14 +249,6 @@ const AttendanceScreen: React.FC = () => {
   };
 
   const proceedWithAttendanceAction = async (type: AttendanceType) => {
-    console.log('🎯 Starting attendance action:', type);
-    
-    if (!locationState.currentLocation || !authState.user) {
-      Alert.alert('Error', 'Location or user information not available');
-      return;
-    }
-
-  const proceedWithAttendanceAction = async (type: AttendanceType) => {
     console.log('🎯 Proceeding with attendance action:', type);
     
     if (!locationState.currentLocation || !authState.user) {
@@ -789,6 +781,7 @@ const AttendanceScreen: React.FC = () => {
         variant="elevated"
         style={styles.actionsSection}
       >
+        <>
         {/* Primary Actions */}
         <View style={styles.primaryActions}>
           {renderAttendanceButton(
@@ -849,6 +842,7 @@ const AttendanceScreen: React.FC = () => {
             </View>
           </View>
         )}
+        </>
       </ConstructionCard>
 
       {/* Today's Summary */}

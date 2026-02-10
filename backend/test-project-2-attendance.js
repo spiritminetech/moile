@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = 'http://192.168.0.3:5002/api';
+const API_BASE = 'http://192.168.1.6:5002/api';
 
 async function testProject2Attendance() {
   console.log('🎯 Testing Project ID 2 Attendance');
@@ -24,7 +24,7 @@ async function testProject2Attendance() {
 
     // Step 2: Test geofence validation for Project 2 (your exact request)
     console.log('\n🔍 Step 2: Testing your exact API request...');
-    console.log('Request: POST http://192.168.0.3:5002/api/attendance/validate-geofence');
+    console.log('Request: POST http://192.168.1.6:5002/api/attendance/validate-geofence');
     console.log('Payload:', JSON.stringify({
       "projectId": "2",
       "latitude": 12.865141646709928,

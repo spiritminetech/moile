@@ -6,7 +6,7 @@ The `/api/supervisor/task-assignments/:assignmentId/priority` endpoint was retur
 
 **Error Message**:
 ```
-PUT http://192.168.0.3:5002/api/supervisor/task-assignments/698749e6773df0f6f47f5f14/priority
+PUT http://192.168.1.6:5002/api/supervisor/task-assignments/698749e6773df0f6f47f5f14/priority
 Status: 500
 Response: {"errors": ["Failed to update task priority"], "success": false}
 ```

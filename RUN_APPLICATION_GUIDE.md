@@ -31,7 +31,7 @@ npm run dev
 ```
 Server running on port 5002
 Connected to MongoDB
-✅ Backend server is ready at http://192.168.0.3:5002
+✅ Backend server is ready at http://192.168.1.6:5002
 ```
 
 ### Step 2: Start the Mobile App
@@ -85,12 +85,12 @@ npm run web
 ### Backend Configuration
 - **Port:** 5002
 - **Database:** MongoDB Atlas (configured)
-- **Base URL:** http://192.168.0.3:5002
+- **Base URL:** http://192.168.1.6:5002
 - **Environment:** Development
 
 ### Mobile App Configuration
 - **Framework:** Expo/React Native
-- **API Base URL:** Should point to backend (http://192.168.0.3:5002)
+- **API Base URL:** Should point to backend (http://192.168.1.6:5002)
 
 ## 📋 Testing the Supervisor Features
 
@@ -161,16 +161,16 @@ npx expo start --clear
 
 **Check server health:**
 ```bash
-curl http://192.168.0.3:5002/api/health
+curl http://192.168.1.6:5002/api/health
 ```
 
 **Test supervisor endpoints:**
 ```bash
 # Get supervisor projects
-curl http://192.168.0.3:5002/api/supervisor/projects
+curl http://192.168.1.6:5002/api/supervisor/projects
 
 # Get attendance monitoring
-curl http://192.168.0.3:5002/api/supervisor/attendance-monitoring
+curl http://192.168.1.6:5002/api/supervisor/attendance-monitoring
 ```
 
 ## 📱 Mobile App Features to Test
