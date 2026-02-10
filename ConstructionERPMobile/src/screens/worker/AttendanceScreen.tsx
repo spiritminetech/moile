@@ -27,9 +27,13 @@ import {
   ConstructionLoadingIndicator,
   ErrorDisplay
 } from '../../components/common';
+import { TimeWindowStatus } from '../../components/attendance/TimeWindowStatus';
+import { OvertimeApprovalComponent } from '../../components/attendance/OvertimeApprovalStatus';
+import { ForgottenCheckoutAlert } from '../../components/attendance/ForgottenCheckoutAlert';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 import { AttendanceRecord } from '../../types';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
+import { TimeValidator, TimeValidationResult, OvertimeApprovalStatus } from '../../utils/timeValidation';
 
 interface AttendanceStatus {
   currentSession: AttendanceRecord | null;
@@ -62,6 +66,9 @@ const AttendanceScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<AttendanceType | null>(null);
+  const [currentAction, setCurrentAction] = useState<AttendanceType | null>(null);
+  const [timeValidation, setTimeValidation] = useState<TimeValidationResult | null>(null);
+  const [overtimeApproval, setOvertimeApproval] = useState<OvertimeApprovalStatus | null>(null);
 
   // Load attendance status on component mount
   useEffect(() => {
@@ -182,6 +189,75 @@ const AttendanceScreen: React.FC = () => {
 
   const handleAttendanceAction = async (type: AttendanceType) => {
     console.log('🎯 Starting attendance action:', type);
+    
+    if (!locationState.currentLocation || !authState.user) {
+      Alert.alert('Error', 'Location or user information not available');
+      return;
+    }
+
+    // Time window validation
+    let timeValidationResult: TimeValidationResult;
+    switch (type) {
+      case 'login':
+        timeValidationResult = TimeValidator.validateMorningLogin();
+        break;
+      case 'lunch_start':
+        timeValidationResult = TimeValidator.validateLunchTiming('start');
+        break;
+      case 'lunch_end':
+        timeValidationResult = TimeValidator.validateLunchTiming('end');
+        break;
+      case 'logout':
+        timeValidationResult = TimeValidator.validateEveningLogout();
+        break;
+      case 'overtime_start':
+      case 'overtime_end':
+        // Check overtime approval first
+        if (!overtimeApproval?.isApproved) {
+          Alert.alert(
+            'Overtime Not Approved',
+            'Overtime requires supervisor approval. Please request approval first.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+        timeValidationResult = { isValid: true, message: 'Overtime approved', canProceed: true };
+        break;
+      default:
+        timeValidationResult = { isValid: true, message: 'No validation required', canProceed: true };
+    }
+
+    // Show time validation warning if needed
+    if (!timeValidationResult.canProceed) {
+      Alert.alert('Time Restriction', timeValidationResult.message);
+      return;
+    }
+
+    if (timeValidationResult.isGracePeriod) {
+      Alert.alert(
+        'Late Action Warning',
+        `${timeValidationResult.message}\n\nThis action will be marked as late. Continue?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Continue', onPress: () => proceedWithAttendanceAction(type) },
+        ]
+      );
+      return;
+    }
+
+    proceedWithAttendanceAction(type);
+  };
+
+  const proceedWithAttendanceAction = async (type: AttendanceType) => {
+    console.log('🎯 Starting attendance action:', type);
+    
+    if (!locationState.currentLocation || !authState.user) {
+      Alert.alert('Error', 'Location or user information not available');
+      return;
+    }
+
+  const proceedWithAttendanceAction = async (type: AttendanceType) => {
+    console.log('🎯 Proceeding with attendance action:', type);
     
     if (!locationState.currentLocation || !authState.user) {
       Alert.alert('Error', 'Location or user information not available');
@@ -441,6 +517,45 @@ const AttendanceScreen: React.FC = () => {
     setIsRefreshing(false);
   }, [loadAttendanceStatus]);
 
+  const handleTimeValidationChange = (isValid: boolean, result: TimeValidationResult) => {
+    setTimeValidation(result);
+  };
+
+  const handleOvertimeApprovalChange = (status: OvertimeApprovalStatus) => {
+    setOvertimeApproval(status);
+  };
+
+  const handleRequestRegularization = async () => {
+    try {
+      if (!authState.user || !attendanceStatus.currentSession) return;
+      
+      const response = await workerApiService.requestAttendanceRegularization({
+        workerId: authState.user.id.toString(),
+        projectId: authState.user.currentProject?.id?.toString() || '1003',
+        requestType: 'forgotten_checkout',
+        originalTime: attendanceStatus.currentSession.loginTime,
+        reason: 'Forgot to checkout - requesting supervisor regularization',
+      });
+      
+      if (response.success) {
+        Alert.alert(
+          'Request Sent',
+          'Your regularization request has been sent to your supervisor.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Error', response.message || 'Failed to send regularization request');
+      }
+    } catch (error) {
+      console.error('Error requesting regularization:', error);
+      Alert.alert('Error', 'Failed to send regularization request');
+    }
+  };
+
+  const handleForceCheckout = async () => {
+    await handleAttendanceAction('logout');
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     console.log('🕐 Formatting time:', {
@@ -486,12 +601,27 @@ const AttendanceScreen: React.FC = () => {
       (isLunchAction && attendanceStatus.currentSession)
     );
     
-    const finalEnabled = enabled && locationValid && actionLoading === null && offlineState.isOnline !== false;
+    // Time window validation
+    let timeWindowValid = true;
+    if (timeValidation && currentAction === type) {
+      timeWindowValid = timeValidation.canProceed;
+    }
+    
+    // Overtime approval validation
+    let overtimeValid = true;
+    if ((type === 'overtime_start' || type === 'overtime_end') && overtimeApproval) {
+      overtimeValid = overtimeApproval.isApproved;
+    }
+    
+    const finalEnabled = enabled && locationValid && timeWindowValid && overtimeValid && actionLoading === null && offlineState.isOnline !== false;
     
     return (
       <ConstructionButton
         title={title}
-        onPress={() => handleAttendanceAction(type)}
+        onPress={() => {
+          setCurrentAction(type);
+          handleAttendanceAction(type);
+        }}
         variant={variant}
         size="large"
         disabled={!finalEnabled}
@@ -530,6 +660,21 @@ const AttendanceScreen: React.FC = () => {
           variant="banner"
           onRetry={loadAttendanceStatus}
           onDismiss={clearError}
+        />
+      )}
+
+      {/* Time Window Status */}
+      <TimeWindowStatus
+        currentAction={currentAction || undefined}
+        onValidationChange={handleTimeValidationChange}
+      />
+
+      {/* Forgotten Checkout Alert */}
+      {attendanceStatus.currentSession && (
+        <ForgottenCheckoutAlert
+          checkInTime={attendanceStatus.currentSession.loginTime}
+          onRequestRegularization={handleRequestRegularization}
+          onForceCheckout={handleForceCheckout}
         />
       )}
       
@@ -678,19 +823,29 @@ const AttendanceScreen: React.FC = () => {
                 'warning'
               )}
             </View>
-            <View style={styles.actionRow}>
-              {renderAttendanceButton(
-                'overtime_start',
-                'START OVERTIME',
-                attendanceStatus.canClockOut,
-                'secondary'
-              )}
-              {renderAttendanceButton(
-                'overtime_end',
-                'END OVERTIME',
-                !attendanceStatus.currentSession,
-                'secondary'
-              )}
+            
+            {/* Overtime Section with Approval Status */}
+            <View style={styles.overtimeSection}>
+              <OvertimeApprovalComponent
+                workerId={authState.user?.id || 0}
+                projectId={authState.user?.currentProject?.id || 1003}
+                onApprovalChange={handleOvertimeApprovalChange}
+                showRequestButton={true}
+              />
+              <View style={styles.actionRow}>
+                {renderAttendanceButton(
+                  'overtime_start',
+                  'START OVERTIME',
+                  attendanceStatus.canClockOut && overtimeApproval?.isApproved,
+                  'secondary'
+                )}
+                {renderAttendanceButton(
+                  'overtime_end',
+                  'END OVERTIME',
+                  !attendanceStatus.currentSession && overtimeApproval?.isApproved,
+                  'secondary'
+                )}
+              </View>
             </View>
           </View>
         )}
@@ -704,7 +859,7 @@ const AttendanceScreen: React.FC = () => {
       >
         {attendanceStatus.todaysAttendance.length > 0 ? (
           attendanceStatus.todaysAttendance.map((record, index) => (
-            <View key={record.id || index} style={styles.summaryItem}>
+            <View key={`today-${record.id || record.loginTime || index}`} style={styles.summaryItem}>
               <Text style={styles.summaryText}>
                 {formatTime(record.loginTime)} - {record.logoutTime ? formatTime(record.logoutTime) : 'Active'}
               </Text>
@@ -795,6 +950,12 @@ const styles = StyleSheet.create({
   },
   attendanceButton: {
     flex: 1,
+  },
+  overtimeSection: {
+    marginTop: ConstructionTheme.spacing.md,
+    paddingTop: ConstructionTheme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: ConstructionTheme.colors.surfaceVariant,
   },
   summarySection: {
     marginHorizontal: ConstructionTheme.spacing.md,

@@ -345,6 +345,7 @@ export interface TaskAssignment {
   assignmentId: number;
   projectId: number;
   projectName?: string; // Added project name field
+  clientName?: string; // Added client name field
   taskName: string;
   description: string;
   dependencies: number[];
@@ -357,6 +358,11 @@ export interface TaskAssignment {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  // Enhanced fields
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  workArea?: string;
+  floor?: string;
+  zone?: string;
   // Progress information
   progress?: {
     percentage: number;
@@ -369,6 +375,32 @@ export interface TaskAssignment {
     estimated: number;
     elapsed: number;
     remaining: number;
+  };
+  // Daily target information
+  dailyTarget?: {
+    description: string;
+    quantity: number;
+    unit: string;
+    targetCompletion: number;
+  };
+  // Supervisor instructions with attachments
+  supervisorInstructions?: string;
+  instructionAttachments?: Array<{
+    type: 'photo' | 'document' | 'drawing' | 'video';
+    filename: string;
+    url: string;
+    uploadedAt: string;
+    uploadedBy: number;
+    description?: string;
+    fileSize?: number;
+    mimeType?: string;
+  }>;
+  instructionsLastUpdated?: string;
+  // Project geofence for map display
+  projectGeofence?: {
+    latitude: number;
+    longitude: number;
+    radius: number;
   };
 }
 
@@ -1177,6 +1209,17 @@ export interface SupervisorReport {
     milestonesCompleted: number;
     tasksCompleted: number;
     hoursWorked: number;
+  };
+  taskMetrics?: {
+    totalTasks: number;
+    completedTasks: number;
+    inProgressTasks: number;
+    queuedTasks: number;
+    overdueTasks: number;
+    onScheduleTasks: number;
+    completionRate: number;
+    efficiency: number;
+    lastUpdated: string;
   };
   issues: Array<{
     type: 'safety' | 'quality' | 'delay' | 'resource' | 'general';

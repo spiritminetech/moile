@@ -457,7 +457,7 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
       <ConstructionCard title="Specializations" variant="elevated" style={styles.section}>
         <View style={styles.specializationsContainer}>
           {profileData.supervisorInfo.specializations.map((specialization, index) => (
-            <View key={index} style={styles.specializationBadge}>
+            <View key={`specialization-${specialization}`} style={styles.specializationBadge}>
               <Text style={styles.specializationText}>{specialization}</Text>
             </View>
           ))}
@@ -550,7 +550,7 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
 
             <Text style={styles.responsibilitiesTitle}>Key Responsibilities:</Text>
             {project.responsibilities.map((responsibility, index) => (
-              <View key={index} style={styles.responsibilityItem}>
+              <View key={`responsibility-${index}-${responsibility.substring(0, 20)}`} style={styles.responsibilityItem}>
                 <Text style={styles.responsibilityBullet}>•</Text>
                 <Text style={styles.responsibilityText}>{responsibility}</Text>
               </View>

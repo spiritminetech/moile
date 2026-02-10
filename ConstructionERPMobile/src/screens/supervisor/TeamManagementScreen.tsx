@@ -879,7 +879,7 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                 <ConstructionCard title="Certifications" variant="elevated" style={styles.detailCard}>
                   {selectedMember.certifications && selectedMember.certifications.length > 0 ? (
                     selectedMember.certifications.map((cert, index) => (
-                      <View key={index} style={styles.certificationItem}>
+                      <View key={`cert-${index}-${cert.name || 'unknown'}`} style={styles.certificationItem}>
                         <View style={styles.certificationHeader}>
                           <Text style={styles.certificationName}>{cert.name || 'Unknown Certification'}</Text>
                           <View style={[

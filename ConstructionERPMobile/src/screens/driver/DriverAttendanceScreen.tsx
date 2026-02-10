@@ -513,7 +513,7 @@ const DriverAttendanceScreen: React.FC = () => {
           {attendanceHistory.length > 0 ? (
             <View style={styles.historyList}>
               {attendanceHistory.slice(0, 10).map((record, index) => (
-                <View key={index} style={styles.historyItem}>
+                <View key={`attendance-${record.date}-${record.loginTime || index}`} style={styles.historyItem}>
                   <View style={styles.historyDate}>
                     <Text style={styles.historyDateText}>
                       {new Date(record.date).toLocaleDateString([], { 

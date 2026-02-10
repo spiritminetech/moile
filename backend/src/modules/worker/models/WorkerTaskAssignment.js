@@ -97,6 +97,27 @@ const WorkerTaskAssignmentSchema = new mongoose.Schema({
       latitude: Number,
       longitude: Number
     }
+  },
+  
+  // Supervisor instructions with attachments
+  supervisorInstructions: {
+    text: String,
+    attachments: [{
+      type: {
+        type: String,
+        enum: ['photo', 'document', 'drawing', 'video'],
+        required: true
+      },
+      filename: String,
+      url: String,
+      uploadedAt: { type: Date, default: Date.now },
+      uploadedBy: Number, // supervisor ID
+      description: String,
+      fileSize: Number, // in bytes
+      mimeType: String
+    }],
+    lastUpdated: { type: Date, default: Date.now },
+    updatedBy: Number // supervisor ID
   }
 }, {
   collection: 'workerTaskAssignment',

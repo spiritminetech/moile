@@ -439,7 +439,7 @@ const VehicleInfoScreen: React.FC = () => {
                   <View style={styles.routeLocations}>
                     <Text style={styles.routeLabel}>Pickup Locations:</Text>
                     {vehicleInfo.assignedRoute.pickupLocations.map((location, index) => (
-                      <Text key={index} style={styles.routeLocation}>
+                      <Text key={`location-${index}-${location}`} style={styles.routeLocation}>
                         {index + 1}. {location}
                       </Text>
                     ))}
@@ -563,7 +563,7 @@ const VehicleInfoScreen: React.FC = () => {
           <ConstructionCard title="Maintenance Schedule" variant="outlined" style={styles.scheduleCard}>
             <Text style={styles.scheduleTitle}>🗓️ Upcoming Services</Text>
             {vehicleInfo.maintenanceSchedule.map((item, index) => (
-              <View key={index} style={styles.scheduleItem}>
+              <View key={`maintenance-${item.type || 'general'}-${item.dueDate || index}`} style={styles.scheduleItem}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleType}>
                     {(item.type || 'general').replace('_', ' ').toUpperCase()}

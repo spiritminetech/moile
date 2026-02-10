@@ -99,7 +99,20 @@ const ProjectDailyProgressSchema = new mongoose.Schema(
       plannedConsumption: Number,
       wastage: Number,
       notes: String
-    }]
+    }],
+
+    /* 📊 Task Metrics (Daily Actual) */
+    taskMetrics: {
+      totalTasks: { type: Number, default: 0 },
+      completedTasks: { type: Number, default: 0 },
+      inProgressTasks: { type: Number, default: 0 },
+      queuedTasks: { type: Number, default: 0 },
+      overdueTasks: { type: Number, default: 0 },
+      onScheduleTasks: { type: Number, default: 0 },
+      completionRate: { type: Number, default: 0 },
+      efficiency: { type: Number, default: 0 },
+      lastUpdated: { type: Date, default: Date.now }
+    }
   },
   {
     collection: "projectDailyProgress",

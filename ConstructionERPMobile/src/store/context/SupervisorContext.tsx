@@ -600,10 +600,21 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
           },
           progressMetrics: {
             overallProgress: item.overallProgress || 0,
-            milestonesCompleted: 0,
-            tasksCompleted: 0,
-            hoursWorked: 0
+            milestonesCompleted: item.taskMetrics?.completedTasks || 0,
+            tasksCompleted: item.taskMetrics?.totalTasks || 0,
+            hoursWorked: item.manpowerUsage?.totalWorkers * 8 || 0
           },
+          taskMetrics: item.taskMetrics ? {
+            totalTasks: item.taskMetrics.totalTasks || 0,
+            completedTasks: item.taskMetrics.completedTasks || 0,
+            inProgressTasks: item.taskMetrics.inProgressTasks || 0,
+            queuedTasks: item.taskMetrics.queuedTasks || 0,
+            overdueTasks: item.taskMetrics.overdueTasks || 0,
+            onScheduleTasks: item.taskMetrics.onScheduleTasks || 0,
+            completionRate: item.taskMetrics.completionRate || 0,
+            efficiency: item.taskMetrics.efficiency || 0,
+            lastUpdated: item.taskMetrics.lastUpdated || new Date().toISOString()
+          } : undefined,
           issues: item.issues ? (typeof item.issues === 'string' ? [{ 
             type: 'general' as const,
             description: item.issues,

@@ -439,7 +439,17 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Today's Tasks</Text>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Today's Tasks</Text>
+          {tasks.length > 0 && tasks[0].clientName && (
+            <Text style={styles.clientName}>Client: {tasks[0].clientName}</Text>
+          )}
+        </View>
+        {tasks.length > 0 && (
+          <View style={styles.taskCount}>
+            <Text style={styles.taskCountText}>{tasks.length}</Text>
+          </View>
+        )}
       </View>
       
       {/* Debug info - remove in production */}
@@ -495,19 +505,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerContent: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333333',
   },
-  taskCount: {
+  clientName: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#2196F3',
-    backgroundColor: '#E3F2FD',
+    color: '#666666',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  taskCount: {
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  taskCountText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   listContainer: {
     padding: 16,

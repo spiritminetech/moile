@@ -245,7 +245,14 @@ export const getDailyProgressByDate = async (req, res) => {
             remarks: progress.remarks,
             issues: progress.issues,
             photos: photos.map(p => p.photoUrl),
-            submittedAt: progress.submittedAt
+            submittedAt: progress.submittedAt,
+            approvalStatus: progress.approvalStatus,
+            approvedBy: progress.approvedBy,
+            approvedAt: progress.approvedAt,
+            rejectionReason: progress.rejectionReason,
+            taskMetrics: progress.taskMetrics,
+            manpowerUsage: progress.manpowerUsage,
+            materialConsumption: progress.materialConsumption
         });
     } catch (err) {
         console.error("getDailyProgressByDate error:", err);

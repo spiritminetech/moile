@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert } from 'react-native';
 import { Project } from '../../types';
 
 interface ProjectInfoCardProps {
@@ -8,6 +8,42 @@ interface ProjectInfoCardProps {
 }
 
 const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading }) => {
+  const handleCallSupervisor = (phone: string, name: string) => {
+    Alert.alert(
+      'Call Supervisor',
+      `Call ${name} at ${phone}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Call', 
+          onPress: () => {
+            Linking.openURL(`tel:${phone}`).catch(() => {
+              Alert.alert('Error', 'Could not open phone app');
+            });
+          }
+        },
+      ]
+    );
+  };
+
+  const handleEmailSupervisor = (email: string, name: string) => {
+    const subject = encodeURIComponent('Work Site Query');
+    const body = encodeURIComponent(`Hello ${name},\n\nI have a question regarding today's work.\n\nBest regards`);
+    
+    Linking.openURL(`mailto:${email}?subject=${subject}&body=${body}`).catch(() => {
+      Alert.alert('Error', 'Could not open email app');
+    });
+  };
+
+  const getGeofenceStatus = (project: Project) => {
+    // This would typically check current location against geofence
+    // For now, we'll show the geofence information
+    return {
+      isInside: true, // This would be calculated based on current location
+      distance: 0, // Distance from center in meters
+    };
+  };
+
   if (isLoading) {
     return (
       <View style={styles.container}>
@@ -22,50 +58,134 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
     return (
       <View style={styles.container}>
         <View style={styles.noDataContainer}>
+          <Text style={styles.noDataIcon}>🏗️</Text>
           <Text style={styles.noDataText}>No project assigned today</Text>
+          <Text style={styles.noDataSubtext}>Check with your supervisor for today's assignment</Text>
         </View>
       </View>
     );
   }
 
+  const geofenceStatus = getGeofenceStatus(project);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Today's Project</Text>
+        <Text style={styles.title}>📍 Today's Project & Site</Text>
         <View style={[styles.statusBadge, styles[`status_${project.status}`]]}>
           <Text style={styles.statusText}>{project.status.toUpperCase()}</Text>
         </View>
       </View>
       
-      <Text style={styles.projectName}>{project.name}</Text>
-      {project.description && (
-        <Text style={styles.projectDescription}>{project.description}</Text>
-      )}
+      {/* Project Information */}
+      <View style={styles.projectSection}>
+        <Text style={styles.projectName}>{project.name}</Text>
+        {project.description && (
+          <Text style={styles.projectDescription}>{project.description}</Text>
+        )}
+      </View>
       
+      {/* Site Location */}
       <View style={styles.locationContainer}>
-        <Text style={styles.locationIcon}>📍</Text>
-        <Text style={styles.locationText}>{project.location.address}</Text>
+        <Text style={styles.sectionTitle}>🏢 Site Location</Text>
+        <View style={styles.locationDetails}>
+          <Text style={styles.locationIcon}>📍</Text>
+          <View style={styles.locationInfo}>
+            <Text style={styles.locationText}>{project.location.address}</Text>
+            {project.location.landmarks && project.location.landmarks.length > 0 && (
+              <Text style={styles.landmarksText}>
+                Near: {project.location.landmarks.join(', ')}
+              </Text>
+            )}
+            {project.location.accessInstructions && (
+              <Text style={styles.accessInstructions}>
+                Access: {project.location.accessInstructions}
+              </Text>
+            )}
+          </View>
+        </View>
       </View>
 
+      {/* Geo-fenced Work Area */}
+      <View style={styles.geofenceContainer}>
+        <Text style={styles.sectionTitle}>🎯 Geo-fenced Work Area</Text>
+        <View style={styles.geofenceDetails}>
+          <View style={styles.geofenceRow}>
+            <Text style={styles.geofenceLabel}>Work Area Radius:</Text>
+            <Text style={styles.geofenceValue}>{project.geofence.radius}m</Text>
+          </View>
+          <View style={styles.geofenceRow}>
+            <Text style={styles.geofenceLabel}>GPS Accuracy Required:</Text>
+            <Text style={styles.geofenceValue}>≤{project.geofence.allowedAccuracy}m</Text>
+          </View>
+          <View style={styles.geofenceRow}>
+            <Text style={styles.geofenceLabel}>Current Status:</Text>
+            <View style={[styles.geofenceStatusBadge, geofenceStatus.isInside ? styles.insideGeofence : styles.outsideGeofence]}>
+              <Text style={styles.geofenceStatusText}>
+                {geofenceStatus.isInside ? '✅ Inside Work Area' : '❌ Outside Work Area'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.coordinatesText}>
+            Center: {project.geofence.center.latitude.toFixed(6)}, {project.geofence.center.longitude.toFixed(6)}
+          </Text>
+          <Text style={styles.geofenceNote}>
+            ⚠️ Attendance can only be marked inside the geo-fenced area
+          </Text>
+        </View>
+      </View>
+
+      {/* Supervisor Contact */}
       {project.supervisor && (
         <View style={styles.supervisorContainer}>
-          <Text style={styles.supervisorLabel}>Supervisor:</Text>
-          <Text style={styles.supervisorName}>{project.supervisor.name}</Text>
-          <TouchableOpacity style={styles.contactButton}>
-            <Text style={styles.contactButtonText}>📞 {project.supervisor.phone}</Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>👨‍💼 Supervisor Name & Contact</Text>
+          <View style={styles.supervisorCard}>
+            <View style={styles.supervisorInfo}>
+              <Text style={styles.supervisorName}>{project.supervisor.name}</Text>
+              <Text style={styles.supervisorRole}>Site Supervisor</Text>
+            </View>
+            <View style={styles.contactButtons}>
+              <TouchableOpacity 
+                style={styles.contactButton}
+                onPress={() => handleCallSupervisor(project.supervisor.phone, project.supervisor.name)}
+              >
+                <Text style={styles.contactButtonIcon}>📞</Text>
+                <Text style={styles.contactButtonText}>{project.supervisor.phone}</Text>
+              </TouchableOpacity>
+              {project.supervisor.email && (
+                <TouchableOpacity 
+                  style={[styles.contactButton, styles.emailButton]}
+                  onPress={() => handleEmailSupervisor(project.supervisor.email, project.supervisor.name)}
+                >
+                  <Text style={styles.contactButtonIcon}>✉️</Text>
+                  <Text style={styles.contactButtonText}>Email</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          <Text style={styles.contactNote}>
+            📋 Contact supervisor for: Late arrival, Site issues, Emergency situations
+          </Text>
         </View>
       )}
 
-      {/* Geofence Information */}
-      <View style={styles.geofenceContainer}>
-        <Text style={styles.geofenceLabel}>Work Area:</Text>
-        <Text style={styles.geofenceText}>
-          Within {project.geofence.radius}m radius
-        </Text>
-        <Text style={styles.coordinatesText}>
-          {project.geofence.center.latitude.toFixed(6)}, {project.geofence.center.longitude.toFixed(6)}
-        </Text>
+      {/* Project Timeline */}
+      <View style={styles.timelineContainer}>
+        <Text style={styles.sectionTitle}>📅 Project Timeline</Text>
+        <View style={styles.timelineDetails}>
+          <View style={styles.timelineRow}>
+            <Text style={styles.timelineLabel}>Start Date:</Text>
+            <Text style={styles.timelineValue}>
+              {project.startDate.toLocaleDateString()}
+            </Text>
+          </View>
+          <View style={styles.timelineRow}>
+            <Text style={styles.timelineLabel}>End Date:</Text>
+            <Text style={styles.timelineValue}>
+              {project.endDate.toLocaleDateString()}
+            </Text>
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -87,7 +207,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   title: {
     fontSize: 16,
@@ -113,6 +233,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#4CAF50',
   },
+  projectSection: {
+    marginBottom: 16,
+  },
   projectName: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -122,71 +245,178 @@ const styles = StyleSheet.create({
   projectDescription: {
     fontSize: 14,
     color: '#757575',
-    marginBottom: 12,
     lineHeight: 20,
   },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#424242',
+    marginBottom: 8,
+  },
   locationContainer: {
+    marginBottom: 16,
+  },
+  locationDetails: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
+    alignItems: 'flex-start',
   },
   locationIcon: {
     fontSize: 16,
     marginRight: 8,
+    marginTop: 2,
+  },
+  locationInfo: {
+    flex: 1,
   },
   locationText: {
     fontSize: 14,
     color: '#424242',
-    flex: 1,
+    marginBottom: 4,
+  },
+  landmarksText: {
+    fontSize: 12,
+    color: '#757575',
+    marginBottom: 2,
+  },
+  accessInstructions: {
+    fontSize: 12,
+    color: '#2196F3',
+    fontStyle: 'italic',
+  },
+  geofenceContainer: {
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    paddingTop: 12,
+    marginBottom: 16,
+  },
+  geofenceDetails: {
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 8,
+  },
+  geofenceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  geofenceLabel: {
+    fontSize: 12,
+    color: '#757575',
+  },
+  geofenceValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#424242',
+  },
+  geofenceStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  insideGeofence: {
+    backgroundColor: '#E8F5E8',
+  },
+  outsideGeofence: {
+    backgroundColor: '#FFEBEE',
+  },
+  geofenceStatusText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  coordinatesText: {
+    fontSize: 11,
+    color: '#757575',
+    fontFamily: 'monospace',
+    marginBottom: 8,
+  },
+  geofenceNote: {
+    fontSize: 11,
+    color: '#FF9800',
+    fontWeight: '500',
+    textAlign: 'center',
   },
   supervisorContainer: {
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
     paddingTop: 12,
-    marginBottom: 12,
+    marginBottom: 16,
   },
-  supervisorLabel: {
-    fontSize: 12,
-    color: '#757575',
-    marginBottom: 4,
+  supervisorCard: {
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  supervisorInfo: {
+    marginBottom: 12,
   },
   supervisorName: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#212121',
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  supervisorRole: {
+    fontSize: 12,
+    color: '#757575',
+  },
+  contactButtons: {
+    flexDirection: 'row',
+    gap: 8,
   },
   contactButton: {
     backgroundColor: '#2196F3',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
-    alignSelf: 'flex-start',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  emailButton: {
+    backgroundColor: '#4CAF50',
+  },
+  contactButtonIcon: {
+    fontSize: 14,
+    marginRight: 6,
   },
   contactButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 'bold',
   },
-  geofenceContainer: {
+  contactNote: {
+    fontSize: 11,
+    color: '#757575',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  timelineContainer: {
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
     paddingTop: 12,
   },
-  geofenceLabel: {
-    fontSize: 12,
-    color: '#757575',
+  timelineDetails: {
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 8,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 4,
   },
-  geofenceText: {
-    fontSize: 14,
+  timelineLabel: {
+    fontSize: 12,
+    color: '#757575',
+  },
+  timelineValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
     color: '#424242',
-    marginBottom: 4,
-  },
-  coordinatesText: {
-    fontSize: 12,
-    color: '#757575',
-    fontFamily: 'monospace',
   },
   loadingContainer: {
     padding: 20,
@@ -200,9 +430,20 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
+  noDataIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
   noDataText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#757575',
+    marginBottom: 8,
+  },
+  noDataSubtext: {
     fontSize: 14,
     color: '#757575',
+    textAlign: 'center',
   },
 });
 

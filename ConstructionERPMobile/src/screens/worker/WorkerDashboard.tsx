@@ -16,6 +16,7 @@ import { useDashboard } from '../../hooks/useDashboard';
 import ProjectInfoCard from '../../components/dashboard/ProjectInfoCard';
 import AttendanceStatusCard from '../../components/dashboard/AttendanceStatusCard';
 import CertificationAlertsCard from '../../components/dashboard/CertificationAlertsCard';
+import WorkInstructionsCard from '../../components/dashboard/WorkInstructionsCard';
 import { 
   LoadingOverlay, 
   ConstructionButton, 
@@ -24,6 +25,98 @@ import {
 } from '../../components/common';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
+
+// Mock data for work instructions - in real app, this would come from API
+const mockWorkInstructions = [
+  {
+    id: 1,
+    type: 'work_instruction' as const,
+    title: 'Report to Project A – Tower B, Level 5',
+    message: 'Today you are assigned to work on Tower B, Level 5. Please report to the site supervisor upon arrival and collect your safety equipment from the storage room. Your tasks include concrete pouring and rebar installation. Work area is Section C-5.',
+    priority: 'high' as const,
+    timestamp: new Date().toISOString(),
+    isRead: false,
+    source: 'admin' as const,
+    sourceName: 'Project Manager',
+  },
+  {
+    id: 2,
+    type: 'transport_instruction' as const,
+    title: 'Use company transport – Bus No. 3',
+    message: 'Company transport is available today. Please board Bus No. 3 at the designated pickup point at 7:30 AM. The bus will depart promptly from Main Gate. Driver: Ahmad (Contact: +65-9876-5432). Return trip at 6:00 PM from the same location.',
+    priority: 'medium' as const,
+    timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30 minutes ago
+    isRead: false,
+    source: 'manager' as const,
+    sourceName: 'Transport Coordinator',
+  },
+  {
+    id: 3,
+    type: 'safety_message' as const,
+    title: 'Mandatory Safety Briefing at 8:00 AM',
+    message: 'All workers must attend the safety briefing at 8:00 AM in the main assembly area. Topics will include new safety protocols, emergency procedures, and proper use of fall protection equipment. Attendance is mandatory and will be recorded.',
+    priority: 'critical' as const,
+    timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour ago
+    isRead: true,
+    source: 'supervisor' as const,
+    sourceName: 'Safety Officer',
+  },
+  {
+    id: 4,
+    type: 'supervisor_instruction' as const,
+    title: 'Overtime approved till 7:00 PM',
+    message: 'Your overtime request has been approved. You may work until 7:00 PM today to complete the concrete pouring task. Please ensure all safety protocols are followed during extended hours. Additional meal allowance will be provided.',
+    priority: 'medium' as const,
+    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+    isRead: false,
+    source: 'supervisor' as const,
+    sourceName: 'Site Supervisor',
+  },
+  {
+    id: 5,
+    type: 'warning' as const,
+    title: 'Weather Alert - Heavy Rain Expected',
+    message: 'Heavy rain is expected between 2:00 PM - 4:00 PM today. All outdoor work must be suspended during this period. Please move to covered areas and secure all equipment. Work will resume once weather conditions improve.',
+    priority: 'critical' as const,
+    timestamp: new Date(Date.now() - 90 * 60 * 1000).toISOString(), // 1.5 hours ago
+    isRead: false,
+    source: 'system' as const,
+    sourceName: 'Weather Monitoring System',
+  },
+  {
+    id: 6,
+    type: 'reminder' as const,
+    title: 'Tomorrow assigned to new site',
+    message: 'Please note that tomorrow you will be assigned to a different construction site: Marina Bay Project, Block D. Report to Site Office at 7:45 AM. New site supervisor: Mr. Lim Wei Ming. Check your dashboard tomorrow morning for detailed location and parking instructions.',
+    priority: 'low' as const,
+    timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3 hours ago
+    isRead: true,
+    source: 'system' as const,
+    sourceName: 'Scheduling System',
+  },
+  {
+    id: 7,
+    type: 'safety_message' as const,
+    title: 'New PPE Requirements Effective Today',
+    message: 'New personal protective equipment requirements are now in effect. All workers must wear high-visibility vests, safety helmets with chin straps, and steel-toed boots. Safety glasses are mandatory in all work areas. Non-compliance will result in immediate removal from site.',
+    priority: 'high' as const,
+    timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), // 4 hours ago
+    isRead: false,
+    source: 'admin' as const,
+    sourceName: 'Safety Department',
+  },
+  {
+    id: 8,
+    type: 'transport_instruction' as const,
+    title: 'Parking Instructions for Private Vehicles',
+    message: 'If using private transport, please park in designated Area C (Yellow Zone). Parking passes are available at the security gate. Show your employee ID for verification. Parking fee: $5/day (deductible from salary). No parking allowed in visitor areas.',
+    priority: 'low' as const,
+    timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), // 5 hours ago
+    isRead: true,
+    source: 'manager' as const,
+    sourceName: 'Site Administrator',
+  },
+];
 
 const WorkerDashboard: React.FC = () => {
   const { state, logout } = useAuth();
@@ -82,6 +175,16 @@ const WorkerDashboard: React.FC = () => {
 
   const handleNavigateToRequests = () => {
     navigation.navigate('Requests' as never);
+  };
+
+  const handleMarkInstructionAsRead = (instructionId: number) => {
+    // In real app, this would call an API to mark instruction as read
+    console.log('Marking instruction as read:', instructionId);
+  };
+
+  const handleViewAllInstructions = () => {
+    // Navigate to full instructions screen
+    navigation.navigate('Instructions' as never);
   };
 
   return (
@@ -144,6 +247,13 @@ const WorkerDashboard: React.FC = () => {
 
         <CertificationAlertsCard 
           onViewProfile={handleViewProfile}
+        />
+
+        <WorkInstructionsCard
+          instructions={mockWorkInstructions}
+          isLoading={isLoading}
+          onMarkAsRead={handleMarkInstructionAsRead}
+          onViewAll={handleViewAllInstructions}
         />
 
         <ProjectInfoCard 

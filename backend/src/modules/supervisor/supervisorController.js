@@ -1225,24 +1225,16 @@ export const getAttendanceMonitoring = async (req, res) => {
     const employeeIds = [...new Set(assignments.map(a => a.employeeId))];
 
     // Fetch employees with search filter
-    // Convert string IDs to ObjectIds for MongoDB query
-    const objectIdEmployeeIds = employeeIds.map(id => {
-      try {
-        return typeof id === 'string' ? new mongoose.Types.ObjectId(id) : id;
-      } catch (e) {
-        return id;
-      }
-    });
-    
-    let employeeQuery = { _id: { $in: objectIdEmployeeIds } };
+    // Employee model uses numeric IDs, not ObjectIds
+    let employeeQuery = { id: { $in: employeeIds } };
     if (search) {
       employeeQuery.fullName = { $regex: search, $options: 'i' };
     }
 
     const employees = await Employee.find(employeeQuery).lean();
     const employeeMap = employees.reduce((map, emp) => {
-      // Use _id as string for mapping since assignments use string IDs
-      map[emp._id.toString()] = emp;
+      // Use numeric id for mapping since assignments use numeric IDs
+      map[emp.id] = emp;
       return map;
     }, {});
 
@@ -2883,7 +2875,21 @@ export const getPendingApprovalsSummary = async (req, res) => {
       ]
     }).lean();
     
-    const employeeIds = employees.map(e => e.id);
+    // Filter employeeIds to only include numeric values (exclude ObjectId strings)
+    const allEmployeeIds = employees.map(e => e.id);
+    const employeeIds = allEmployeeIds.filter(id => {
+      // Only include numeric IDs, exclude ObjectId strings
+      return typeof id === 'number' && !isNaN(id);
+    });
+    
+    console.log('🔍 Employee ID Types Debug:', {
+      totalEmployees: employees.length,
+      allEmployeeIds: allEmployeeIds.slice(0, 5), // Show first 5 for debugging
+      numericEmployeeIds: employeeIds.slice(0, 5), // Show first 5 numeric IDs
+      filteredCount: employeeIds.length,
+      excludedCount: allEmployeeIds.length - employeeIds.length,
+      excludedIds: allEmployeeIds.filter(id => typeof id !== 'number' || isNaN(id)).slice(0, 3) // Show first 3 excluded IDs
+    });
 
     console.log('🔍 Approvals Screen Debug:', {
       supervisorId: supervisor.id,

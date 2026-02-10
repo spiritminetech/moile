@@ -21,7 +21,7 @@ async function testPendingApprovalsAPI() {
     console.log('-'.repeat(60));
     
     const loginResponse = await axios.post(`${API_URL}/auth/login`, {
-      email: 'supervisor4@example.com',
+      email: 'supervisor@gmail.com',
       password: 'password123'
     });
 

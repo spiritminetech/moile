@@ -187,10 +187,10 @@ const HelpSupportScreen: React.FC<HelpSupportScreenProps> = ({ navigation }) => 
         <ConstructionCard style={styles.section}>
           <Text style={styles.sectionTitle}>Troubleshooting Guide</Text>
           {troubleshootingSteps.map((guide, index) => (
-            <View key={index} style={styles.troubleshootingItem}>
+            <View key={`guide-${index}-${guide.title}`} style={styles.troubleshootingItem}>
               <Text style={styles.troubleshootingTitle}>{guide.title}</Text>
               {guide.steps.map((step, stepIndex) => (
-                <Text key={stepIndex} style={styles.troubleshootingStep}>
+                <Text key={`step-${stepIndex}-${step.substring(0, 20)}`} style={styles.troubleshootingStep}>
                   {stepIndex + 1}. {step}
                 </Text>
               ))}

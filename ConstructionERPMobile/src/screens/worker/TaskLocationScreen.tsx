@@ -13,11 +13,15 @@ import {
   ScrollView,
   SafeAreaView,
   StatusBar,
+  Dimensions,
 } from 'react-native';
+import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import { TaskAssignment, GeoLocation } from '../../types';
 import { useLocation } from '../../store/context/LocationContext';
 import DistanceDisplay from '../../components/common/DistanceDisplay';
 import GPSAccuracyIndicator from '../../components/common/GPSAccuracyIndicator';
+
+const { width, height } = Dimensions.get('window');
 
 const TaskLocationScreen = ({ navigation, route }: any) => {
   const { task } = route.params;
@@ -25,6 +29,12 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
   const { currentLocation, isLocationEnabled, hasLocationPermission } = locationState;
   
   const [distance, setDistance] = useState<number | null>(null);
+  const [mapRegion, setMapRegion] = useState({
+    latitude: task.location?.latitude || 1.3521,
+    longitude: task.location?.longitude || 103.8198,
+    latitudeDelta: 0.01,
+    longitudeDelta: 0.01,
+  });
 
   // Calculate distance between current location and task location
   useEffect(() => {
@@ -36,6 +46,27 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
         task.location.longitude
       );
       setDistance(calculatedDistance);
+    }
+  }, [currentLocation, task.location]);
+
+  // Update map region when current location changes
+  useEffect(() => {
+    if (currentLocation && task.location) {
+      // Calculate bounds to show both current location and task location
+      const minLat = Math.min(currentLocation.latitude, task.location.latitude);
+      const maxLat = Math.max(currentLocation.latitude, task.location.latitude);
+      const minLng = Math.min(currentLocation.longitude, task.location.longitude);
+      const maxLng = Math.max(currentLocation.longitude, task.location.longitude);
+      
+      const latDelta = Math.max(0.01, (maxLat - minLat) * 1.5);
+      const lngDelta = Math.max(0.01, (maxLng - minLng) * 1.5);
+      
+      setMapRegion({
+        latitude: (minLat + maxLat) / 2,
+        longitude: (minLng + maxLng) / 2,
+        latitudeDelta: latDelta,
+        longitudeDelta: lngDelta,
+      });
     }
   }, [currentLocation, task.location]);
 
@@ -190,133 +221,179 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      {/* Task Information */}
-      <View style={styles.taskInfoContainer}>
-        <View style={styles.taskHeader}>
-          <View style={styles.taskTitleContainer}>
-            <Text style={styles.taskName}>{task.taskName}</Text>
-            <Text style={styles.taskSequence}>#{task.sequence}</Text>
+        {/* Task Information */}
+        <View style={styles.taskInfoContainer}>
+          <View style={styles.taskHeader}>
+            <View style={styles.taskTitleContainer}>
+              <Text style={styles.taskName}>{task.taskName}</Text>
+              <Text style={styles.taskSequence}>#{task.sequence}</Text>
+            </View>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
+              <Text style={styles.statusText}>{getStatusText(task.status)}</Text>
+            </View>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
-            <Text style={styles.statusText}>{getStatusText(task.status)}</Text>
-          </View>
+          <Text style={styles.taskDescription}>{task.description}</Text>
         </View>
-        <Text style={styles.taskDescription}>{task.description}</Text>
-      </View>
 
-      {/* GPS Status */}
-      <GPSAccuracyIndicator accuracyWarning={checkGPSAccuracy()} />
+        {/* GPS Status */}
+        <GPSAccuracyIndicator accuracyWarning={checkGPSAccuracy()} />
 
-      {/* Location Information */}
-      <View style={styles.locationContainer}>
-        <Text style={styles.sectionTitle}>Task Location</Text>
-        
-        {task.location ? (
-          <>
+        {/* Interactive Map */}
+        {task.location && (
+          <View style={styles.mapContainer}>
+            <Text style={styles.sectionTitle}>Task Location Map</Text>
+            <MapView
+              provider={PROVIDER_GOOGLE}
+              style={styles.map}
+              region={mapRegion}
+              onRegionChangeComplete={setMapRegion}
+              showsUserLocation={hasLocationPermission && isLocationEnabled}
+              showsMyLocationButton={true}
+              showsCompass={true}
+              showsScale={true}
+              mapType="hybrid"
+            >
+              {/* Task Location Marker */}
+              <Marker
+                coordinate={{
+                  latitude: task.location.latitude,
+                  longitude: task.location.longitude,
+                }}
+                title={task.taskName}
+                description={`Task #${task.sequence}`}
+                pinColor="#FF6B6B"
+              />
+              
+              {/* Geofence Circle (if available) */}
+              {task.projectGeofence && (
+                <Circle
+                  center={{
+                    latitude: task.projectGeofence.latitude,
+                    longitude: task.projectGeofence.longitude,
+                  }}
+                  radius={task.projectGeofence.radius || 100}
+                  strokeColor="rgba(33, 150, 243, 0.8)"
+                  fillColor="rgba(33, 150, 243, 0.2)"
+                  strokeWidth={2}
+                />
+              )}
+
+              {/* Current Location Marker */}
+              {currentLocation && (
+                <Marker
+                  coordinate={{
+                    latitude: currentLocation.latitude,
+                    longitude: currentLocation.longitude,
+                  }}
+                  title="Your Location"
+                  description={`Accuracy: ±${Math.round(currentLocation.accuracy)}m`}
+                  pinColor="#4CAF50"
+                />
+              )}
+            </MapView>
+          </View>
+        )}
+
+        {/* Location Information */}
+        <View style={styles.locationContainer}>
+          <Text style={styles.sectionTitle}>Location Details</Text>
+          
+          {task.location ? (
+            <>
+              <View style={styles.coordinatesContainer}>
+                <Text style={styles.coordinatesLabel}>Coordinates:</Text>
+                <Text style={styles.coordinatesText}>
+                  {task.location.latitude.toFixed(6)}, {task.location.longitude.toFixed(6)}
+                </Text>
+              </View>
+
+              {task.location.altitude && (
+                <View style={styles.altitudeContainer}>
+                  <Text style={styles.altitudeLabel}>Altitude:</Text>
+                  <Text style={styles.altitudeText}>{Math.round(task.location.altitude)}m</Text>
+                </View>
+              )}
+
+              {/* Distance from current location */}
+              {currentLocation && distance !== null && (
+                <DistanceDisplay
+                  distance={distance}
+                  isValid={distance <= 100} // Assuming 100m threshold
+                  showIcon={true}
+                />
+              )}
+            </>
+          ) : (
+            <View style={styles.noLocationContainer}>
+              <Text style={styles.noLocationIcon}>📍</Text>
+              <Text style={styles.noLocationText}>Location information not available</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Current Location */}
+        {currentLocation && (
+          <View style={styles.currentLocationContainer}>
+            <Text style={styles.sectionTitle}>Your Current Location</Text>
             <View style={styles.coordinatesContainer}>
               <Text style={styles.coordinatesLabel}>Coordinates:</Text>
               <Text style={styles.coordinatesText}>
-                {task.location.latitude.toFixed(6)}, {task.location.longitude.toFixed(6)}
+                {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)}
               </Text>
             </View>
-
-            {task.location.altitude && (
-              <View style={styles.altitudeContainer}>
-                <Text style={styles.altitudeLabel}>Altitude:</Text>
-                <Text style={styles.altitudeText}>{Math.round(task.location.altitude)}m</Text>
-              </View>
-            )}
-
-            {/* Distance from current location */}
-            {currentLocation && distance !== null && (
-              <DistanceDisplay
-                distance={distance}
-                isValid={distance <= 100} // Assuming 100m threshold
-                showIcon={true}
-              />
-            )}
-          </>
-        ) : (
-          <View style={styles.noLocationContainer}>
-            <Text style={styles.noLocationIcon}>📍</Text>
-            <Text style={styles.noLocationText}>Location information not available</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Current Location */}
-      {currentLocation && (
-        <View style={styles.currentLocationContainer}>
-          <Text style={styles.sectionTitle}>Your Current Location</Text>
-          <View style={styles.coordinatesContainer}>
-            <Text style={styles.coordinatesLabel}>Coordinates:</Text>
-            <Text style={styles.coordinatesText}>
-              {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)}
+            <Text style={styles.accuracyText}>
+              Accuracy: ±{Math.round(currentLocation.accuracy)}m
             </Text>
           </View>
-          <Text style={styles.accuracyText}>
-            Accuracy: ±{Math.round(currentLocation.accuracy)}m
-          </Text>
-        </View>
-      )}
-
-      {/* Location Status */}
-      {!hasLocationPermission && (
-        <View style={styles.warningContainer}>
-          <Text style={styles.warningIcon}>⚠️</Text>
-          <Text style={styles.warningText}>
-            Location permission is required to show distance and enable navigation.
-          </Text>
-        </View>
-      )}
-
-      {!isLocationEnabled && hasLocationPermission && (
-        <View style={styles.warningContainer}>
-          <Text style={styles.warningIcon}>📍</Text>
-          <Text style={styles.warningText}>
-            Please enable location services to show your current position and distance.
-          </Text>
-        </View>
-      )}
-
-      {/* Action Buttons */}
-      <View style={styles.actionsContainer}>
-        {task.location && (
-          <>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.navigateButton]}
-              onPress={handleNavigateToLocation}
-            >
-              <Text style={styles.actionButtonText}>🧭 Navigate to Location</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionButton, styles.shareButton]}
-              onPress={handleShareLocation}
-            >
-              <Text style={styles.shareButtonText}>📤 Share Location</Text>
-            </TouchableOpacity>
-          </>
         )}
 
-        <TouchableOpacity
-          style={[styles.actionButton, styles.backButton]}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>← Back to Tasks</Text>
-        </TouchableOpacity>
-      </View>
+        {/* Location Status */}
+        {!hasLocationPermission && (
+          <View style={styles.warningContainer}>
+            <Text style={styles.warningIcon}>⚠️</Text>
+            <Text style={styles.warningText}>
+              Location permission is required to show distance and enable navigation.
+            </Text>
+          </View>
+        )}
 
-      {/* Map Placeholder */}
-      <View style={styles.mapPlaceholder}>
-        <Text style={styles.mapPlaceholderIcon}>🗺️</Text>
-        <Text style={styles.mapPlaceholderTitle}>Interactive Map</Text>
-        <Text style={styles.mapPlaceholderText}>
-          Map integration would be implemented here using react-native-maps or similar library.
-          For now, use the navigation buttons above to open external map applications.
-        </Text>
-      </View>
-    </ScrollView>
+        {!isLocationEnabled && hasLocationPermission && (
+          <View style={styles.warningContainer}>
+            <Text style={styles.warningIcon}>📍</Text>
+            <Text style={styles.warningText}>
+              Please enable location services to show your current position and distance.
+            </Text>
+          </View>
+        )}
+
+        {/* Action Buttons */}
+        <View style={styles.actionsContainer}>
+          {task.location && (
+            <>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.navigateButton]}
+                onPress={handleNavigateToLocation}
+              >
+                <Text style={styles.actionButtonText}>🧭 Navigate to Location</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionButton, styles.shareButton]}
+                onPress={handleShareLocation}
+              >
+                <Text style={styles.shareButtonText}>📤 Share Location</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          <TouchableOpacity
+            style={[styles.actionButton, styles.backButton]}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backButtonText}>← Back to Tasks</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -519,32 +596,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  mapPlaceholder: {
+  mapContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    padding: 24,
-    alignItems: 'center',
+    marginBottom: 16,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    overflow: 'hidden',
   },
-  mapPlaceholderIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  mapPlaceholderTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 8,
-  },
-  mapPlaceholderText: {
-    fontSize: 14,
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: 20,
+  map: {
+    width: '100%',
+    height: 300,
   },
 });
 

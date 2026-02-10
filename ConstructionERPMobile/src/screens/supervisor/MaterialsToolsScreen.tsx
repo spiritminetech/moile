@@ -1355,7 +1355,7 @@ const MaterialsToolsScreen: React.FC = () => {
           <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
             {toolUsageLogData.length > 0 ? (
               toolUsageLogData.map((tool, index) => (
-                <ConstructionCard key={index} variant="outlined" style={{ marginBottom: ConstructionTheme.spacing.md }}>
+                <ConstructionCard key={`tool-${index}-${tool.toolName || 'unknown'}`} variant="outlined" style={{ marginBottom: ConstructionTheme.spacing.md }}>
                   <Text style={styles.toolLogName}>{tool.toolName}</Text>
                   <Text style={styles.toolLogDetail}>Category: {tool.category}</Text>
                   <Text style={styles.toolLogDetail}>Quantity: {tool.totalQuantity}</Text>
@@ -1367,7 +1367,7 @@ const MaterialsToolsScreen: React.FC = () => {
                     <>
                       <Text style={styles.toolLogSubtitle}>Allocation History:</Text>
                       {tool.allocationHistory.slice(0, 3).map((history: any, idx: number) => (
-                        <View key={idx} style={styles.historyItem}>
+                        <View key={`history-${idx}-${history.requestedDate}-${history.purpose?.substring(0, 10) || ''}`} style={styles.historyItem}>
                           <Text style={styles.historyText}>
                             • {new Date(history.requestedDate).toLocaleDateString()} - {history.purpose}
                           </Text>

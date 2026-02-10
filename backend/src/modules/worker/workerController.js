@@ -952,6 +952,8 @@ export const getWorkerTasksToday = async (req, res) => {
               task.description, 
               { maxLength: 2000, default: "", fieldName: "supervisor instructions" }
             ).value,
+            instructionAttachments: assignment.supervisorInstructions?.attachments || [],
+            instructionsLastUpdated: assignment.supervisorInstructions?.lastUpdated || null,
             startTime: assignment.startTime,
             estimatedEndTime: estimatedEndTime,
             canStart: canStart,
@@ -1087,6 +1089,7 @@ export const getWorkerTasksToday = async (req, res) => {
           id: project.id,
           name: validateStringField(project.projectName, { default: "N/A", maxLength: 200 }).value,
           code: validateStringField(project.projectCode, { default: "N/A", maxLength: 100 }).value,
+          clientName: validateStringField(project.clientName, { default: "N/A", maxLength: 200 }).value,
           location: validateStringField(project.address, { default: "N/A", maxLength: 500 }).value,
           geofence: {
             latitude: projectGeofence.center.latitude,

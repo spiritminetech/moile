@@ -187,19 +187,49 @@ export class WorkerApiService {
             assignmentId: task.assignmentId || task.id || 0,
             projectId: response.data.project?.id || 1,
             projectName: response.data.project?.name || 'Unknown Project',
+            clientName: response.data.project?.clientName || undefined,
             taskName: task.taskName || task.name || 'Unknown Task',
             description: task.description || '',
             dependencies: task.dependencies || [],
             sequence: task.sequence || 0,
             status: this.mapTaskStatus(task.status),
+            priority: task.priority || 'medium',
+            workArea: task.workArea || undefined,
+            floor: task.floor || undefined,
+            zone: task.zone || undefined,
             location: {
-              latitude: 0,
-              longitude: 0,
+              latitude: response.data.project?.geofence?.latitude || 0,
+              longitude: response.data.project?.geofence?.longitude || 0,
               accuracy: 0,
               timestamp: new Date()
             },
+            projectGeofence: response.data.project?.geofence ? {
+              latitude: response.data.project.geofence.latitude,
+              longitude: response.data.project.geofence.longitude,
+              radius: response.data.project.geofence.radius || 100
+            } : undefined,
             estimatedHours: task.timeEstimate?.estimated ? task.timeEstimate.estimated / 60 : 8,
             actualHours: task.timeEstimate?.elapsed ? task.timeEstimate.elapsed / 60 : undefined,
+            dailyTarget: task.dailyTarget ? {
+              description: task.dailyTarget.description || '',
+              quantity: task.dailyTarget.quantity || 0,
+              unit: task.dailyTarget.unit || '',
+              targetCompletion: task.dailyTarget.targetCompletion || 100
+            } : undefined,
+            progress: task.progress ? {
+              percentage: task.progress.percentage || 0,
+              completed: task.progress.completed || 0,
+              remaining: task.progress.remaining || 0,
+              lastUpdated: task.progress.lastUpdated || null
+            } : undefined,
+            timeEstimate: task.timeEstimate ? {
+              estimated: task.timeEstimate.estimated || 0,
+              elapsed: task.timeEstimate.elapsed || 0,
+              remaining: task.timeEstimate.remaining || 0
+            } : undefined,
+            supervisorInstructions: task.supervisorInstructions || undefined,
+            instructionAttachments: task.instructionAttachments || [],
+            instructionsLastUpdated: task.instructionsLastUpdated || undefined,
             createdAt: new Date().toISOString(),
             updatedAt: task.progress?.lastUpdated || new Date().toISOString(),
             startedAt: task.startTime || undefined,
@@ -568,6 +598,25 @@ export class WorkerApiService {
     return attendanceApiService.sendOvertimeAlert(data);
   }
 
+  /**
+   * Request attendance regularization from supervisor
+   */
+  async requestAttendanceRegularization(data: {
+    workerId: string;
+    projectId: string;
+    requestType: 'forgotten_checkout' | 'late_login' | 'early_logout';
+    originalTime?: string;
+    requestedTime?: string;
+    reason: string;
+  }): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+    requestId: string;
+  }>> {
+    console.log('📝 Requesting attendance regularization:', data);
+    return apiClient.post('/attendance/request-regularization', data);
+  }
+
   async getCurrentAttendanceStatus(): Promise<ApiResponse<{
     currentStatus: 'NOT_LOGGED_IN' | 'CHECKED_IN' | 'CHECKED_OUT' | 'ON_LUNCH';
     checkInTime: string | null;
@@ -877,6 +926,49 @@ export class WorkerApiService {
     }
 
     return apiClient.uploadFile('/worker/requests/advance-payment', formData);
+  }
+
+  // Work Instructions APIs
+  async getWorkInstructions(date?: string): Promise<ApiResponse<Array<{
+    id: number;
+    type: 'work_instruction' | 'safety_message' | 'supervisor_instruction' | 'transport_instruction' | 'warning' | 'reminder';
+    title: string;
+    message: string;
+    priority: 'low' | 'medium' | 'high' | 'critical';
+    timestamp: string;
+    isRead: boolean;
+    source: 'admin' | 'manager' | 'supervisor' | 'system';
+    sourceName?: string;
+  }>>> {
+    const params = date ? { date } : {};
+    return apiClient.get('/worker/instructions', { params });
+  }
+
+  async markInstructionAsRead(instructionId: number): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+  }>> {
+    return apiClient.post(`/worker/instructions/${instructionId}/read`);
+  }
+
+  async getInstructionDetails(instructionId: number): Promise<ApiResponse<{
+    id: number;
+    type: string;
+    title: string;
+    message: string;
+    priority: string;
+    timestamp: string;
+    isRead: boolean;
+    source: string;
+    sourceName?: string;
+    attachments?: Array<{
+      id: number;
+      filename: string;
+      url: string;
+      size: number;
+    }>;
+  }>> {
+    return apiClient.get(`/worker/instructions/${instructionId}`);
   }
 
   async uploadRequestAttachments(

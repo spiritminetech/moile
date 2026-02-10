@@ -113,6 +113,10 @@ const projectSchema = new mongoose.Schema({
   clientId: {
     type: Number
   },
+  clientName: {
+    type: String,
+    trim: true
+  },
   expectedEndDate: {
     type: Date
   },

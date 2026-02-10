@@ -468,7 +468,7 @@ const DailyReportScreen: React.FC = () => {
           </View>
 
           {formData.tasksCompleted.map((task, index) => (
-            <View key={index} style={styles.taskItem}>
+            <View key={`task-${index}-${task.taskName || ''}-${Date.now()}`} style={styles.taskItem}>
               <View style={styles.taskHeader}>
                 <Text style={styles.taskNumber}>Task {index + 1}</Text>
                 {formData.tasksCompleted.length > 1 && (
@@ -541,7 +541,7 @@ const DailyReportScreen: React.FC = () => {
           </View>
 
           {formData.issues.map((issue, index) => (
-            <View key={index} style={styles.issueItem}>
+            <View key={`issue-${index}-${issue.description?.substring(0, 10) || ''}-${Date.now()}`} style={styles.issueItem}>
               <View style={styles.taskHeader}>
                 <Text style={styles.taskNumber}>Issue {index + 1}</Text>
                 <TouchableOpacity onPress={() => removeIssue(index)}>
@@ -584,7 +584,7 @@ const DailyReportScreen: React.FC = () => {
           </View>
 
           {formData.materialUsed.map((material, index) => (
-            <View key={index} style={styles.materialItem}>
+            <View key={`material-${index}-${material.materialName || ''}-${Date.now()}`} style={styles.materialItem}>
               <View style={styles.taskHeader}>
                 <Text style={styles.taskNumber}>Material {index + 1}</Text>
                 <TouchableOpacity onPress={() => removeMaterial(index)}>

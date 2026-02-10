@@ -550,7 +550,7 @@ const DriverProfileScreen: React.FC<DriverProfileScreenProps> = ({ navigation })
               <Text style={styles.specializationsTitle}>Specializations:</Text>
               <View style={styles.specializationsGrid}>
                 {profileData.driverInfo.specializations.map((spec, index) => (
-                  <View key={index} style={styles.specializationTag}>
+                  <View key={`spec-${spec}`} style={styles.specializationTag}>
                     <Text style={styles.specializationText}>{spec}</Text>
                   </View>
                 ))}

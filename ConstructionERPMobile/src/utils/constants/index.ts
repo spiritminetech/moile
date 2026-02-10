@@ -110,8 +110,21 @@ export const WORK_HOURS_CONFIG = {
   STANDARD_WORK_HOURS: 8, // 8 hours per day
   WORK_START_HOUR: 8, // 8:00 AM
   WORK_END_HOUR: 17, // 5:00 PM (8 hours + 1 hour lunch)
+  EXTENDED_WORK_END_HOUR: 19, // 7:00 PM for extended shifts
   LUNCH_DURATION_MINUTES: 60, // 1 hour lunch break
   OVERTIME_THRESHOLD_HOURS: 8, // Overtime after 8 hours of work
+  
+  // Time window restrictions
+  MORNING_LOGIN_CUTOFF: 8, // Must login before 8:00 AM
+  LUNCH_START_TIME: 12, // 12:00 noon
+  LUNCH_END_TIME: 13, // 1:00 PM
+  EVENING_LOGOUT_NORMAL: 17, // 5:00 PM
+  EVENING_LOGOUT_EXTENDED: 19, // 7:00 PM
+  
+  // Grace periods (in minutes)
+  MORNING_GRACE_PERIOD: 30, // 30 minutes grace for morning login
+  LUNCH_GRACE_PERIOD: 15, // 15 minutes grace for lunch timing
+  EVENING_GRACE_PERIOD: 30, // 30 minutes grace for evening logout
 } as const;
 
 export const UI_CONSTANTS = {

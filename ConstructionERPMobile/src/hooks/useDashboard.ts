@@ -14,6 +14,9 @@ export interface DashboardData {
   workingHours: {
     currentSessionDuration: number;
     totalHours: number;
+    overtimeApproved?: boolean;
+    overtimeHours?: number;
+    shiftType?: 'morning' | 'afternoon' | 'overtime';
   };
   // New fields from API documentation
   supervisor: {
@@ -176,6 +179,9 @@ export const useDashboard = (): UseDashboardReturn => {
     workingHours: {
       currentSessionDuration: 0,
       totalHours: 0,
+      overtimeApproved: false,
+      overtimeHours: 0,
+      shiftType: 'morning',
     },
     supervisor: null,
     worker: null,
@@ -192,6 +198,13 @@ export const useDashboard = (): UseDashboardReturn => {
       totalHoursWorked: 0,
       remainingHours: 8,
       overallProgress: 0,
+    },
+    workingHours: {
+      currentSessionDuration: 0,
+      totalHours: 0,
+      overtimeApproved: false,
+      overtimeHours: 0,
+      shiftType: 'morning',
     },
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -249,10 +262,28 @@ export const useDashboard = (): UseDashboardReturn => {
           
           const totalHours = attendanceData.workDuration || 0; // Total work duration for today
 
+          // Determine shift type and overtime status
+          const now = new Date();
+          const currentHour = now.getHours();
+          let shiftType: 'morning' | 'afternoon' | 'overtime' = 'morning';
+          let overtimeApproved = false;
+          let overtimeHours = 0;
+
+          if (currentHour >= 19) { // After 7 PM
+            shiftType = 'overtime';
+            overtimeApproved = true; // In real app, this would come from API
+            overtimeHours = Math.max(0, totalHours - (8 * 60)); // Hours beyond 8 hours
+          } else if (currentHour >= 13) { // After 1 PM
+            shiftType = 'afternoon';
+          }
+
           transformedData.attendanceStatus = attendanceRecord;
           transformedData.workingHours = {
             currentSessionDuration, // Duration in minutes
-            totalHours // Total duration in minutes
+            totalHours, // Total duration in minutes
+            overtimeApproved,
+            overtimeHours,
+            shiftType,
           };
         }
 
@@ -316,6 +347,13 @@ export const useDashboard = (): UseDashboardReturn => {
             totalHoursWorked: 0,
             remainingHours: 8, // Default work day
             overallProgress: 0, // 0% is correct when no tasks
+          },
+          workingHours: {
+            currentSessionDuration: 0,
+            totalHours: 0,
+            overtimeApproved: false,
+            overtimeHours: 0,
+            shiftType: 'morning',
           },
         });
         setLastRefresh(new Date());

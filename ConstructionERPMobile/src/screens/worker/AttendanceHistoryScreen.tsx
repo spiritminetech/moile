@@ -554,7 +554,7 @@ const AttendanceHistoryScreen: React.FC = () => {
           
           {filteredHistory.length > 0 ? (
             filteredHistory.map((record, index) => (
-              <AttendanceRecordItem key={record.id || index} record={record} index={index} />
+              <AttendanceRecordItem key={`history-${record.id || record.date}-${record.loginTime || index}`} record={record} index={index} />
             ))
           ) : (
             <View style={styles.noDataContainer}>
