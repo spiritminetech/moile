@@ -249,9 +249,9 @@ async function setupSupervisorTestData() {
     console.log(`   - Task Assignments: 3 (for today)\n`);
 
     console.log('🧪 Test the API:');
-    console.log('   1. Login: POST http://192.168.1.6:5002/api/auth/login');
-    console.log('   2. Get Tasks: GET http://192.168.1.6:5002/api/supervisor/active-tasks/1');
-    console.log('   3. Update Targets: PUT http://192.168.1.6:5002/api/supervisor/daily-targets\n');
+    console.log('   1. Login: POST http://192.168.0.3:5002/api/auth/login');
+    console.log('   2. Get Tasks: GET http://192.168.0.3:5002/api/supervisor/active-tasks/1');
+    console.log('   3. Update Targets: PUT http://192.168.0.3:5002/api/supervisor/daily-targets\n');
 
     await mongoose.disconnect();
     console.log('✅ Disconnected from MongoDB\n');

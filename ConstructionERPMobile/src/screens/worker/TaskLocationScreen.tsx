@@ -15,7 +15,7 @@ import {
   StatusBar,
   Dimensions,
 } from 'react-native';
-import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
+// import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import { TaskAssignment, GeoLocation } from '../../types';
 import { useLocation } from '../../store/context/LocationContext';
 import DistanceDisplay from '../../components/common/DistanceDisplay';
@@ -242,55 +242,14 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
         {task.location && (
           <View style={styles.mapContainer}>
             <Text style={styles.sectionTitle}>Task Location Map</Text>
-            <MapView
-              provider={PROVIDER_GOOGLE}
-              style={styles.map}
-              region={mapRegion}
-              onRegionChangeComplete={setMapRegion}
-              showsUserLocation={hasLocationPermission && isLocationEnabled}
-              showsMyLocationButton={true}
-              showsCompass={true}
-              showsScale={true}
-              mapType="hybrid"
-            >
-              {/* Task Location Marker */}
-              <Marker
-                coordinate={{
-                  latitude: task.location.latitude,
-                  longitude: task.location.longitude,
-                }}
-                title={task.taskName}
-                description={`Task #${task.sequence}`}
-                pinColor="#FF6B6B"
-              />
-              
-              {/* Geofence Circle (if available) */}
-              {task.projectGeofence && (
-                <Circle
-                  center={{
-                    latitude: task.projectGeofence.latitude,
-                    longitude: task.projectGeofence.longitude,
-                  }}
-                  radius={task.projectGeofence.radius || 100}
-                  strokeColor="rgba(33, 150, 243, 0.8)"
-                  fillColor="rgba(33, 150, 243, 0.2)"
-                  strokeWidth={2}
-                />
-              )}
-
-              {/* Current Location Marker */}
-              {currentLocation && (
-                <Marker
-                  coordinate={{
-                    latitude: currentLocation.latitude,
-                    longitude: currentLocation.longitude,
-                  }}
-                  title="Your Location"
-                  description={`Accuracy: ±${Math.round(currentLocation.accuracy)}m`}
-                  pinColor="#4CAF50"
-                />
-              )}
-            </MapView>
+            <View style={[styles.map, styles.mapPlaceholder]}>
+              <Text style={styles.placeholderText}>
+                Map functionality temporarily disabled
+              </Text>
+              <Text style={styles.placeholderSubtext}>
+                Task Location: {task.location.latitude.toFixed(6)}, {task.location.longitude.toFixed(6)}
+              </Text>
+            </View>
           </View>
         )}
 
@@ -610,6 +569,25 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: 300,
+  },
+  mapPlaceholder: {
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+  },
+  placeholderText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  placeholderSubtext: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
   },
 });
 

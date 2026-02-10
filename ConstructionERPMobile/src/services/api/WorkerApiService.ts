@@ -1058,21 +1058,36 @@ export class WorkerApiService {
       profileImage?: string;
       employeeId: string;
     };
+    employeeCode?: string;
+    nationality?: string;
+    jobTitle?: string;
+    department?: string;
+    companyName?: string;
     certifications: Array<{
       id: number;
       name: string;
+      type?: string;
+      certificationType?: string;
+      ownership?: string;
       issuer: string;
       issueDate: string;
       expiryDate: string;
       certificateNumber: string;
       status: 'active' | 'expired' | 'expiring_soon';
+      documentPath?: string;
     }>;
     workPass: {
       id: number;
       passNumber: string;
+      finNumber?: string;
+      workPassType?: string;
       issueDate: string;
       expiryDate: string;
-      status: 'active' | 'expired' | 'suspended';
+      status: 'active' | 'expired' | 'suspended' | 'new' | 'renewal' | 'under_renewal';
+      applicationDoc?: string;
+      medicalDoc?: string;
+      issuanceDoc?: string;
+      momDoc?: string;
     };
     salaryInfo?: {
       basicSalary: number;
@@ -1082,52 +1097,168 @@ export class WorkerApiService {
     };
   }>> {
     try {
+      console.log('🔍 [PROFILE] Fetching worker profile from /worker/profile...');
       const response = await apiClient.get('/worker/profile');
       
-      if (response.success) {
-        // The API returns profile data directly in response, not in response.data
-        const responseData = response as any;
-        const profile = responseData.profile;
-        
-        if (profile) {
-          // Map the API response to the expected format
-          const mappedData = {
-            user: {
-              id: profile.id || profile.employeeId,
-              name: profile.name,
-              email: profile.email,
-              phone: profile.phoneNumber,
-              profileImage: profile.photoUrl,
-              employeeId: profile.employeeId?.toString() || profile.employeeCode || profile.id?.toString()
-            },
-            certifications: profile.certifications || [], // Default to empty array if not provided
-            workPass: profile.workPass || {
-              id: 0,
-              passNumber: profile.workPassNumber || 'N/A',
-              issueDate: new Date().toISOString(),
-              expiryDate: new Date().toISOString(),
-              status: 'active' as const
-            }, // Use work pass data from backend or default
-            salaryInfo: profile.salaryInfo // Optional field
-          };
-          
-          return {
-            success: true,
-            data: mappedData,
-            message: response.message
-          };
+      console.log('📥 [PROFILE] Raw API response:', JSON.stringify({
+        success: response.success,
+        hasData: !!response.data,
+        dataType: typeof response.data,
+        dataKeys: response.data ? Object.keys(response.data) : null,
+        hasProfile: !!(response as any).profile,
+        responseKeys: Object.keys(response),
+        message: response.message
+      }, null, 2));
+      
+      // Extract profile data from various possible response structures
+      let profile = null;
+      
+      // Priority 1: Check response.data (most common)
+      if (response.data && typeof response.data === 'object') {
+        // Check if data has user info directly
+        if (response.data.name || response.data.email || response.data.id || response.data.employeeId) {
+          profile = response.data;
+          console.log('✅ [PROFILE] Found profile in response.data (direct)');
+        }
+        // Check if data has a nested profile object
+        else if ((response.data as any).profile) {
+          profile = (response.data as any).profile;
+          console.log('✅ [PROFILE] Found profile in response.data.profile');
+        }
+        // Check if data has a nested user object
+        else if ((response.data as any).user) {
+          profile = (response.data as any).user;
+          console.log('✅ [PROFILE] Found profile in response.data.user');
         }
       }
       
-      // Return error if profile data is not in expected format
+      // Priority 2: Check response.profile (legacy format)
+      if (!profile && (response as any).profile) {
+        profile = (response as any).profile;
+        console.log('✅ [PROFILE] Found profile in response.profile (legacy)');
+      }
+      
+      // Priority 3: Check if entire response is the profile
+      if (!profile && (response.name || response.email || response.id)) {
+        profile = response;
+        console.log('✅ [PROFILE] Using entire response as profile');
+      }
+      
+      console.log('🔍 [PROFILE] Extracted profile:', JSON.stringify({
+        hasProfile: !!profile,
+        profileKeys: profile ? Object.keys(profile) : null,
+        name: profile?.name || profile?.fullName,
+        email: profile?.email,
+        id: profile?.id,
+        employeeId: profile?.employeeId,
+        employeeCode: profile?.employeeCode
+      }, null, 2));
+      
+      if (!profile) {
+        console.error('❌ [PROFILE] No profile data found in any expected location');
+        return {
+          success: false,
+          data: undefined as any,
+          message: 'Profile data not found in server response. Please contact support.'
+        };
+      }
+      
+      // Map the API response to the expected format with comprehensive fallbacks
+      const mappedData = {
+        user: {
+          id: profile.id || profile.userId || profile.employeeId || 0,
+          name: profile.name || profile.fullName || profile.userName || 'Unknown User',
+          email: profile.email || profile.emailAddress || 'no-email@example.com',
+          phone: profile.phoneNumber || profile.phone || profile.mobile || 'No phone',
+          profileImage: profile.photoUrl || profile.profileImage || profile.profilePicture || profile.avatar || undefined,
+          employeeId: String(profile.employeeId || profile.employeeCode || profile.id || 'N/A')
+        },
+        employeeCode: profile.employeeCode || String(profile.employeeId || ''),
+        nationality: profile.nationality || undefined,
+        jobTitle: profile.jobTitle || profile.designation || profile.position || profile.role || undefined,
+        department: profile.department || profile.departmentName || undefined,
+        companyName: profile.companyName || profile.company || profile.organization || undefined,
+        certifications: Array.isArray(profile.certifications) ? profile.certifications : [],
+        workPass: profile.workPass || {
+          id: profile.workPassId || 0,
+          passNumber: profile.workPassNumber || profile.passNumber || profile.workPermitNumber || 'N/A',
+          finNumber: profile.finNumber || profile.fin || undefined,
+          workPassType: profile.workPassType || profile.passType || 'WORK_PERMIT',
+          issueDate: profile.workPassIssueDate || profile.passIssueDate || new Date().toISOString(),
+          expiryDate: profile.workPassExpiryDate || profile.passExpiryDate || new Date().toISOString(),
+          status: (profile.workPassStatus || profile.passStatus || 'active') as 'active' | 'expired' | 'suspended' | 'new' | 'renewal' | 'under_renewal',
+          applicationDoc: profile.applicationDoc || undefined,
+          medicalDoc: profile.medicalDoc || undefined,
+          issuanceDoc: profile.issuanceDoc || undefined,
+          momDoc: profile.momDoc || undefined
+        },
+        salaryInfo: profile.salaryInfo || profile.salary || undefined
+      };
+      
+      console.log('✅ [PROFILE] Successfully mapped profile data:', JSON.stringify({
+        userId: mappedData.user.id,
+        userName: mappedData.user.name,
+        userEmail: mappedData.user.email,
+        employeeId: mappedData.user.employeeId,
+        hasProfileImage: !!mappedData.user.profileImage,
+        certificationsCount: mappedData.certifications.length,
+        hasWorkPass: !!mappedData.workPass,
+        hasSalaryInfo: !!mappedData.salaryInfo
+      }, null, 2));
+      
+      return {
+        success: true,
+        data: mappedData,
+        message: response.message || 'Profile loaded successfully'
+      };
+      
+    } catch (error: any) {
+      console.error('❌ [PROFILE] Error fetching profile:', {
+        error: error,
+        message: error?.message,
+        response: error?.response?.data,
+        status: error?.response?.status,
+        code: error?.code
+      });
+      
+      // Provide detailed, actionable error messages
+      let errorMessage = 'Failed to load profile data';
+      let errorDetails = '';
+      
+      if (error?.code === 'NETWORK_ERROR' || error?.message?.includes('Network Error')) {
+        errorMessage = 'Cannot connect to server';
+        errorDetails = 'Please check:\n• Internet connection\n• Server is running\n• Correct server address';
+      } else if (error?.code === 'ECONNREFUSED' || error?.message?.includes('ECONNREFUSED')) {
+        errorMessage = 'Server connection refused';
+        errorDetails = 'Backend server may not be running. Please contact support.';
+      } else if (error?.code === 'TIMEOUT' || error?.message?.includes('timeout')) {
+        errorMessage = 'Request timed out';
+        errorDetails = 'Server is taking too long to respond. Please try again.';
+      } else if (error?.response?.status === 401 || error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
+        errorMessage = 'Session expired';
+        errorDetails = 'Please log out and log in again.';
+      } else if (error?.response?.status === 403 || error?.message?.includes('403') || error?.message?.includes('Forbidden')) {
+        errorMessage = 'Access denied';
+        errorDetails = 'You do not have permission to view this profile.';
+      } else if (error?.response?.status === 404 || error?.message?.includes('404')) {
+        errorMessage = 'Profile not found';
+        errorDetails = 'Your profile data could not be found. Please contact support.';
+      } else if (error?.response?.status >= 500 || error?.message?.includes('500')) {
+        errorMessage = 'Server error';
+        errorDetails = 'The server encountered an error. Please try again later.';
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      const fullMessage = errorDetails ? `${errorMessage}\n\n${errorDetails}` : errorMessage;
+      
+      console.error('❌ [PROFILE] Final error message:', fullMessage);
+      
       return {
         success: false,
         data: undefined as any,
-        message: 'Invalid profile data format'
+        message: fullMessage
       };
-    } catch (error) {
-      console.error('❌ getProfile error:', error);
-      throw error;
     }
   }
 

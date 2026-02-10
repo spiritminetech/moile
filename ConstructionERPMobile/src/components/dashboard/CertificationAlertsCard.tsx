@@ -103,7 +103,7 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
         <Text style={styles.title}>🏆 Certification Alerts</Text>
         {alerts && alerts.length > 3 && (
           <TouchableOpacity onPress={handleViewAllAlerts}>
-            <Text style={styles.viewAllText}>View All ({alerts?.length || 0})</Text>
+            <Text style={styles.viewAllText}>{`View All (${alerts.length})`}</Text>
           </TouchableOpacity>
         )}
       </View>

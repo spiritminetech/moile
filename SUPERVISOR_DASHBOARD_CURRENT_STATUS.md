@@ -228,7 +228,7 @@ export interface SupervisorDashboardResponse {
 
 ### Error Log:
 ```
-❌ GET http://192.168.1.6:5002/api/supervisor/dashboard
+❌ GET http://192.168.0.3:5002/api/supervisor/dashboard
 📊 Status: 401
 📥 Response Data: {"message": "User authentication required", "success": false}
 ```

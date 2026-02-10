@@ -21,7 +21,7 @@ async function testMobileApiConnection() {
 
     // Test 1: Check if backend server is running on the expected port
     console.log('\n🔍 Test 1: Backend Server Status');
-    console.log('Expected URL: http://192.168.1.6:5002/api');
+    console.log('Expected URL: http://192.168.0.3:5002/api');
     console.log('Current NODE_ENV:', process.env.NODE_ENV || 'development');
     console.log('Server should be running on port:', process.env.PORT || 5002);
 
@@ -82,14 +82,14 @@ async function testMobileApiConnection() {
     // Test 4: Check mobile app configuration
     console.log('\n🔍 Test 4: Mobile App Configuration Check');
     console.log('Mobile app should be configured with:');
-    console.log('  - API_CONFIG.BASE_URL: http://192.168.1.6:5002/api');
+    console.log('  - API_CONFIG.BASE_URL: http://192.168.0.3:5002/api');
     console.log('  - API_CONFIG.MOCK_MODE: false');
     console.log('  - Network connectivity to backend server');
 
     // Test 5: Provide troubleshooting steps
     console.log('\n🔧 Troubleshooting Steps for Mobile App:');
     console.log('1. Check if backend server is running on port 5002');
-    console.log('2. Verify mobile device can reach 192.168.1.6:5002');
+    console.log('2. Verify mobile device can reach 192.168.0.3:5002');
     console.log('3. Clear mobile app cache by logging out and back in');
     console.log('4. If still not working, clear AsyncStorage completely');
     console.log('5. Check mobile app network logs for API call failures');

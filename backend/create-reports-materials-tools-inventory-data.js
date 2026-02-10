@@ -572,32 +572,32 @@ async function createReportsAndInventoryData() {
     console.log(`\n🎯 Test URLs for Mobile App:\n`);
     
     console.log(`1️⃣  Daily Progress Reports:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/daily-progress/${projectIds[0]}`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/daily-progress/${projectIds[0]}/2026-02-10`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/daily-progress/${projectIds[0]}`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/daily-progress/${projectIds[0]}/2026-02-10`);
     console.log(`   Headers: Authorization: Bearer <token>\n`);
     
     console.log(`2️⃣  Materials & Tools Combined:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/materials-tools?projectId=${projectIds[0]}`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/materials-tools?projectId=${projectIds[0]}`);
     console.log(`   Headers: Authorization: Bearer <token>\n`);
     
     console.log(`3️⃣  Materials Inventory:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/materials/inventory?projectId=${projectIds[0]}`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/materials/inventory?lowStock=true`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/materials/inventory?projectId=${projectIds[0]}`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/materials/inventory?lowStock=true`);
     console.log(`   Headers: Authorization: Bearer <token>\n`);
     
     console.log(`4️⃣  Tool Usage Log:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/tool-usage-log?projectId=${projectIds[0]}`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/tool-usage-log?projectId=${projectIds[0]}`);
     console.log(`   Headers: Authorization: Bearer <token>\n`);
     
     console.log(`5️⃣  Submit Daily Progress:`);
-    console.log(`   POST http://192.168.1.6:5002/api/supervisor/daily-progress`);
+    console.log(`   POST http://192.168.0.3:5002/api/supervisor/daily-progress`);
     console.log(`   Body: { projectId: ${projectIds[0]}, overallProgress: 75, remarks: "Good progress", issues: "None" }`);
     console.log(`   Headers: Authorization: Bearer <token>\n`);
 
     console.log(`\n📝 Login Credentials:`);
     console.log(`   Email: supervisor@gmail.com`);
     console.log(`   Password: password123`);
-    console.log(`   POST http://192.168.1.6:5002/api/auth/login\n`);
+    console.log(`   POST http://192.168.0.3:5002/api/auth/login\n`);
 
     console.log(`\n📱 Mobile App Testing:`);
     console.log(`   1. Login as supervisor@gmail.com`);

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = 'http://192.168.1.6:5002/api';
+const API_BASE = 'http://192.168.0.3:5002/api';
 
 async function getValidToken() {
   try {

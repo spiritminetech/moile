@@ -54,7 +54,7 @@ export const getNetworkConfig = (): NetworkConfig => {
  * Common IP addresses to try when localhost doesn't work
  */
 export const COMMON_LOCAL_IPS = [
-  '192.168.1.6',    // Your computer's IP address
+  '192.168.0.3',    // Your computer's IP address
   '192.168.1.100',  // Common home network
   '192.168.0.100',  // Alternative home network
   '192.168.1.101',

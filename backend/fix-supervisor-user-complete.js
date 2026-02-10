@@ -89,8 +89,8 @@ async function fixSupervisorUser() {
     console.log('  Email: supervisor@gmail.com');
     console.log('  Password: password123');
     console.log('\nTest the API:');
-    console.log('  POST http://192.168.1.6:5002/api/auth/login');
-    console.log('  GET http://192.168.1.6:5002/api/supervisor/active-tasks/1');
+    console.log('  POST http://192.168.0.3:5002/api/auth/login');
+    console.log('  GET http://192.168.0.3:5002/api/supervisor/active-tasks/1');
 
     await mongoose.disconnect();
     process.exit(0);

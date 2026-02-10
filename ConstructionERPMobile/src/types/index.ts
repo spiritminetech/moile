@@ -191,7 +191,7 @@ export interface Project {
   startDate: Date;
   endDate: Date;
   status: 'active' | 'completed' | 'on_hold';
-  supervisor: Supervisor;
+  supervisor?: Supervisor;
 }
 
 // New types to match API documentation
@@ -212,7 +212,7 @@ export interface DashboardApiResponse {
     name: string;
     phone: string;
     email: string;
-  };
+  } | null;
   worker: {
     id: number;
     name: string;

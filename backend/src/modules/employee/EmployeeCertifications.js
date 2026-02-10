@@ -16,7 +16,12 @@ const employeeCertificationsSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['training', 'professional cert']
+    enum: ['training', 'professional cert', 'new', 'renewal']
+  },
+  certificationType: {
+    type: String,
+    enum: ['NEW', 'RENEWAL'],
+    default: 'NEW'
   },
   ownership: {
     type: String,

@@ -13,8 +13,13 @@ const employeeWorkPassSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PENDING', 'ACTIVE', 'EXPIRED'],
+    enum: ['PENDING', 'ACTIVE', 'EXPIRED', 'NEW', 'RENEWAL', 'UNDER_RENEWAL'],
     default: 'ACTIVE'
+  },
+  workPassType: {
+    type: String,
+    enum: ['WORK_PERMIT', 'S_PASS', 'EMPLOYMENT_PASS', 'DEPENDENT_PASS'],
+    default: 'WORK_PERMIT'
   },
   workPermitNo: {
     type: String,

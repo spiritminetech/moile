@@ -248,19 +248,19 @@ async function fixLeaveRequestsAndTaskCounts() {
     console.log(`\n🎯 Test URLs:\n`);
     
     console.log(`1️⃣  Pending Leave Requests:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-leave-requests`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-leave-requests`);
     console.log(`   Expected: ${createdLeaveRequests.length} leave requests\n`);
     
     console.log(`2️⃣  Pending Approvals Summary:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-approvals`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-approvals`);
     console.log(`   Expected: Leave requests included in summary\n`);
     
     console.log(`3️⃣  Dashboard with Leave Requests:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/dashboard`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/dashboard`);
     console.log(`   Expected: pendingApprovals.leaveRequests > 0\n`);
     
     console.log(`4️⃣  Daily Progress Reports with Task Counts:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/daily-progress/${projectIds[0]}?from=2026-02-06&to=2026-02-10`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/daily-progress/${projectIds[0]}?from=2026-02-06&to=2026-02-10`);
     console.log(`   Expected: Reports with taskMetrics showing actual task counts\n`);
 
     console.log(`\n📝 Login Credentials:`);

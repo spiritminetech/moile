@@ -147,7 +147,7 @@ async function fixLeaveRequestsFiltering() {
     console.log(`   - Supervisor's projects: ${projects.length}`);
     
     console.log(`\n🎯 Now test the APIs again:`);
-    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-leave-requests`);
+    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-leave-requests`);
     console.log(`   Expected: Should now show leave requests for supervisor's workers`);
 
   } catch (error) {

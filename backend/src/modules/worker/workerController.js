@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import bcrypt from "bcryptjs";
 import multer from "multer";
+import mongoose from "mongoose";
 import FleetTask from "../fleetTask/models/FleetTask.js";
 import FleetTaskPassenger from "../fleetTask/submodules/fleetTaskPassenger/FleetTaskPassenger.js";
 import Project from '../project/models/Project.js';
@@ -190,29 +191,42 @@ export const getWorkerProfile = async (req, res) => {
 
     const profile = {
       employeeId: employee.id,
+      employeeCode: employee.employeeCode || null,
       name: employee.fullName,
       email: user.email,
       phoneNumber: employee.phone || user.phone || "N/A",
+      nationality: employee.nationality || "N/A",
+      jobTitle: employee.jobTitle || "Worker",
+      department: employee.department || "Construction",
       companyName: company.name,
       role,
       photoUrl: fullPhotoUrl,
-      employeeCode: employee.employeeCode || null,
-      jobTitle: employee.jobTitle || "Worker",
-      department: employee.department || "Construction",
       status: employee.status || "ACTIVE",
       workPassNumber: workPass?.workPermitNo || workPass?.finNumber || null,
       workPass: workPass ? {
         id: workPass.id || workPass._id,
-        passNumber: workPass.workPermitNo || workPass.finNumber || 'N/A',
+        passNumber: workPass.workPermitNo || 'N/A',
+        finNumber: workPass.finNumber || 'N/A',
+        workPassType: workPass.workPassType || 'WORK_PERMIT',
         issueDate: workPass.issuanceDate || workPass.createdAt,
         expiryDate: workPass.expiryDate,
-        status: workPass.status?.toLowerCase() || 'active'
+        status: workPass.status?.toLowerCase() || 'active',
+        applicationDoc: workPass.applicationDoc || null,
+        medicalDoc: workPass.medicalDoc || null,
+        issuanceDoc: workPass.issuanceDoc || null,
+        momDoc: workPass.momDoc || null
       } : {
         id: 0,
         passNumber: 'N/A',
+        finNumber: 'N/A',
+        workPassType: 'WORK_PERMIT',
         issueDate: new Date().toISOString(),
         expiryDate: new Date().toISOString(),
-        status: 'active'
+        status: 'active',
+        applicationDoc: null,
+        medicalDoc: null,
+        issuanceDoc: null,
+        momDoc: null
       },
       certifications: certifications ? certifications.map(cert => {
         // Calculate status based on expiry date
@@ -250,11 +264,15 @@ export const getWorkerProfile = async (req, res) => {
         return {
           id: cert.id || cert._id?.toString() || Math.random().toString(),
           name: cert.name || 'Unknown Certification',
+          type: cert.type || 'training',
+          certificationType: cert.certificationType || 'NEW',
+          ownership: cert.ownership || 'company',
           issuer: issuer,
           issueDate: cert.issueDate ? cert.issueDate.toISOString() : new Date().toISOString(),
           expiryDate: cert.expiryDate ? cert.expiryDate.toISOString() : null,
           certificateNumber: certificateNumber,
-          status: status
+          status: status,
+          documentPath: cert.documentPath || null
         };
       }) : [],
       createdAt: employee.createdAt || user.createdAt,
@@ -622,6 +640,21 @@ export const getWorkerTasksToday = async (req, res) => {
         message: "Invalid project data detected",
         error: "INVALID_PROJECT_DATA"
       });
+    }
+
+    // Get client information from client collection if clientId exists
+    let clientName = project.clientName || "N/A";
+    if (project.clientId) {
+      try {
+        const clientsCollection = mongoose.connection.db.collection('clients');
+        const client = await clientsCollection.findOne({ id: project.clientId });
+        if (client && client.name) {
+          clientName = client.name;
+        }
+      } catch (clientError) {
+        console.error("❌ Error fetching client information:", clientError);
+        // Continue with existing clientName from project
+      }
     }
 
     // Get supervisor information with error handling
@@ -1089,7 +1122,7 @@ export const getWorkerTasksToday = async (req, res) => {
           id: project.id,
           name: validateStringField(project.projectName, { default: "N/A", maxLength: 200 }).value,
           code: validateStringField(project.projectCode, { default: "N/A", maxLength: 100 }).value,
-          clientName: validateStringField(project.clientName, { default: "N/A", maxLength: 200 }).value,
+          clientName: validateStringField(clientName, { default: "N/A", maxLength: 200 }).value,
           location: validateStringField(project.address, { default: "N/A", maxLength: 500 }).value,
           geofence: {
             latitude: projectGeofence.center.latitude,
@@ -1097,12 +1130,12 @@ export const getWorkerTasksToday = async (req, res) => {
             radius: projectGeofence.radius
           }
         },
-        supervisor: {
-          id: supervisor?.id || 0,
-          name: validateStringField(supervisor?.fullName, { default: "N/A", maxLength: 200 }).value,
-          phone: validateStringField(supervisor?.phone, { default: "N/A", maxLength: 50 }).value,
-          email: validateStringField(supervisor?.email, { default: "N/A", maxLength: 200 }).value
-        },
+        supervisor: supervisor && supervisor.fullName ? {
+          id: supervisor.id,
+          name: supervisor.fullName,
+          phone: supervisor.phone || "N/A",
+          email: supervisor.email || "N/A"
+        } : null,
         worker: {
           id: employee.id,
           name: validateStringField(employee.fullName, { default: "N/A", maxLength: 200 }).value,
@@ -1438,7 +1471,7 @@ export const getWorkerTodayTask = async (req, res) => {
         projectId,
         projectName: project?.projectName || "N/A",
         projectCode: project?.projectCode || "N/A",
-        supervisorName: supervisor?.fullName || "N/A",
+        supervisorName: employee?.fullName || "N/A",
         supervisorPhone: supervisor?.phone || "N/A",
         tasks: taskDetails
       }

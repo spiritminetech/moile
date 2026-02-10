@@ -32,6 +32,16 @@ const employeeSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  department: {
+    type: String,
+    trim: true,
+    default: 'Construction'
+  },
+  nationality: {
+    type: String,
+    trim: true,
+    default: null
+  },
   photoUrl: {  // New field
     type: String,
     default: null

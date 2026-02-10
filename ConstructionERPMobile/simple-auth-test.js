@@ -5,7 +5,7 @@ async function testBasicAuth() {
   try {
     console.log('Testing basic authentication...');
     
-    const response = await axios.post('http://192.168.1.6:5002/api/auth/login', {
+    const response = await axios.post('http://192.168.0.3:5002/api/auth/login', {
       email: 'worker@test.com',
       password: 'password123'
     });
@@ -19,7 +19,7 @@ async function testBasicAuth() {
     });
     
     // Test logout
-    const logoutResponse = await axios.post('http://192.168.1.6:5002/api/auth/logout', {}, {
+    const logoutResponse = await axios.post('http://192.168.0.3:5002/api/auth/logout', {}, {
       headers: { Authorization: `Bearer ${response.data.data.token}` }
     });
     

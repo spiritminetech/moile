@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://192.168.1.6:5002';
+const BASE_URL = 'http://192.168.0.3:5002';
 
 async function testLunchWithProject1() {
   console.log('🧪 Testing Lunch with Project 1');

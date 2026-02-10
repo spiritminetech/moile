@@ -163,8 +163,25 @@ class ApiClient {
     // Use the comprehensive error handler
     const errorInfo = handleApiError(error, 'API Client');
     
+    // Provide more user-friendly error messages
+    let userMessage = errorInfo.message;
+    
+    if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+      userMessage = 'Network connection error. Please check your internet connection and try again.';
+    } else if (error.response?.status === 401) {
+      userMessage = 'Your session has expired. Please log in again.';
+    } else if (error.response?.status === 403) {
+      userMessage = 'Access denied. Please contact your supervisor.';
+    } else if (error.response?.status === 404) {
+      userMessage = 'The requested information was not found. Please contact support.';
+    } else if (error.response?.status >= 500) {
+      userMessage = 'Server error. Please try again later or contact support if the problem persists.';
+    } else if (error.code === 'TIMEOUT' || error.message?.includes('timeout')) {
+      userMessage = 'Request timed out. Please check your connection and try again.';
+    }
+    
     return {
-      message: errorInfo.message,
+      message: userMessage,
       code: errorInfo.code?.toString() || 'UNKNOWN_ERROR',
       details: errorInfo.details,
     };

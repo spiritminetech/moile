@@ -1,7 +1,7 @@
 import axios from 'axios';
 import db from './src/config/database.js';
 
-const BASE_URL = 'http://192.168.1.6:5002';
+const BASE_URL = 'http://192.168.0.3:5002';
 
 async function setupTestData() {
   console.log('Setting up test data...\n');

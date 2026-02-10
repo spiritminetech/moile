@@ -90,7 +90,7 @@ async function createTestData() {
     console.log('✅ TEST DATA READY!');
     console.log('='.repeat(60));
     console.log('\n📋 You can now test manual attendance override with:');
-    console.log('\nPOST http://192.168.1.6:5002/api/supervisor/manual-attendance-override');
+    console.log('\nPOST http://192.168.0.3:5002/api/supervisor/manual-attendance-override');
     console.log('\nBody:');
     console.log(JSON.stringify({
       employeeId: 104,

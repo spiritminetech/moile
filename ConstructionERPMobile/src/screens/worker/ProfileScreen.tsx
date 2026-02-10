@@ -25,21 +25,36 @@ interface ProfileData {
     profileImage?: string;
     employeeId: string;
   };
+  employeeCode?: string;
+  nationality?: string;
+  jobTitle?: string;
+  department?: string;
+  companyName?: string;
   certifications: Array<{
     id: number;
     name: string;
+    type?: string;
+    certificationType?: string;
+    ownership?: string;
     issuer: string;
     issueDate: string;
     expiryDate: string;
     certificateNumber: string;
     status: 'active' | 'expired' | 'expiring_soon';
+    documentPath?: string;
   }>;
   workPass: {
     id: number;
     passNumber: string;
+    finNumber?: string;
+    workPassType?: string;
     issueDate: string;
     expiryDate: string;
-    status: 'active' | 'expired' | 'suspended';
+    status: 'active' | 'expired' | 'suspended' | 'new' | 'renewal' | 'under_renewal';
+    applicationDoc?: string;
+    medicalDoc?: string;
+    issuanceDoc?: string;
+    momDoc?: string;
   };
   salaryInfo?: {
     basicSalary: number;
@@ -90,26 +105,57 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
         hasData: !!profileResponse.data,
         hasUser: !!profileResponse.data?.user,
         hasProfileImage: !!profileResponse.data?.user?.profileImage,
-        profileImageUrl: profileResponse.data?.user?.profileImage
+        profileImageUrl: profileResponse.data?.user?.profileImage,
+        message: profileResponse.message
       });
 
-      if (profileResponse.success) {
+      if (profileResponse.success && profileResponse.data) {
         setProfileData(profileResponse.data);
+        console.log('✅ Profile data loaded successfully');
       } else {
-        throw new Error(profileResponse.message || 'Failed to load profile data');
+        const errorMsg = profileResponse.message || 'Failed to load profile data';
+        console.warn('❌ Profile loading failed:', errorMsg);
+        throw new Error(errorMsg);
       }
 
       if (alertsResponse.success) {
-        setCertificationAlerts(alertsResponse.data);
+        setCertificationAlerts(alertsResponse.data || []);
+        console.log('✅ Certification alerts loaded successfully');
       } else {
         // Don't fail the whole screen if alerts fail
         console.warn('Failed to load certification alerts:', alertsResponse.message);
+        setCertificationAlerts([]);
       }
     } catch (err) {
       console.error('❌ Profile loading error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load profile data';
+      let errorMessage = 'Failed to load profile data';
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      }
+      
       setError(errorMessage);
-      Alert.alert('Error', errorMessage);
+      
+      // Show user-friendly alert with retry option
+      Alert.alert(
+        'Profile Loading Error',
+        errorMessage,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Retry', 
+            style: 'default',
+            onPress: () => loadProfileData(false)
+          },
+          {
+            text: 'Help',
+            style: 'default',
+            onPress: () => navigation.navigate('HelpSupport')
+          }
+        ]
+      );
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -147,13 +193,19 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
   };
 
   const getWorkPassStatusColor = (status: string): string => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'active':
         return '#4CAF50';
       case 'expired':
         return '#F44336';
       case 'suspended':
         return '#FF9800';
+      case 'new':
+        return '#2196F3';
+      case 'renewal':
+        return '#9C27B0';
+      case 'under_renewal':
+        return '#FF5722';
       default:
         return '#757575';
     }
@@ -210,6 +262,38 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
           
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{profileData.user.name}</Text>
+          </View>
+
+          {profileData.employeeCode && (
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Employee Code:</Text>
+              <Text style={styles.infoValue}>{profileData.employeeCode}</Text>
+            </View>
+          )}
+          
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Full Name:</Text>
+            <Text style={styles.infoValue}>{profileData.user.name}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Nationality:</Text>
+            <Text style={styles.infoValue}>{profileData.nationality || 'N/A'}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Trade/Designation:</Text>
+            <Text style={styles.infoValue}>{profileData.jobTitle || 'N/A'}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Department:</Text>
+            <Text style={styles.infoValue}>{profileData.department || 'N/A'}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Company:</Text>
+            <Text style={styles.infoValue}>{profileData.companyName || 'N/A'}</Text>
           </View>
           
           <View style={styles.infoRow}>
@@ -270,6 +354,20 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
             </View>
             
             <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Certification Type:</Text>
+              <Text style={styles.infoValue}>
+                {cert.certificationType === 'NEW' ? 'New' : 'Renewal'}
+              </Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Ownership:</Text>
+              <Text style={styles.infoValue}>
+                {cert.ownership === 'company' ? 'Company-sponsored' : 'Personal'}
+              </Text>
+            </View>
+            
+            <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Issuer:</Text>
               <Text style={styles.infoValue}>{cert.issuer || 'N/A'}</Text>
             </View>
@@ -305,9 +403,43 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
   const renderWorkPass = () => {
     if (!profileData?.workPass) return null;
 
+    const getWorkPassTypeDisplay = (type: string): string => {
+      switch (type) {
+        case 'WORK_PERMIT':
+          return 'Work Permit';
+        case 'S_PASS':
+          return 'S Pass';
+        case 'EMPLOYMENT_PASS':
+          return 'Employment Pass';
+        case 'DEPENDENT_PASS':
+          return 'Dependent Pass';
+        default:
+          return 'Work Permit';
+      }
+    };
+
+    const getWorkPassStatusDisplay = (status: string): string => {
+      switch (status?.toLowerCase()) {
+        case 'new':
+          return 'New';
+        case 'renewal':
+          return 'Renewal';
+        case 'under_renewal':
+          return 'Under Renewal';
+        case 'active':
+          return 'Active';
+        case 'expired':
+          return 'Expired';
+        case 'suspended':
+          return 'Suspended';
+        default:
+          return 'Active';
+      }
+    };
+
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Work Pass</Text>
+        <Text style={styles.sectionTitle}>Work Pass Details</Text>
         <View style={styles.card}>
           <View style={styles.certificationHeader}>
             <Text style={styles.certificationName}>Work Authorization</Text>
@@ -316,15 +448,29 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               { backgroundColor: getWorkPassStatusColor(profileData.workPass.status) }
             ]}>
               <Text style={styles.statusText}>
-                {(profileData.workPass?.status || 'unknown').toUpperCase()}
+                {getWorkPassStatusDisplay(profileData.workPass.status)}
               </Text>
             </View>
           </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Work Pass Type:</Text>
+            <Text style={styles.infoValue}>
+              {getWorkPassTypeDisplay(profileData.workPass.workPassType || 'WORK_PERMIT')}
+            </Text>
+          </View>
           
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Pass Number:</Text>
+            <Text style={styles.infoLabel}>Work Permit Number:</Text>
             <Text style={styles.infoValue}>{profileData.workPass.passNumber}</Text>
           </View>
+
+          {profileData.workPass.finNumber && profileData.workPass.finNumber !== profileData.workPass.passNumber && (
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>FIN Number:</Text>
+              <Text style={styles.infoValue}>{profileData.workPass.finNumber}</Text>
+            </View>
+          )}
           
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Issue Date:</Text>
@@ -340,6 +486,44 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               {formatDate(profileData.workPass.expiryDate)}
             </Text>
           </View>
+
+          {/* Documents Section */}
+          {(profileData.workPass.issuanceDoc || profileData.workPass.momDoc || 
+            profileData.workPass.applicationDoc || profileData.workPass.medicalDoc) && (
+            <>
+              <View style={styles.documentsHeader}>
+                <Text style={styles.documentsTitle}>Documents (View Only)</Text>
+              </View>
+              
+              {profileData.workPass.issuanceDoc && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Issuance Letter:</Text>
+                  <Text style={styles.documentValue}>Available</Text>
+                </View>
+              )}
+
+              {profileData.workPass.momDoc && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>MOM Reference:</Text>
+                  <Text style={styles.documentValue}>Available</Text>
+                </View>
+              )}
+
+              {profileData.workPass.applicationDoc && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Application Document:</Text>
+                  <Text style={styles.documentValue}>Available</Text>
+                </View>
+              )}
+
+              {profileData.workPass.medicalDoc && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Medical Document:</Text>
+                  <Text style={styles.documentValue}>Available</Text>
+                </View>
+              )}
+            </>
+          )}
         </View>
       </View>
     );
@@ -441,10 +625,32 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.errorContainer}>
         <StatusBar barStyle="light-content" />
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => loadProfileData()}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+        <View style={styles.errorContent}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorTitle}>Profile Loading Failed</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          
+          <View style={styles.errorHintContainer}>
+            <Text style={styles.errorHintTitle}>💡 Troubleshooting Tips:</Text>
+            <Text style={styles.errorHintText}>• Check your internet connection</Text>
+            <Text style={styles.errorHintText}>• Make sure you're logged in</Text>
+            <Text style={styles.errorHintText}>• Try closing and reopening the app</Text>
+            <Text style={styles.errorHintText}>• Contact support if issue persists</Text>
+          </View>
+          
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => loadProfileData()}
+          >
+            <Text style={styles.retryButtonText}>🔄 Try Again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.helpButton} 
+            onPress={() => navigation.navigate('HelpSupport')}
+          >
+            <Text style={styles.helpButtonText}>📞 Contact Support</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -669,23 +875,73 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: '#F5F5F5',
+  },
+  errorContent: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 24,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    maxWidth: 300,
+    width: '100%',
+  },
+  errorIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    textAlign: 'center',
+    marginBottom: 12,
   },
   errorText: {
-    fontSize: 16,
-    color: '#F44336',
+    fontSize: 14,
+    color: '#666666',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  errorHintContainer: {
+    backgroundColor: '#F8F9FA',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 24,
+    width: '100%',
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  errorHintTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  errorHintText: {
+    fontSize: 13,
+    color: '#666666',
+    marginBottom: 4,
+    lineHeight: 18,
   },
   retryButton: {
     backgroundColor: '#2196F3',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
+    marginBottom: 12,
+    width: '100%',
   },
   retryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
   },
   helpButton: {
     padding: 16,
@@ -703,6 +959,46 @@ const styles = StyleSheet.create({
   helpButtonSubtext: {
     fontSize: 14,
     color: '#666666',
+  },
+  documentsHeader: {
+    marginTop: 16,
+    marginBottom: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  documentsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  documentValue: {
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '500',
+    flex: 2,
+    textAlign: 'right',
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyStateIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyStateMessage: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

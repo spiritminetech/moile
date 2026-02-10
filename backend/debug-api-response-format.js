@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE = 'http://192.168.1.6:5002/api';
+const API_BASE = 'http://192.168.0.3:5002/api';
 
 async function debugApiResponseFormat() {
   try {
@@ -69,7 +69,7 @@ async function debugApiResponseFormat() {
       
       // Try the root endpoint
       try {
-        const rootResponse = await axios.get('http://192.168.1.6:5002/', { timeout: 5000 });
+        const rootResponse = await axios.get('http://192.168.0.3:5002/', { timeout: 5000 });
         console.log('✅ Root endpoint accessible:', rootResponse.status);
       } catch (rootError) {
         console.log('❌ Root endpoint also not accessible:', rootError.message);

@@ -4,7 +4,7 @@
 const axios = require('axios');
 
 // Configuration
-const API_BASE_URL = 'http://192.168.1.6:5002/api'; // Update with your backend URL
+const API_BASE_URL = 'http://192.168.0.3:5002/api'; // Update with your backend URL
 const DRIVER_CREDENTIALS = {
   email: 'driver1@gmail.com',
   password: 'Anbu24@',

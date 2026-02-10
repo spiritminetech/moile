@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Project from './models/Project.js';
 import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
 // import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
@@ -16,6 +17,21 @@ export const getAllProjects = async (req, res) => {
       .skip((Number(page) - 1) * Number(limit));
 
     const total = await Project.countDocuments(filter);
+
+    // Populate client names for projects with clientId
+    const clientsCollection = mongoose.connection.db.collection('clients');
+    for (const project of projects) {
+      if (project.clientId) {
+        try {
+          const client = await clientsCollection.findOne({ id: project.clientId });
+          if (client && client.name) {
+            project.clientName = client.name;
+          }
+        } catch (clientError) {
+          console.error("❌ Error fetching client for project:", project.id, clientError);
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -57,6 +73,21 @@ export const getProjectsByCompany = async (req, res) => {
 
     const total = await Project.countDocuments(filter);
 
+    // Populate client names for projects with clientId
+    const clientsCollection = mongoose.connection.db.collection('clients');
+    for (const project of projects) {
+      if (project.clientId) {
+        try {
+          const client = await clientsCollection.findOne({ id: project.clientId });
+          if (client && client.name) {
+            project.clientName = client.name;
+          }
+        } catch (clientError) {
+          console.error("❌ Error fetching client for project:", project.id, clientError);
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: projects,
@@ -88,6 +119,20 @@ export const getProjectById = async (req, res) => {
     const project = await Project.findOne({ id: projectId });
     if (!project) {
       return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // Get client information from client collection if clientId exists
+    if (project.clientId) {
+      try {
+        const clientsCollection = mongoose.connection.db.collection('clients');
+        const client = await clientsCollection.findOne({ id: project.clientId });
+        if (client && client.name) {
+          project.clientName = client.name;
+        }
+      } catch (clientError) {
+        console.error("❌ Error fetching client information:", clientError);
+        // Continue with existing clientName from project
+      }
     }
 
     res.json({ success: true, data: project });
@@ -161,6 +206,20 @@ export const updateProject = async (req, res) => {
     const currentProject = await Project.findOne({ id: projectId });
     if (!currentProject) {
       return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    // If clientId is being updated, fetch and update clientName from client collection
+    if (updateData.clientId) {
+      try {
+        const clientsCollection = mongoose.connection.db.collection('clients');
+        const client = await clientsCollection.findOne({ id: updateData.clientId });
+        if (client && client.name) {
+          updateData.clientName = client.name;
+        }
+      } catch (clientError) {
+        console.error("❌ Error fetching client information:", clientError);
+        // Continue with update without clientName
+      }
     }
 
     const project = await Project.findOneAndUpdate(
