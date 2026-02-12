@@ -194,6 +194,33 @@ const TripUpdatesScreen: React.FC = () => {
     loadTransportTasks(false);
   }, [loadTransportTasks]);
 
+  // Handle refresh location with feedback
+  const handleRefreshLocation = useCallback(async () => {
+    try {
+      console.log('🔄 Refreshing location...');
+      Alert.alert('🔄 Refreshing Location', 'Getting current GPS location...');
+      
+      const location = await getCurrentLocation();
+      
+      Alert.alert(
+        '✅ Location Updated',
+        `GPS: ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}\n` +
+        `Accuracy: ${location.accuracy.toFixed(0)}m\n` +
+        `Time: ${new Date(location.timestamp).toLocaleTimeString()}`,
+        [{ text: 'OK' }]
+      );
+      
+      console.log('✅ Location refreshed:', location);
+    } catch (error: any) {
+      console.error('❌ Location refresh error:', error);
+      Alert.alert(
+        '⚠️ Location Error',
+        error.message || 'Failed to get current location. Please check your GPS settings.',
+        [{ text: 'OK' }]
+      );
+    }
+  }, [getCurrentLocation]);
+
   // Handle task selection
   const handleTaskSelection = useCallback((task: TransportTask) => {
     setSelectedTask(task);
@@ -718,7 +745,7 @@ const TripUpdatesScreen: React.FC = () => {
             
             <ConstructionButton
               title="🔄 Refresh Location"
-              onPress={getCurrentLocation}
+              onPress={handleRefreshLocation}
               variant="secondary"
               size="small"
               style={styles.refreshLocationButton}

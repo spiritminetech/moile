@@ -476,7 +476,12 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
 
   return (
     <ConstructionCard title="Trip Status Updates" variant="elevated">
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.container} 
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={true}
+        nestedScrollEnabled={true}
+      >
         {/* Current Status */}
         <View style={styles.currentStatus}>
           <Text style={styles.statusTitle}>Current Status</Text>
@@ -839,7 +844,11 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    maxHeight: 600,
+    flex: 1,
+  },
+  contentContainer: {
+    flexGrow: 1,
+    paddingBottom: ConstructionTheme.spacing.xxl || 32,
   },
   currentStatus: {
     marginBottom: ConstructionTheme.spacing.lg,

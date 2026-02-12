@@ -1,0 +1,322 @@
+// Verify Route Start - Check Current State
+// Run these queries to see what happened when you started the route
+
+// ============================================
+// 1. Check Current Task Status
+// ============================================
+
+db.fleetTasks.findOne({ id: 10003 });
+
+// Expected after route start:
+// {
+//   "status": "ONGOING",  // ✅ Changed from PLANNED
+//   "actualStartTime": ISODate("..."),  // ✅ Now has timestamp
+//   "updatedAt": ISODate("...")  // ✅ Updated
+// }
+
+// ============================================
+// 2. Check What Changed
+// ============================================
+
+db.fleetTasks.findOne(
+  { id: 10003 },
+  {
+    id: 1,
+    status: 1,
+    actualStartTime: 1,
+    actualEndTime: 1,
+    notes: 1,
+    driverId: 1,
+    vehicleId: 1,
+    updatedAt: 1,
+    createdAt: 1
+  }
+);
+
+// ============================================
+// 3. Check Attendance (Was driver clocked in?)
+// ============================================
+
+db.attendance.find(
+  {
+    employeeId: 50,
+    checkIn: { $ne: null },
+    pendingCheckout: true
+  },
+  {
+    id: 1,
+    employeeId: 1,
+    date: 1,
+    checkIn: 1,
+    checkOut: 1,
+    pendingCheckout: 1,
+    lastLatitude: 1,
+    lastLongitude: 1
+  }
+).sort({ date: -1 }).limit(1);
+
+// ============================================
+// 4. Check Vehicle Assignment
+// ============================================
+
+db.fleetVehicles.findOne(
+  { id: 1 },
+  {
+    id: 1,
+    registrationNo: 1,
+    assignedDriverId: 1,
+    assignedDriverName: 1,
+    status: 1
+  }
+);
+
+// ============================================
+// 5. Complete Validation Check
+// ============================================
+
+db.fleetTasks.aggregate([
+  { $match: { id: 10003 } },
+  {
+    $lookup: {
+      from: "fleetVehicles",
+      localField: "vehicleId",
+      foreignField: "id",
+      as: "vehicle"
+    }
+  },
+  { $unwind: { path: "$vehicle", preserveNullAndEmptyArrays: true } },
+  {
+    $lookup: {
+      from: "drivers",
+      localField: "driverId",
+      foreignField: "id",
+      as: "driver"
+    }
+  },
+  { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
+  {
+    $lookup: {
+      from: "attendance",
+      let: { driverId: "$driverId" },
+      pipeline: [
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $eq: ["$employeeId", "$$driverId"] },
+                { $ne: ["$checkIn", null] },
+                { $eq: ["$pendingCheckout", true] }
+              ]
+            }
+          }
+        },
+        { $sort: { date: -1 } },
+        { $limit: 1 }
+      ],
+      as: "attendance"
+    }
+  },
+  {
+    $project: {
+      // Task Info
+      taskId: "$id",
+      taskStatus: "$status",
+      actualStartTime: "$actualStartTime",
+      actualEndTime: "$actualEndTime",
+      notes: "$notes",
+      
+      // Vehicle Info
+      vehicleId: "$vehicleId",
+      vehicleRegistrationNo: "$vehicle.registrationNo",
+      vehicleAssignedDriverId: "$vehicle.assignedDriverId",
+      
+      // Driver Info
+      driverId: "$driverId",
+      driverName: "$driver.employeeName",
+      driverVehicleId: "$driver.vehicleId",
+      
+      // Attendance Info
+      hasAttendance: { $gt: [{ $size: "$attendance" }, 0] },
+      attendanceCheckIn: { $arrayElemAt: ["$attendance.checkIn", 0] },
+      attendanceLocation: {
+        latitude: { $arrayElemAt: ["$attendance.lastLatitude", 0] },
+        longitude: { $arrayElemAt: ["$attendance.lastLongitude", 0] }
+      },
+      
+      // Validations
+      validation_taskStarted: {
+        $cond: [
+          { $eq: ["$status", "ONGOING"] },
+          "✅ Route started successfully",
+          "❌ Route not started"
+        ]
+      },
+      
+      validation_hasStartTime: {
+        $cond: [
+          { $ne: ["$actualStartTime", null] },
+          "✅ Start time recorded",
+          "❌ No start time"
+        ]
+      },
+      
+      validation_vehicleAssignment: {
+        $cond: [
+          { $eq: ["$vehicle.assignedDriverId", "$driverId"] },
+          "✅ Vehicle assigned to driver",
+          "❌ Vehicle not assigned"
+        ]
+      },
+      
+      validation_driverAssignment: {
+        $cond: [
+          { $eq: ["$driver.vehicleId", "$vehicleId"] },
+          "✅ Driver assigned to vehicle",
+          "❌ Driver not assigned"
+        ]
+      },
+      
+      validation_attendance: {
+        $cond: [
+          { $gt: [{ $size: "$attendance" }, 0] },
+          "✅ Driver clocked in",
+          "❌ Driver not clocked in"
+        ]
+      },
+      
+      // Overall Status
+      allValidationsPassed: {
+        $and: [
+          { $eq: ["$status", "ONGOING"] },
+          { $ne: ["$actualStartTime", null] },
+          { $eq: ["$vehicle.assignedDriverId", "$driverId"] },
+          { $eq: ["$driver.vehicleId", "$vehicleId"] },
+          { $gt: [{ $size: "$attendance" }, 0] }
+        ]
+      }
+    }
+  }
+]);
+
+// ============================================
+// 6. Check Route Log (if any)
+// ============================================
+
+db.fleetTasks.findOne(
+  { id: 10003 },
+  { routeLog: 1 }
+);
+
+// ============================================
+// 7. Timeline - What happened and when
+// ============================================
+
+db.fleetTasks.findOne(
+  { id: 10003 },
+  {
+    id: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    actualStartTime: 1,
+    actualEndTime: 1,
+    status: 1
+  }
+);
+
+// Calculate duration
+db.fleetTasks.aggregate([
+  { $match: { id: 10003 } },
+  {
+    $project: {
+      taskId: "$id",
+      status: 1,
+      createdAt: 1,
+      actualStartTime: 1,
+      actualEndTime: 1,
+      updatedAt: 1,
+      
+      // Time calculations
+      taskCreatedAt: {
+        $dateToString: {
+          format: "%Y-%m-%d %H:%M:%S",
+          date: "$createdAt"
+        }
+      },
+      routeStartedAt: {
+        $dateToString: {
+          format: "%Y-%m-%d %H:%M:%S",
+          date: "$actualStartTime"
+        }
+      },
+      lastUpdatedAt: {
+        $dateToString: {
+          format: "%Y-%m-%d %H:%M:%S",
+          date: "$updatedAt"
+        }
+      },
+      
+      // Duration since start (in minutes)
+      minutesSinceStart: {
+        $cond: [
+          { $ne: ["$actualStartTime", null] },
+          {
+            $divide: [
+              { $subtract: [new Date(), "$actualStartTime"] },
+              60000  // Convert milliseconds to minutes
+            ]
+          },
+          0
+        ]
+      }
+    }
+  }
+]);
+
+// ============================================
+// 8. Check if Start Route button should be hidden now
+// ============================================
+
+db.fleetTasks.aggregate([
+  { $match: { id: 10003 } },
+  {
+    $project: {
+      taskId: "$id",
+      status: 1,
+      
+      // Frontend status mapping
+      frontendStatus: {
+        $switch: {
+          branches: [
+            { case: { $eq: ["$status", "PLANNED"] }, then: "pending" },
+            { case: { $eq: ["$status", "ONGOING"] }, then: "en_route_pickup" },
+            { case: { $eq: ["$status", "PICKUP_COMPLETE"] }, then: "pickup_complete" },
+            { case: { $eq: ["$status", "EN_ROUTE_DROPOFF"] }, then: "en_route_dropoff" },
+            { case: { $eq: ["$status", "COMPLETED"] }, then: "completed" },
+            { case: { $eq: ["$status", "CANCELLED"] }, then: "cancelled" }
+          ],
+          default: "unknown"
+        }
+      },
+      
+      // Button display logic
+      showStartRouteButton: { $eq: ["$status", "PLANNED"] },
+      showUpdateStatusButton: {
+        $in: ["$status", ["ONGOING", "PICKUP_COMPLETE", "EN_ROUTE_DROPOFF"]]
+      },
+      
+      buttonToShow: {
+        $cond: [
+          { $eq: ["$status", "PLANNED"] },
+          "🚗 Start Route",
+          {
+            $cond: [
+              { $in: ["$status", ["ONGOING", "PICKUP_COMPLETE", "EN_ROUTE_DROPOFF"]] },
+              "📍 Update Status",
+              "No button (completed/cancelled)"
+            ]
+          }
+        ]
+      }
+    }
+  }
+]);

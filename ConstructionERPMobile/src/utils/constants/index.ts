@@ -31,7 +31,8 @@ const getApiBaseUrl = (): string => {
 
 export const API_CONFIG = {
   BASE_URL: getApiBaseUrl(),
-  TIMEOUT: 15000, // Reduced from 30000 to 15000 (15 seconds)
+  TIMEOUT: 15000, // Default timeout for regular API calls (15 seconds)
+  UPLOAD_TIMEOUT: 60000, // Extended timeout for file uploads (60 seconds)
   RETRY_ATTEMPTS: 3,
   // Mock mode for development when backend is not available
   MOCK_MODE: false, // Set to true when you don't have a backend

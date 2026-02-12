@@ -353,7 +353,8 @@ export class DriverApiService {
     location: GeoLocation,
     workerCount: number,
     notes?: string,
-    photo?: File
+    photo?: File,
+    workerIds?: number[]  // ✅ NEW: Array of worker IDs to drop
   ): Promise<ApiResponse<{
     success: boolean;
     message: string;
@@ -372,6 +373,11 @@ export class DriverApiService {
     formData.append('longitude', location.longitude.toString());
     formData.append('accuracy', location.accuracy.toString());
     formData.append('timestamp', location.timestamp.toISOString());
+    
+    // ✅ NEW: Send workerIds array if provided
+    if (workerIds && workerIds.length > 0) {
+      formData.append('workerIds', JSON.stringify(workerIds));
+    }
     
     if (notes) {
       formData.append('notes', notes);
@@ -1064,8 +1070,264 @@ export class DriverApiService {
   async getDelayAuditTrail(taskId: string | number): Promise<ApiResponse<any>> {
     return apiClient.get(`/driver/transport-tasks/${taskId}/delay-audit`);
   }
+
+  // ==============================
+  // Photo Upload APIs
+  // ==============================
+
+  /**
+   * Upload pickup photo
+   * @param taskId - Transport task ID
+   * @param locationId - Pickup location ID
+   * @param photoFormData - FormData with photo and metadata
+   */
+  async uploadPickupPhoto(
+    taskId: number,
+    locationId: number,
+    photoFormData: FormData
+  ): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+    photoUrl: string;
+    photoId: number;
+  }>> {
+    try {
+      console.log('📤 Uploading pickup photo for task:', taskId, 'location:', locationId);
+
+      // Add task and location IDs to FormData
+      photoFormData.append('taskId', taskId.toString());
+      photoFormData.append('locationId', locationId.toString());
+
+      return apiClient.uploadFile(
+        `/driver/transport-tasks/${taskId}/pickup-photo`,
+        photoFormData
+      );
+    } catch (error: any) {
+      console.error('❌ Upload pickup photo error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Upload dropoff photo
+   * @param taskId - Transport task ID
+   * @param photoFormData - FormData with photo and metadata
+   */
+  async uploadDropoffPhoto(
+    taskId: number,
+    photoFormData: FormData
+  ): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+    photoUrl: string;
+    photoId: number;
+  }>> {
+    try {
+      console.log('📤 Uploading dropoff photo for task:', taskId);
+
+      // Add task ID to FormData
+      photoFormData.append('taskId', taskId.toString());
+
+      return apiClient.uploadFile(
+        `/driver/transport-tasks/${taskId}/dropoff-photo`,
+        photoFormData
+      );
+    } catch (error: any) {
+      console.error('❌ Upload dropoff photo error:', error);
+      throw error;
+    }
+  }
+
+  // ==============================
+  // GEOFENCE VIOLATION LOGGING
+  // ==============================
+  async logGeofenceViolation(violationData: {
+    taskId: number;
+    locationId: number;
+    locationType: 'pickup' | 'dropoff' | 'start_route';
+    driverLocation: GeoLocation;
+    expectedLocation: { latitude: number; longitude: number };
+    distance: number;
+    timestamp: Date;
+    notifyAdmin?: boolean;
+  }): Promise<ApiResponse<{
+    violationId: number;
+    distance: number;
+    locationType: string;
+    adminNotified: boolean;
+  }>> {
+    return apiClient.post(`/driver/transport-tasks/${violationData.taskId}/geofence-violation`, {
+      locationId: violationData.locationId,
+      locationType: violationData.locationType,
+      driverLocation: {
+        latitude: violationData.driverLocation.latitude,
+        longitude: violationData.driverLocation.longitude,
+        accuracy: violationData.driverLocation.accuracy,
+      },
+      expectedLocation: violationData.expectedLocation,
+      distance: violationData.distance,
+      timestamp: violationData.timestamp.toISOString(),
+      notifyAdmin: violationData.notifyAdmin || false,
+    });
+  }
+
+  // ==============================
+  // WORKER MISMATCH SUBMISSION
+  // ==============================
+  async submitWorkerMismatch(mismatchData: {
+    taskId: number;
+    expectedCount: number;
+    actualCount: number;
+    mismatches: Array<{
+      workerId: number;
+      workerName: string;
+      reason: 'absent' | 'shifted' | 'medical' | 'other';
+      remarks: string;
+    }>;
+    timestamp: Date;
+    location: GeoLocation;
+  }): Promise<ApiResponse<{
+    mismatchId: number;
+    expectedCount: number;
+    actualCount: number;
+    missingCount: number;
+    attendanceUpdatedCount: number;
+    supervisorsNotified: boolean;
+  }>> {
+    return apiClient.post(`/driver/transport-tasks/${mismatchData.taskId}/worker-mismatch`, {
+      expectedCount: mismatchData.expectedCount,
+      actualCount: mismatchData.actualCount,
+      mismatches: mismatchData.mismatches,
+      timestamp: mismatchData.timestamp.toISOString(),
+      location: {
+        latitude: mismatchData.location.latitude,
+        longitude: mismatchData.location.longitude,
+        accuracy: mismatchData.location.accuracy,
+      },
+    });
+  }
+
+  // Report delay with grace period auto-application
+  async reportDelay(
+    taskId: number,
+    delayData: {
+      reason: string;
+      estimatedDelay: number;
+      location?: { latitude: number; longitude: number };
+      description?: string;
+      photoUrls?: string[];
+    }
+  ): Promise<ApiResponse<{
+    incidentId: number;
+    incidentType: string;
+    delayReason: string;
+    estimatedDelay: number;
+    status: string;
+    reportedAt: string;
+    affectedWorkers: number;
+    graceAppliedCount: number;
+    graceMinutes: number;
+  }>> {
+    try {
+      console.log('⏰ Reporting delay for task:', taskId);
+
+      const response = await apiClient.post(
+        `/driver/transport-tasks/${taskId}/delay`,
+        {
+          delayReason: delayData.reason,
+          estimatedDelay: delayData.estimatedDelay,
+          currentLocation: delayData.location,
+          description: delayData.description,
+          photoUrls: delayData.photoUrls || []
+        }
+      );
+
+      console.log('✅ Delay reported successfully');
+      return response;
+    } catch (error: any) {
+      console.error('❌ Report delay error:', error);
+      throw error;
+    }
+  }
+
+  // Report breakdown
+  async reportBreakdown(
+    taskId: number,
+    breakdownData: {
+      breakdownType: string;
+      severity: string;
+      requiresAssistance: boolean;
+      location?: { latitude: number; longitude: number };
+      description?: string;
+      photoUrls?: string[];
+    }
+  ): Promise<ApiResponse<{
+    incidentId: number;
+    incidentType: string;
+    breakdownType: string;
+    severity: string;
+    status: string;
+    reportedAt: string;
+  }>> {
+    try {
+      console.log('🔧 Reporting breakdown for task:', taskId);
+
+      const response = await apiClient.post(
+        `/driver/transport-tasks/${taskId}/breakdown`,
+        {
+          breakdownType: breakdownData.breakdownType,
+          severity: breakdownData.severity,
+          requiresAssistance: breakdownData.requiresAssistance,
+          currentLocation: breakdownData.location,
+          description: breakdownData.description,
+          photoUrls: breakdownData.photoUrls || []
+        }
+      );
+
+      console.log('✅ Breakdown reported successfully');
+      return response;
+    } catch (error: any) {
+      console.error('❌ Report breakdown error:', error);
+      throw error;
+    }
+  }
+
+  // Request alternate vehicle
+  async requestAlternateVehicle(
+    taskId: number,
+    vehicleRequest: {
+      requestType: 'replacement' | 'additional' | 'emergency';
+      reason: string;
+      urgency: 'low' | 'medium' | 'high' | 'critical';
+      currentLocation?: { latitude: number; longitude: number };
+    }
+  ): Promise<ApiResponse<{
+    requestId: number;
+    status: string;
+    estimatedResponse: string;
+    emergencyContact?: string;
+  }>> {
+    try {
+      console.log('🚗 Requesting alternate vehicle for task:', taskId);
+
+      const response = await apiClient.post(
+        `/driver/transport-tasks/${taskId}/vehicle-request`,
+        {
+          requestType: vehicleRequest.requestType,
+          reason: vehicleRequest.reason,
+          urgency: vehicleRequest.urgency,
+          currentLocation: vehicleRequest.currentLocation
+        }
+      );
+
+      console.log('✅ Vehicle request submitted successfully');
+      return response;
+    } catch (error: any) {
+      console.error('❌ Vehicle request error:', error);
+      throw error;
+    }
+  }
+
 }
 
-// Export singleton instance
 export const driverApiService = new DriverApiService();
-export default driverApiService;

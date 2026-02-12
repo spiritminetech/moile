@@ -13,3 +13,7 @@ export { default as TripStatusUpdateForm } from './TripStatusUpdateForm';
 export { default as VehicleLogForm } from './VehicleLogForm';
 export { default as TripHistoryComponent } from './TripHistoryComponent';
 export { FuelLogModal } from './FuelLogModal';
+
+// NEW: Delay/Breakdown and Mismatch handling
+export { default as DelayBreakdownReportForm } from './DelayBreakdownReportForm';
+export { default as WorkerCountMismatchForm } from './WorkerCountMismatchForm';

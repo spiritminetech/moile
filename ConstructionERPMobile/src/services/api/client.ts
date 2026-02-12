@@ -268,16 +268,29 @@ class ApiClient {
     }
   }
 
-  // File upload method
+  // File upload method with extended timeout
   async uploadFile<T>(url: string, file: FormData, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
     try {
+      console.log('📤 Starting file upload to:', url);
+      const uploadStartTime = Date.now();
+      
       const response = await this.instance.post(url, file, {
         ...config,
+        timeout: API_CONFIG.UPLOAD_TIMEOUT, // Use extended timeout for uploads
         headers: {
           ...config?.headers,
           'Content-Type': 'multipart/form-data',
         },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            console.log(`📤 Upload progress: ${percentCompleted}% (${progressEvent.loaded}/${progressEvent.total} bytes)`);
+          }
+        },
       });
+      
+      const uploadDuration = Date.now() - uploadStartTime;
+      console.log(`✅ File upload completed in ${uploadDuration}ms`);
       
       // Handle both wrapped and unwrapped responses
       if (response.data && typeof response.data === 'object' && 'success' in response.data) {
@@ -290,7 +303,11 @@ class ApiClient {
           data: response.data as T,
         };
       }
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ File upload failed:', error.message);
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.error('⏱️ Upload timeout - file may be too large or connection too slow');
+      }
       throw error;
     }
   }

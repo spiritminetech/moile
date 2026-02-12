@@ -114,25 +114,21 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
       const hasPermission = await locationService.requestLocationPermissions();
       dispatch({ type: 'SET_LOCATION_PERMISSION', payload: hasPermission });
 
-      if (hasPermission && isEnabled) {
-        // Get initial location
-        try {
-          const location = await locationService.getCurrentLocation();
-          dispatch({ type: 'SET_LOCATION', payload: location });
-          console.log('✅ Location initialized successfully');
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Failed to get location';
-          console.warn('⚠️ Location initialization warning:', errorMessage);
-          // Don't set error state for permission issues - fallback will be used
-          if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
-            dispatch({ 
-              type: 'SET_LOCATION_ERROR', 
-              payload: errorMessage
-            });
-          }
+      // Always try to get location with fallback enabled
+      try {
+        const location = await locationService.getCurrentLocation(true); // Always allow fallback
+        dispatch({ type: 'SET_LOCATION', payload: location });
+        console.log('✅ Location initialized successfully');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to get location';
+        console.warn('⚠️ Location initialization warning:', errorMessage);
+        // Don't set error state for permission issues - fallback should have been used
+        if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
+          dispatch({ 
+            type: 'SET_LOCATION_ERROR', 
+            payload: errorMessage
+          });
         }
-      } else {
-        console.warn('⚠️ Location services not fully available, fallback will be used when needed');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to initialize location services';
@@ -150,12 +146,15 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
   const getCurrentLocation = async (): Promise<GeoLocation> => {
     try {
       dispatch({ type: 'CLEAR_LOCATION_ERROR' });
-      const location = await locationService.getCurrentLocation();
+      const location = await locationService.getCurrentLocation(true); // Always allow fallback
       dispatch({ type: 'SET_LOCATION', payload: location });
       return location;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to get location';
-      dispatch({ type: 'SET_LOCATION_ERROR', payload: errorMessage });
+      // Only set error if it's not a permission issue (fallback should handle those)
+      if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
+        dispatch({ type: 'SET_LOCATION_ERROR', payload: errorMessage });
+      }
       throw error;
     }
   };

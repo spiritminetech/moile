@@ -76,6 +76,42 @@ const fleetTaskSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  // Photo storage for pickup and dropoff
+  pickupPhotos: {
+    type: [{
+      photoUrl: String,
+      photoPath: String,
+      fileName: String,
+      fileSize: Number,
+      mimeType: String,
+      locationId: Number,
+      uploadedAt: Date,
+      uploadedBy: Number,
+      gpsLocation: {
+        latitude: Number,
+        longitude: Number,
+        accuracy: Number
+      }
+    }],
+    default: []
+  },
+  dropoffPhotos: {
+    type: [{
+      photoUrl: String,
+      photoPath: String,
+      fileName: String,
+      fileSize: Number,
+      mimeType: String,
+      uploadedAt: Date,
+      uploadedBy: Number,
+      gpsLocation: {
+        latitude: Number,
+        longitude: Number,
+        accuracy: Number
+      }
+    }],
+    default: []
+  },
   createdBy: {
     type: Number
   },

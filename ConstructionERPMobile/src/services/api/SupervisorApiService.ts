@@ -1883,6 +1883,86 @@ export class SupervisorApiService {
   }>> {
     return apiClient.get('/supervisor/material-returns', { params });
   }
+  /**
+   * Get worker location history for a specific worker
+   * Returns location breadcrumb trail for the day
+   */
+  async getWorkerLocationHistory(params: {
+    workerId: number;
+    date: string;
+  }): Promise<ApiResponse<{
+    history: Array<{
+      latitude: number;
+      longitude: number;
+      timestamp: string;
+      insideGeofence: boolean;
+      accuracy?: number;
+    }>;
+  }>> {
+    return apiClient.get('/supervisor/worker-location-history', { params });
+  }
+
+  /**
+   * Get geofence violations for monitoring
+   * Returns active and recent violations
+   */
+  async getGeofenceViolations(params: {
+    projectId?: number | null;
+    date: string;
+    status?: 'active' | 'resolved' | 'all';
+  }): Promise<ApiResponse<{
+    violations: Array<{
+      id: number;
+      workerId: number;
+      workerName: string;
+      violationTime: string;
+      location: {
+        latitude: number;
+        longitude: number;
+      };
+      isActive: boolean;
+      resolvedAt?: string;
+      resolvedBy?: string;
+    }>;
+  }>> {
+    return apiClient.get('/supervisor/geofence-violations', { params });
+  }
+
+  /**
+   * Resolve a geofence violation
+   */
+  async resolveGeofenceViolation(violationId: number): Promise<ApiResponse<any>> {
+    return apiClient.post(`/supervisor/geofence-violations/${violationId}/resolve`);
+  }
+
+  /**
+   * Get real-time worker locations with movement tracking
+   * Enhanced version with distance traveled and movement patterns
+   */
+  async getWorkerLocationsRealtime(params?: {
+    projectId?: number;
+    includeHistory?: boolean;
+  }): Promise<ApiResponse<{
+    workers: Array<{
+      workerId: number;
+      workerName: string;
+      currentLocation: {
+        latitude: number;
+        longitude: number;
+        accuracy: number;
+        timestamp: string;
+      };
+      insideGeofence: boolean;
+      distanceTraveled: number; // in meters
+      lastMovement: string;
+      status: 'checked_in' | 'checked_out' | 'on_break';
+      projectId: number;
+      projectName: string;
+      taskAssigned: string;
+    }>;
+  }>> {
+    return apiClient.get('/supervisor/worker-locations-realtime', { params });
+  }
 }
 
 // Export singleton instance

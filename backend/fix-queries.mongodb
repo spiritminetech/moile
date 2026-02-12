@@ -1,0 +1,268 @@
+// MongoDB Queries to Fix Vehicle Assignment Issues
+// Run these queries in MongoDB Compass or mongosh
+
+// ============================================
+// ISSUE 1: Add assignedDriverId to fleetVehicles
+// ============================================
+
+// First, check current vehicle data
+db.fleetVehicles.findOne({ id: 1 });
+
+// Update vehicle with driver assignment
+db.fleetVehicles.updateOne(
+  { id: 1 },
+  {
+    $set: {
+      assignedDriverId: 50,
+      assignedDriverName: "Driver Name",  // Replace with actual driver name
+      status: "IN_SERVICE",
+      fuelType: "Diesel",
+      year: 2023,
+      insurancePolicyNumber: "INS-ABC123",
+      assignedRoute: {
+        routeName: "Construction Site to Dormitory",
+        routeCode: "RT-001",
+        pickupLocations: ["Construction Site"],
+        dropoffLocation: "Worker Dormitory - Block A",
+        estimatedDistance: 15,
+        estimatedDuration: 60
+      },
+      updatedAt: new Date()
+    }
+  }
+);
+
+// Verify update
+db.fleetVehicles.findOne({ id: 1 });
+
+// ============================================
+// ISSUE 2: Reset fleetTasks status to PLANNED
+// ============================================
+
+// First, check current task data
+db.fleetTasks.findOne({ id: 10003 });
+
+// Option A: Reset task to PLANNED (for testing)
+db.fleetTasks.updateOne(
+  { id: 10003 },
+  {
+    $set: {
+      status: "PLANNED",
+      notes: "",
+      updatedAt: new Date()
+    },
+    $unset: {
+      actualStartTime: ""  // Remove start time
+    }
+  }
+);
+
+// Option B: Keep as ONGOING (if already started in production)
+// No action needed - task is already started
+
+// Verify update
+db.fleetTasks.findOne({ id: 10003 });
+
+// ============================================
+// ISSUE 3: Verify driver has vehicleId
+// ============================================
+
+// Check driver data
+db.drivers.findOne({ id: 50 });
+
+// If driver doesn't have vehicleId, update it
+db.drivers.updateOne(
+  { id: 50 },
+  {
+    $set: {
+      vehicleId: 1,
+      updatedAt: new Date()
+    }
+  }
+);
+
+// Verify update
+db.drivers.findOne({ id: 50 });
+
+// ============================================
+// VERIFICATION QUERIES
+// ============================================
+
+// Check if vehicle assignment is complete
+db.fleetVehicles.aggregate([
+  { $match: { id: 1 } },
+  {
+    $lookup: {
+      from: "drivers",
+      localField: "assignedDriverId",
+      foreignField: "id",
+      as: "driver"
+    }
+  },
+  { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
+  {
+    $project: {
+      vehicleId: "$id",
+      registrationNo: 1,
+      assignedDriverId: 1,
+      assignedDriverName: 1,
+      status: 1,
+      driverEmployeeName: "$driver.employeeName",
+      driverVehicleId: "$driver.vehicleId",
+      assignmentMatch: { $eq: ["$id", "$driver.vehicleId"] }
+    }
+  }
+]);
+
+// Check if task is ready to start
+db.fleetTasks.aggregate([
+  { $match: { id: 10003 } },
+  {
+    $lookup: {
+      from: "fleetVehicles",
+      localField: "vehicleId",
+      foreignField: "id",
+      as: "vehicle"
+    }
+  },
+  { $unwind: { path: "$vehicle", preserveNullAndEmptyArrays: true } },
+  {
+    $lookup: {
+      from: "drivers",
+      localField: "driverId",
+      foreignField: "id",
+      as: "driver"
+    }
+  },
+  { $unwind: { path: "$driver", preserveNullAndEmptyArrays: true } },
+  {
+    $project: {
+      taskId: "$id",
+      status: 1,
+      actualStartTime: 1,
+      canStartRoute: { $eq: ["$status", "PLANNED"] },
+      vehicleRegistrationNo: "$vehicle.registrationNo",
+      vehicleAssignedDriverId: "$vehicle.assignedDriverId",
+      driverEmployeeName: "$driver.employeeName",
+      driverVehicleId: "$driver.vehicleId",
+      vehicleAssignmentValid: { $eq: ["$vehicleId", "$driver.vehicleId"] }
+    }
+  }
+]);
+
+// ============================================
+// SUMMARY QUERY - Check all validations
+// ============================================
+
+db.fleetTasks.aggregate([
+  { $match: { id: 10003 } },
+  {
+    $lookup: {
+      from: "fleetVehicles",
+      localField: "vehicleId",
+      foreignField: "id",
+      as: "vehicle"
+    }
+  },
+  { $unwind: "$vehicle" },
+  {
+    $lookup: {
+      from: "drivers",
+      localField: "driverId",
+      foreignField: "id",
+      as: "driver"
+    }
+  },
+  { $unwind: "$driver" },
+  {
+    $lookup: {
+      from: "attendance",
+      let: { driverId: "$driverId" },
+      pipeline: [
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $eq: ["$employeeId", "$$driverId"] },
+                { $ne: ["$checkIn", null] },
+                { $eq: ["$pendingCheckout", true] }
+              ]
+            }
+          }
+        },
+        { $sort: { date: -1 } },
+        { $limit: 1 }
+      ],
+      as: "attendance"
+    }
+  },
+  {
+    $project: {
+      taskId: "$id",
+      taskStatus: "$status",
+      actualStartTime: "$actualStartTime",
+      
+      // Validation 1: Task Status
+      validation1_taskStatus: {
+        status: { $eq: ["$status", "PLANNED"] },
+        message: {
+          $cond: [
+            { $eq: ["$status", "PLANNED"] },
+            "✅ Task is PLANNED - Ready to start",
+            "❌ Task is already started or completed"
+          ]
+        }
+      },
+      
+      // Validation 2: Vehicle Assignment
+      validation2_vehicleAssignment: {
+        vehicleId: "$vehicleId",
+        registrationNo: "$vehicle.registrationNo",
+        assignedDriverId: "$vehicle.assignedDriverId",
+        status: {
+          $cond: [
+            { $eq: ["$vehicle.assignedDriverId", "$driverId"] },
+            "✅ Vehicle assigned to driver",
+            "❌ Vehicle not assigned to driver"
+          ]
+        }
+      },
+      
+      // Validation 3: Driver Assignment
+      validation3_driverAssignment: {
+        driverId: "$driverId",
+        driverName: "$driver.employeeName",
+        driverVehicleId: "$driver.vehicleId",
+        status: {
+          $cond: [
+            { $eq: ["$driver.vehicleId", "$vehicleId"] },
+            "✅ Driver assigned to vehicle",
+            "❌ Driver not assigned to vehicle"
+          ]
+        }
+      },
+      
+      // Validation 4: Attendance
+      validation4_attendance: {
+        hasAttendance: { $gt: [{ $size: "$attendance" }, 0] },
+        status: {
+          $cond: [
+            { $gt: [{ $size: "$attendance" }, 0] },
+            "✅ Driver clocked in",
+            "❌ Driver not clocked in"
+          ]
+        }
+      },
+      
+      // Overall Status
+      canStartRoute: {
+        $and: [
+          { $eq: ["$status", "PLANNED"] },
+          { $eq: ["$vehicle.assignedDriverId", "$driverId"] },
+          { $eq: ["$driver.vehicleId", "$vehicleId"] },
+          { $gt: [{ $size: "$attendance" }, 0] }
+        ]
+      }
+    }
+  }
+]);

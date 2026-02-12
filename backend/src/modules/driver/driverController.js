@@ -17,7 +17,11 @@ import FleetVehicle from "../fleetTask/submodules/fleetvehicle/FleetVehicle.js";
 import Project from "../project/models/Project.js";
 import FleetTaskPassenger from "../fleetTask/submodules/fleetTaskPassenger/FleetTaskPassenger.js";
 import TripIncident from "./models/TripIncident.js";
+import VehicleRequest from "./models/VehicleRequest.js";
 import Attendance from "../attendance/Attendance.js";  // ✅ Add Attendance import
+import ApprovedLocation from "../location/ApprovedLocation.js";  // ✅ Add ApprovedLocation import
+import FleetTaskPhoto from "../fleetTask/models/FleetTaskPhoto.js";  // ✅ Add FleetTaskPhoto import
+import { validateGeofence, isValidCoordinates } from "../../../utils/geofenceUtil.js";  // ✅ Add geofence utilities
 
 // ==============================
 // Multer Configuration for Driver Photo Upload
@@ -767,27 +771,12 @@ export const confirmPickup = async (req, res) => {
     if (locationId !== undefined && workerCount !== undefined) {
       console.log(`📌 Using new format: locationId=${locationId}, workerCount=${workerCount}`);
       
-      // Mark all passengers at this location as confirmed
-      const passengersAtLocation = await FleetTaskPassenger.find({ 
-        fleetTaskId: Number(taskId),
-        pickupPoint: locationId.toString() // Assuming pickupPoint stores locationId
-      }).lean();
+      // ✅ FIX: Do NOT update passenger status here!
+      // Passenger status should ONLY be updated by checkInWorker endpoint
+      // This endpoint only updates the TASK status, not individual passengers
       
-      if (passengersAtLocation.length > 0) {
-        await FleetTaskPassenger.updateMany(
-          { 
-            fleetTaskId: Number(taskId), 
-            pickupPoint: locationId.toString()
-          },
-          {
-            $set: {
-              pickupStatus: "confirmed",
-              pickupConfirmedAt: new Date(),
-            },
-          }
-        );
-        console.log(`✅ Marked ${passengersAtLocation.length} passengers as confirmed at location ${locationId}`);
-      }
+      // Just log the worker count for reference
+      console.log(`📌 Completing pickup with ${workerCount} workers at location ${locationId}`);
     } 
     // Handle old format (confirmed/missed arrays)
     else {
@@ -901,6 +890,18 @@ export const confirmDrop = async (req, res) => {
   try {
     const { taskId } = req.params;
     const { confirmed = [], missed = [], workerCount } = req.body;
+    
+    // ✅ Parse workerIds from JSON string if provided
+    let workerIds = req.body.workerIds;
+    if (typeof workerIds === 'string') {
+      try {
+        workerIds = JSON.parse(workerIds);
+      } catch (e) {
+        console.log('⚠️ Failed to parse workerIds:', e);
+        workerIds = undefined;
+      }
+    }
+    
     const driverId = Number(req.user.id || req.user.userId);
     const companyId = Number(req.user.companyId);
 
@@ -923,16 +924,38 @@ export const confirmDrop = async (req, res) => {
     // Handle new format (workerCount) from transport tasks screen
     if (workerCount !== undefined) {
       console.log(`📌 Using new format: workerCount=${workerCount}`);
+      console.log(`📌 workerIds provided: ${workerIds ? JSON.stringify(workerIds) : 'NO'}`);
       
-      // Mark all passengers as confirmed for dropoff
       const allPassengers = await FleetTaskPassenger.find({ 
         fleetTaskId: Number(taskId)
       }).lean();
       
-      if (allPassengers.length > 0) {
-        await FleetTaskPassenger.updateMany(
+      const pickedUpPassengers = allPassengers.filter(p => p.pickupStatus === "confirmed");
+      const droppedPassengers = allPassengers.filter(p => p.dropStatus === "confirmed");
+      
+      console.log(`📊 Task completion summary:`);
+      console.log(`   Total passengers: ${allPassengers.length}`);
+      console.log(`   Picked up: ${pickedUpPassengers.length}`);
+      console.log(`   Already dropped: ${droppedPassengers.length}`);
+      console.log(`   Reported workerCount: ${workerCount}`);
+      
+      // Log current status BEFORE any updates
+      console.log(`📊 Current passenger status (BEFORE update):`);
+      allPassengers.forEach(p => {
+        console.log(`   Worker ${p.workerEmployeeId}: pickup=${p.pickupStatus}, drop=${p.dropStatus}`);
+      });
+      
+      // ✅ PRODUCTION LOGIC: Support both individual and bulk drop
+      
+      // Option 1: Driver app sends specific workerIds (for "pick 3, drop 2" scenario)
+      if (workerIds && Array.isArray(workerIds) && workerIds.length > 0) {
+        console.log(`👤 Individual drop: Updating ${workerIds.length} specific workers`);
+        console.log(`   Worker IDs to update: ${workerIds.join(', ')}`);
+        
+        const updateResult = await FleetTaskPassenger.updateMany(
           { 
-            fleetTaskId: Number(taskId)
+            fleetTaskId: Number(taskId),
+            workerEmployeeId: { $in: workerIds.map(id => Number(id)) }
           },
           {
             $set: {
@@ -941,12 +964,42 @@ export const confirmDrop = async (req, res) => {
             },
           }
         );
-        console.log(`✅ Marked ${allPassengers.length} passengers as dropped off`);
+        
+        console.log(`✅ Update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
       }
+      // Option 2: Workers already checked out via checkOutWorker endpoint
+      else if (droppedPassengers.length > 0) {
+        console.log(`👤 ${droppedPassengers.length} workers already checked out via checkOutWorker`);
+        console.log(`   No additional updates needed`);
+      }
+      // Option 3: No workerIds AND no workers checked out yet - DO NOT AUTO-UPDATE
+      else {
+        console.log(`⚠️ WARNING: No workerIds provided and no workers checked out yet!`);
+        console.log(`⚠️ This means driver completed drop without selecting any workers.`);
+        console.log(`⚠️ NOT updating passenger status automatically.`);
+        console.log(`⚠️ Driver app should either:`);
+        console.log(`   1. Send workerIds array with specific workers to drop, OR`);
+        console.log(`   2. Call checkOutWorker for each worker before completing drop`);
+      }
+      
+      // Log final status AFTER updates
+      const finalPassengers = await FleetTaskPassenger.find({ 
+        fleetTaskId: Number(taskId)
+      }).lean();
+      
+      console.log(`📊 Final passenger status (AFTER update):`);
+      finalPassengers.forEach(p => {
+        console.log(`   Worker ${p.workerEmployeeId}: pickup=${p.pickupStatus}, drop=${p.dropStatus}`);
+      });
     } 
     // Handle old format (confirmed/missed arrays)
     else {
       console.log(`📌 Using old format: confirmed=${confirmed.length}, missed=${missed.length}`);
+      
+      // ✅ Individual workers are checked out via checkOutWorker endpoint
+      // This endpoint is only called when driver clicks "Complete Drop" button
+      // At this point, individual workers should already have their dropStatus updated
+      // So we don't need to update passenger records here - just update task status
       
       if (confirmed.length > 0) {
         await FleetTaskPassenger.updateMany(
@@ -961,6 +1014,7 @@ export const confirmDrop = async (req, res) => {
             },
           }
         );
+        console.log(`✅ Marked ${confirmed.length} passengers as confirmed drop`);
       }
 
       if (missed.length > 0) {
@@ -976,7 +1030,15 @@ export const confirmDrop = async (req, res) => {
             },
           }
         );
+        console.log(`✅ Marked ${missed.length} passengers as missed drop`);
       }
+      
+      // Log current passenger status for debugging
+      const passengers = await FleetTaskPassenger.find({ fleetTaskId: Number(taskId) }).lean();
+      console.log(`📊 Passenger drop status summary:`);
+      passengers.forEach(p => {
+        console.log(`   Worker ${p.workerEmployeeId}: pickup=${p.pickupStatus}, drop=${p.dropStatus}`);
+      });
     }
 
     const currentTime = new Date();
@@ -1633,10 +1695,12 @@ export const getMaintenanceAlerts = async (req, res) => {
 // ==============================
 // DELAY REPORT
 // ==============================
+// DELAY REPORT WITH GRACE PERIOD APPLICATION
+// ==============================
 export const reportDelay = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const { delayReason, estimatedDelay, currentLocation } = req.body;
+    const { delayReason, estimatedDelay, currentLocation, description, photoUrls } = req.body;
     const driverId = Number(req.user.id || req.user.userId);
     const companyId = Number(req.user.companyId);
 
@@ -1671,28 +1735,90 @@ export const reportDelay = async (req, res) => {
       driverId,
       companyId,
       incidentType: 'DELAY',
-      description: delayReason,
+      description: description || delayReason,
       delayReason,
       estimatedDelay: Number(estimatedDelay),
       location: currentLocation || {},
+      photoUrls: photoUrls || [],
       requiresAssistance: false,
       status: 'REPORTED'
     });
 
     await incident.save();
 
-    res.json({
-      success: true,
-      message: 'Delay reported successfully',
-      incident: {
-        id: incident.id,
-        incidentType: incident.incidentType,
-        delayReason: incident.delayReason,
-        estimatedDelay: incident.estimatedDelay,
-        status: incident.status,
-        reportedAt: incident.reportedAt
+    // ✅ FIX #7: APPLY GRACE PERIOD TO WORKER ATTENDANCE
+    try {
+      // Get all workers on this transport task
+      const passengers = await FleetTaskPassenger.find({
+        fleetTaskId: Number(taskId),
+        companyId: companyId,
+        status: { $in: ['ASSIGNED', 'PICKED_UP'] }
+      });
+
+      console.log(`📋 Found ${passengers.length} workers to apply grace period`);
+
+      // Apply grace period to each worker's attendance
+      const today = new Date().toISOString().split('T')[0];
+      let graceAppliedCount = 0;
+
+      for (const passenger of passengers) {
+        const attendanceUpdate = await Attendance.updateOne(
+          {
+            employeeId: passenger.workerId,
+            date: today,
+            companyId: companyId
+          },
+          {
+            $set: {
+              graceApplied: true,
+              graceReason: `Transport delay: ${delayReason}`,
+              graceMinutes: Number(estimatedDelay),
+              transportDelayId: incident.id,
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        if (attendanceUpdate.modifiedCount > 0) {
+          graceAppliedCount++;
+        }
       }
-    });
+
+      console.log(`✅ Grace period applied to ${graceAppliedCount} workers`);
+
+      res.json({
+        success: true,
+        message: 'Delay reported successfully. Grace period applied to affected workers.',
+        data: {
+          incidentId: incident.id,
+          incidentType: incident.incidentType,
+          delayReason: incident.delayReason,
+          estimatedDelay: incident.estimatedDelay,
+          status: incident.status,
+          reportedAt: incident.reportedAt,
+          affectedWorkers: passengers.length,
+          graceAppliedCount: graceAppliedCount,
+          graceMinutes: Number(estimatedDelay)
+        }
+      });
+
+    } catch (graceError) {
+      console.error('⚠️ Error applying grace period:', graceError);
+      // Still return success for delay report even if grace period fails
+      res.json({
+        success: true,
+        message: 'Delay reported successfully (grace period application failed)',
+        data: {
+          incidentId: incident.id,
+          incidentType: incident.incidentType,
+          delayReason: incident.delayReason,
+          estimatedDelay: incident.estimatedDelay,
+          status: incident.status,
+          reportedAt: incident.reportedAt,
+          graceError: graceError.message
+        }
+      });
+    }
 
   } catch (err) {
     console.error("❌ Error reporting delay:", err);
@@ -2097,6 +2223,122 @@ export const updateTaskStatus = async (req, res) => {
       });
     }
 
+    // ✅ FIX 2: Validate status transitions to prevent starting task twice
+    if (status === 'en_route_pickup' || backendStatus === 'ONGOING') {
+      // Validate task is in PLANNED status before allowing route start
+      if (task.status !== 'PLANNED') {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot start route. Task is currently in ${task.status} status. Only tasks in PLANNED status can be started.`,
+          error: 'INVALID_STATUS_TRANSITION',
+          currentStatus: task.status,
+          requiredStatus: 'PLANNED',
+          taskId: task.id
+        });
+      }
+
+      // ✅ FIX 2.5: Validate driver has clocked in today before starting route
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(today);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const attendance = await Attendance.findOne({
+        employeeId: driverId,
+        date: { $gte: today, $lte: endOfDay },
+        checkIn: { $ne: null },
+        pendingCheckout: true
+      });
+
+      if (!attendance) {
+        return res.status(403).json({
+          success: false,
+          message: 'Route start denied: You must clock in before starting a route',
+          error: 'ATTENDANCE_REQUIRED',
+          details: {
+            message: 'Please clock in first before starting your route. Go to Attendance screen to clock in.'
+          }
+        });
+      }
+
+      console.log(`✅ Driver attendance verified: Clocked in at ${attendance.checkIn}`);
+
+      // ✅ FIX 3: Validate driver is at approved location before starting route
+      if (location && isValidCoordinates(location.latitude, location.longitude)) {
+        const approvedLocations = await ApprovedLocation.find({
+          companyId,
+          active: true,
+          allowedForRouteStart: true
+        }).lean();
+
+        if (approvedLocations.length > 0) {
+          let isAtApprovedLocation = false;
+          let nearestLocation = null;
+          let nearestDistance = Infinity;
+
+          for (const approvedLoc of approvedLocations) {
+            const validation = validateGeofence(location, {
+              center: approvedLoc.center,
+              radius: approvedLoc.radius,
+              strictMode: true,
+              allowedVariance: 50  // Allow 50m variance for route start
+            });
+
+            if (validation.distance < nearestDistance) {
+              nearestDistance = validation.distance;
+              nearestLocation = approvedLoc.name;
+            }
+
+            if (validation.isValid) {
+              isAtApprovedLocation = true;
+              console.log(`✅ Route start approved from location: ${approvedLoc.name} (${validation.distance}m away)`);
+              break;
+            }
+          }
+
+          if (!isAtApprovedLocation) {
+            return res.status(403).json({
+              success: false,
+              message: `Route start denied: You must be at an approved location to start the route`,
+              error: 'ROUTE_START_LOCATION_NOT_APPROVED',
+              details: {
+                nearestLocation,
+                distance: Math.round(nearestDistance),
+                message: `You are ${Math.round(nearestDistance)}m from ${nearestLocation}. Please move closer to start the route.`
+              }
+            });
+          }
+        }
+      }
+
+      // Set actualStartTime when starting route
+      if (!task.actualStartTime) {
+        task.actualStartTime = new Date();
+      }
+    }
+
+    // Validate other status transitions
+    const validTransitions = {
+      'PLANNED': ['ONGOING', 'CANCELLED'],
+      'ONGOING': ['PICKUP_COMPLETE', 'CANCELLED'],
+      'PICKUP_COMPLETE': ['EN_ROUTE_DROPOFF', 'CANCELLED'],
+      'EN_ROUTE_DROPOFF': ['COMPLETED', 'CANCELLED'],
+      'COMPLETED': [],  // Cannot transition from completed
+      'CANCELLED': []   // Cannot transition from cancelled
+    };
+
+    const allowedNextStatuses = validTransitions[task.status] || [];
+    if (!allowedNextStatuses.includes(backendStatus) && task.status !== backendStatus) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status transition from ${task.status} to ${backendStatus}`,
+        error: 'INVALID_STATUS_TRANSITION',
+        currentStatus: task.status,
+        requestedStatus: backendStatus,
+        allowedStatuses: allowedNextStatuses
+      });
+    }
+
     // Use the mapped backend status
     task.status = backendStatus;
     if (location) {
@@ -2113,12 +2355,15 @@ export const updateTaskStatus = async (req, res) => {
 
     await task.save();
 
+    console.log(`✅ Task ${taskId} status updated: ${task.status}`);
+
     res.json({
       success: true,
       message: 'Task status updated successfully',
       data: {
         taskId: task.id,
         status: backendStatus,
+        actualStartTime: task.actualStartTime,
         updatedAt: task.updatedAt
       }
     });
@@ -2583,6 +2828,29 @@ export const checkInWorker = async (req, res) => {
 
     console.log(`📌 Found active task: ${activeTask.id} for worker check-in`);
 
+    // Log the query parameters for debugging
+    console.log(`📌 Query parameters:`, {
+      workerEmployeeId: Number(workerId),
+      fleetTaskId: activeTask.id,
+      companyId: companyId
+    });
+
+    // First, check if the passenger record exists
+    const existingPassenger = await FleetTaskPassenger.findOne({
+      workerEmployeeId: Number(workerId),
+      fleetTaskId: activeTask.id
+    }).lean();
+
+    console.log(`📌 Existing passenger record:`, existingPassenger);
+
+    if (!existingPassenger) {
+      console.log(`❌ No passenger record found for worker ${workerId} in task ${activeTask.id}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Worker not found in task passenger list. Please ensure worker is assigned to this task.'
+      });
+    }
+
     // Update passenger status - MUST match both workerEmployeeId AND fleetTaskId
     // Use pickupStatus field which exists in the schema
     const updateResult = await FleetTaskPassenger.updateOne(
@@ -2599,6 +2867,14 @@ export const checkInWorker = async (req, res) => {
     );
 
     console.log(`✅ Update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
+    
+    // Verify the update by reading the record again
+    const updatedPassenger = await FleetTaskPassenger.findOne({
+      workerEmployeeId: Number(workerId),
+      fleetTaskId: activeTask.id
+    }).lean();
+    
+    console.log(`✅ Updated passenger record:`, updatedPassenger);
 
     if (updateResult.matchedCount === 0) {
       return res.status(404).json({
@@ -2647,21 +2923,44 @@ export const checkOutWorker = async (req, res) => {
       });
     }
 
-    // Update passenger status
-    await FleetTaskPassenger.updateOne(
-      { employeeId: Number(workerId) },
+    // Find the active task for this driver
+    const activeTask = await FleetTask.findOne({
+      driverId,
+      companyId,
+      status: { $in: ['PICKUP_COMPLETE', 'ENROUTE_DROPOFF', 'COMPLETED'] }
+    }).sort({ id: -1 });
+
+    if (!activeTask) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active task found for this driver'
+      });
+    }
+
+    console.log(`📌 Found active task: ${activeTask.id} for worker check-out`);
+
+    // ✅ FIX: Update passenger drop status using correct field names
+    const updateResult = await FleetTaskPassenger.updateOne(
+      { 
+        workerEmployeeId: Number(workerId),  // ✅ Correct field name
+        fleetTaskId: activeTask.id
+      },
       {
         $set: {
-          status: 'checked-out',
-          checkOutTime: new Date(location?.timestamp || Date.now()),
-          checkOutLocation: {
-            latitude: Number(location?.latitude),
-            longitude: Number(location?.longitude),
-            accuracy: Number(location?.accuracy)
-          }
+          dropStatus: 'confirmed',  // ✅ Correct field name
+          dropConfirmedAt: new Date(location?.timestamp || Date.now())
         }
       }
     );
+
+    console.log(`✅ Update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
+
+    if (updateResult.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Worker not found in task passenger list'
+      });
+    }
 
     res.json({
       success: true,
@@ -2776,6 +3075,63 @@ export const clockInDriver = async (req, res) => {
     const { vehicleId, preCheckCompleted, mileageReading, location } = req.body;
     
     console.log(`⏰ Driver clock in: ${driverId}, vehicle: ${vehicleId}`);
+
+    // ✅ FIX 1: Validate location is provided
+    if (!location || !isValidCoordinates(location.latitude, location.longitude)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid GPS location is required for clock-in',
+        error: 'LOCATION_REQUIRED'
+      });
+    }
+
+    // ✅ FIX 1: Validate driver is at approved location (geofence check)
+    const approvedLocations = await ApprovedLocation.find({
+      companyId,
+      active: true,
+      allowedForClockIn: true
+    }).lean();
+
+    if (approvedLocations.length === 0) {
+      console.warn(`⚠️ No approved locations configured for company ${companyId}`);
+      // Allow clock-in if no locations configured (backward compatibility)
+    } else {
+      let isAtApprovedLocation = false;
+      let nearestLocation = null;
+      let nearestDistance = Infinity;
+
+      for (const approvedLoc of approvedLocations) {
+        const validation = validateGeofence(location, {
+          center: approvedLoc.center,
+          radius: approvedLoc.radius,
+          strictMode: true
+        });
+
+        if (validation.distance < nearestDistance) {
+          nearestDistance = validation.distance;
+          nearestLocation = approvedLoc.name;
+        }
+
+        if (validation.isValid) {
+          isAtApprovedLocation = true;
+          console.log(`✅ Driver at approved location: ${approvedLoc.name} (${validation.distance}m away)`);
+          break;
+        }
+      }
+
+      if (!isAtApprovedLocation) {
+        return res.status(403).json({
+          success: false,
+          message: `Clock-in denied: You must be at an approved location (depot/dormitory/yard)`,
+          error: 'LOCATION_NOT_APPROVED',
+          details: {
+            nearestLocation,
+            distance: Math.round(nearestDistance),
+            message: `You are ${Math.round(nearestDistance)}m from ${nearestLocation}. Please move closer to an approved location.`
+          }
+        });
+      }
+    }
 
     // Get vehicle details
     const vehicle = await FleetVehicle.findOne({
@@ -3854,6 +4210,577 @@ export const getDelayAuditTrail = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch delay audit trail',
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// Multer Configuration for Pickup Photos
+// ==============================
+const pickupPhotoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "uploads/pickup/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const taskId = req.params.taskId || "unknown";
+    const locationId = req.body.locationId || "unknown";
+    cb(null, `pickup-task${taskId}-loc${locationId}-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+export const uploadPickupPhotoMulter = multer({
+  storage: pickupPhotoStorage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+});
+
+// ==============================
+// Multer Configuration for Dropoff Photos
+// ==============================
+const dropoffPhotoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "uploads/dropoff/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const taskId = req.params.taskId || "unknown";
+    cb(null, `dropoff-task${taskId}-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+export const uploadDropoffPhotoMulter = multer({
+  storage: dropoffPhotoStorage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+});
+
+// ==============================
+// Upload Pickup Photo Handler
+// ==============================
+export const uploadPickupPhoto = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { locationId, latitude, longitude, accuracy, timestamp, remarks } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`📸 Upload pickup photo - Task: ${taskId}, Location: ${locationId}, Driver: ${driverId}`);
+    console.log(`📸 Request body:`, req.body);
+    console.log(`📸 File info:`, req.file ? { filename: req.file.filename, size: req.file.size } : 'No file');
+
+    // Validate required fields
+    if (!req.file) {
+      console.error('❌ No photo file uploaded');
+      return res.status(400).json({
+        success: false,
+        message: "No photo file uploaded"
+      });
+    }
+
+    // Verify task belongs to this driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId: driverId,
+      companyId: companyId
+    });
+
+    if (!task) {
+      console.error(`❌ Task ${taskId} not found for driver ${driverId}`);
+      // Delete uploaded file if task not found
+      if (req.file) {
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error('Error deleting file:', err);
+        });
+      }
+      return res.status(404).json({
+        success: false,
+        message: "Task not found or not assigned to this driver"
+      });
+    }
+
+    // Construct photo URL
+    const photoUrl = `/uploads/pickup/${req.file.filename}`;
+
+    console.log(`📸 Creating photo record in FleetTaskPhoto collection...`);
+
+    // Create photo record in FleetTaskPhoto collection
+    const photoRecord = new FleetTaskPhoto({
+      fleetTaskId: Number(taskId),
+      driverId: driverId,
+      companyId: companyId,
+      photoType: "pickup",
+      photoUrl: photoUrl,
+      remarks: remarks || `Pickup photo at location ${locationId || 'unknown'}`,
+      locationId: locationId ? Number(locationId) : null,
+      fileName: req.file.filename,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype,
+      gpsLocation: latitude && longitude ? {
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        accuracy: parseFloat(accuracy || 0)
+      } : null,
+      uploadedAt: new Date(timestamp || Date.now())
+    });
+
+    await photoRecord.save();
+
+    console.log(`✅ Pickup photo saved to FleetTaskPhoto collection - ID: ${photoRecord._id}`);
+    console.log(`✅ Photo URL: ${photoUrl}`);
+
+    res.json({
+      success: true,
+      message: "Pickup photo uploaded successfully",
+      photoUrl: photoUrl,
+      photoId: photoRecord._id.toString(),
+      data: {
+        photoUrl: photoUrl,
+        photoId: photoRecord._id.toString(),
+        uploadedAt: photoRecord.createdAt,
+        fileSize: req.file.size,
+        gpsTagged: !!photoRecord.gpsLocation
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error uploading pickup photo:", err);
+    console.error("❌ Error stack:", err.stack);
+    
+    // Delete uploaded file on error
+    if (req.file) {
+      fs.unlink(req.file.path, (unlinkErr) => {
+        if (unlinkErr) console.error('Error deleting file:', unlinkErr);
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Server error while uploading photo",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// Upload Dropoff Photo Handler
+// ==============================
+export const uploadDropoffPhoto = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { latitude, longitude, accuracy, timestamp, remarks } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`📸 Upload dropoff photo - Task: ${taskId}, Driver: ${driverId}`);
+    console.log(`📸 Request body:`, req.body);
+    console.log(`📸 File info:`, req.file ? { filename: req.file.filename, size: req.file.size } : 'No file');
+
+    // Validate required fields
+    if (!req.file) {
+      console.error('❌ No photo file uploaded');
+      return res.status(400).json({
+        success: false,
+        message: "No photo file uploaded"
+      });
+    }
+
+    // Verify task belongs to this driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId: driverId,
+      companyId: companyId
+    });
+
+    if (!task) {
+      console.error(`❌ Task ${taskId} not found for driver ${driverId}`);
+      // Delete uploaded file if task not found
+      if (req.file) {
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error('Error deleting file:', err);
+        });
+      }
+      return res.status(404).json({
+        success: false,
+        message: "Task not found or not assigned to this driver"
+      });
+    }
+
+    // Construct photo URL
+    const photoUrl = `/uploads/dropoff/${req.file.filename}`;
+
+    console.log(`📸 Creating photo record in FleetTaskPhoto collection...`);
+
+    // Create photo record in FleetTaskPhoto collection
+    const photoRecord = new FleetTaskPhoto({
+      fleetTaskId: Number(taskId),
+      driverId: driverId,
+      companyId: companyId,
+      photoType: "dropoff",
+      photoUrl: photoUrl,
+      remarks: remarks || `Dropoff photo for task ${taskId}`,
+      fileName: req.file.filename,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype,
+      gpsLocation: latitude && longitude ? {
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        accuracy: parseFloat(accuracy || 0)
+      } : null,
+      uploadedAt: new Date(timestamp || Date.now())
+    });
+
+    await photoRecord.save();
+
+    console.log(`✅ Dropoff photo saved to FleetTaskPhoto collection - ID: ${photoRecord._id}`);
+    console.log(`✅ Photo URL: ${photoUrl}`);
+
+    res.json({
+      success: true,
+      message: "Dropoff photo uploaded successfully",
+      photoUrl: photoUrl,
+      photoId: photoRecord._id.toString(),
+      data: {
+        photoUrl: photoUrl,
+        photoId: photoRecord._id.toString(),
+        uploadedAt: photoRecord.createdAt,
+        fileSize: req.file.size,
+        gpsTagged: !!photoRecord.gpsLocation
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error uploading dropoff photo:", err);
+    console.error("❌ Error stack:", err.stack);
+    
+    // Delete uploaded file on error
+    if (req.file) {
+      fs.unlink(req.file.path, (unlinkErr) => {
+        if (unlinkErr) console.error('Error deleting file:', unlinkErr);
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Server error while uploading photo",
+      error: err.message
+    });
+  }
+};
+
+
+// ==============================
+// LOG GEOFENCE VIOLATION
+// ==============================
+export const logGeofenceViolation = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const {
+      locationId,
+      locationType,
+      driverLocation,
+      expectedLocation,
+      distance,
+      timestamp,
+      notifyAdmin
+    } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`🚫 Logging geofence violation for task: ${taskId}, driver: ${driverId}`);
+    console.log(`   Location type: ${locationType}, Distance: ${distance}m`);
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    // Create violation record using TripIncident model
+    const incidentId = await getNextId(TripIncident);
+    const violation = new TripIncident({
+      id: incidentId,
+      fleetTaskId: Number(taskId),
+      driverId,
+      companyId,
+      incidentType: 'GEOFENCE_VIOLATION',
+      description: `Geofence violation at ${locationType}: ${distance.toFixed(0)}m away from expected location`,
+      location: driverLocation,
+      expectedLocation: expectedLocation,
+      distance: distance,
+      locationType: locationType,
+      locationId: locationId,
+      requiresAssistance: false,
+      status: 'REPORTED',
+      notifyAdmin: notifyAdmin || false
+    });
+
+    await violation.save();
+
+    console.log(`✅ Geofence violation logged with ID: ${violation.id}`);
+
+    // TODO: Send notification to admin/supervisors if notifyAdmin is true
+    // This would integrate with your notification system
+
+    res.json({
+      success: true,
+      message: 'Geofence violation logged successfully',
+      data: {
+        violationId: violation.id,
+        distance: distance,
+        locationType: locationType,
+        adminNotified: notifyAdmin || false
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error logging geofence violation:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while logging geofence violation",
+      error: err.message
+    });
+  }
+};
+
+// ==============================
+// SUBMIT WORKER MISMATCH
+// ==============================
+export const submitWorkerMismatch = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { expectedCount, actualCount, mismatches, timestamp, location } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`⚠️ Submitting worker mismatch for task: ${taskId}`);
+    console.log(`   Expected: ${expectedCount}, Actual: ${actualCount}`);
+    console.log(`   Missing workers: ${mismatches.length}`);
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    // Create mismatch record using TripIncident model
+    const incidentId = await getNextId(TripIncident);
+    const mismatchRecord = new TripIncident({
+      id: incidentId,
+      fleetTaskId: Number(taskId),
+      driverId,
+      companyId,
+      incidentType: 'WORKER_MISMATCH',
+      description: `Worker count mismatch: Expected ${expectedCount}, Actual ${actualCount}`,
+      location: location,
+      expectedCount: expectedCount,
+      actualCount: actualCount,
+      mismatches: mismatches,
+      requiresAssistance: false,
+      status: 'REPORTED'
+    });
+
+    await mismatchRecord.save();
+
+    // Update attendance records for missing workers
+    const today = new Date().toISOString().split('T')[0];
+    let attendanceUpdatedCount = 0;
+
+    for (const mismatch of mismatches) {
+      try {
+        const attendanceUpdate = await Attendance.updateOne(
+          {
+            employeeId: mismatch.workerId,
+            date: today,
+            companyId: companyId
+          },
+          {
+            $set: {
+              status: mismatch.reason === 'absent' ? 'ABSENT' : 'EXCUSED',
+              mismatchReason: mismatch.reason,
+              mismatchRemarks: mismatch.remarks,
+              transportMismatchId: mismatchRecord.id,
+              updatedAt: new Date()
+            }
+          },
+          { upsert: true }
+        );
+
+        if (attendanceUpdate.modifiedCount > 0 || attendanceUpdate.upsertedCount > 0) {
+          attendanceUpdatedCount++;
+        }
+      } catch (attendanceError) {
+        console.error(`⚠️ Error updating attendance for worker ${mismatch.workerId}:`, attendanceError);
+      }
+    }
+
+    console.log(`✅ Worker mismatch recorded. Attendance updated for ${attendanceUpdatedCount} workers`);
+
+    // TODO: Send notification to supervisors
+    // This would integrate with your notification system
+
+    res.json({
+      success: true,
+      message: 'Worker mismatch recorded successfully',
+      data: {
+        mismatchId: mismatchRecord.id,
+        expectedCount: expectedCount,
+        actualCount: actualCount,
+        missingCount: expectedCount - actualCount,
+        attendanceUpdatedCount: attendanceUpdatedCount,
+        supervisorsNotified: true
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error submitting worker mismatch:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while submitting worker mismatch",
+      error: err.message
+    });
+  }
+};
+
+
+// ==============================
+// REQUEST ALTERNATE VEHICLE
+// ==============================
+export const requestAlternateVehicle = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { requestType, reason, urgency, currentLocation } = req.body;
+    const driverId = Number(req.user.id || req.user.userId);
+    const companyId = Number(req.user.companyId);
+
+    console.log(`🚗 Requesting alternate vehicle for task: ${taskId}, driver: ${driverId}`);
+
+    if (!requestType || !reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'Request type and reason are required'
+      });
+    }
+
+    // Verify task belongs to driver
+    const task = await FleetTask.findOne({
+      id: Number(taskId),
+      driverId,
+      companyId
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found or not assigned to this driver'
+      });
+    }
+
+    // Check if there's already a pending request
+    const existingRequest = await VehicleRequest.findOne({
+      fleetTaskId: Number(taskId),
+      driverId,
+      companyId,
+      status: 'pending'
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({
+        success: false,
+        message: 'A vehicle request is already pending for this task',
+        existingRequest: {
+          id: existingRequest.id,
+          requestType: existingRequest.requestType,
+          urgency: existingRequest.urgency,
+          status: existingRequest.status,
+          requestedAt: existingRequest.requestedAt
+        }
+      });
+    }
+
+    // Create vehicle request
+    const requestId = await getNextId(VehicleRequest);
+    const vehicleRequest = new VehicleRequest({
+      id: requestId,
+      fleetTaskId: Number(taskId),
+      driverId,
+      companyId,
+      requestType,
+      reason,
+      urgency: urgency || 'medium',
+      status: 'pending',
+      currentLocation: currentLocation || {}
+    });
+
+    await vehicleRequest.save();
+
+    // Determine estimated response time based on urgency
+    let estimatedResponse = '30-60 minutes';
+    let emergencyContact = null;
+
+    switch (urgency) {
+      case 'critical':
+        estimatedResponse = 'Immediate (5-10 minutes)';
+        emergencyContact = '+971-XX-XXX-XXXX'; // Replace with actual emergency contact
+        break;
+      case 'high':
+        estimatedResponse = '15-30 minutes';
+        break;
+      case 'medium':
+        estimatedResponse = '30-60 minutes';
+        break;
+      case 'low':
+        estimatedResponse = '1-2 hours';
+        break;
+    }
+
+    // TODO: Send notification to fleet manager/supervisor
+    // TODO: If critical, trigger emergency response protocol
+
+    console.log(`✅ Vehicle request created: ${requestId}, urgency: ${urgency}`);
+
+    res.json({
+      success: true,
+      message: 'Vehicle request submitted successfully',
+      data: {
+        requestId: vehicleRequest.id,
+        status: vehicleRequest.status,
+        estimatedResponse,
+        emergencyContact,
+        requestedAt: vehicleRequest.requestedAt
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error requesting alternate vehicle:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while requesting vehicle",
       error: err.message
     });
   }

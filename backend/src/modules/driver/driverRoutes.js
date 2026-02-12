@@ -19,6 +19,7 @@ import {
   getMaintenanceAlerts,
   reportDelay,
   reportBreakdown,
+  requestAlternateVehicle,
   uploadTripPhoto,
   uploadTripPhotos,
   validateWorkerCount,
@@ -48,7 +49,13 @@ import {
   getRouteDeviationHistory,
   getTransportAttendanceImpact,
   linkDelayToAttendance,
-  getDelayAuditTrail
+  getDelayAuditTrail,
+  uploadPickupPhoto,
+  uploadDropoffPhoto,
+  uploadPickupPhotoMulter,
+  uploadDropoffPhotoMulter,
+  logGeofenceViolation,
+  submitWorkerMismatch
 } from './driverController.js';
 
 import { verifyToken } from '../../middleware/authMiddleware.js';
@@ -80,8 +87,8 @@ router.get("/tasks/:taskId", verifyToken, getTaskDetails);
 router.get("/transport-tasks/:taskId", verifyToken, getTaskDetails); // Alias for transport task details
 router.post("/tasks/:taskId/pickup", verifyToken, confirmPickup);
 router.post("/tasks/:taskId/drop", verifyToken, confirmDrop);
-router.post("/transport-tasks/:taskId/pickup-complete", verifyToken, confirmPickup); // Alias for pickup complete
-router.post("/transport-tasks/:taskId/dropoff-complete", verifyToken, confirmDrop); // Alias for dropoff complete
+router.post("/transport-tasks/:taskId/pickup-complete", verifyToken, uploadTripPhotos.single('photo'), confirmPickup); // Alias for pickup complete with photo upload
+router.post("/transport-tasks/:taskId/dropoff-complete", verifyToken, uploadTripPhotos.single('photo'), confirmDrop); // Alias for dropoff complete with photo upload
 router.get("/tasks/:taskId/summary", verifyToken, getTripSummary);
 
 // 🔹 Trip Updates Routes
@@ -89,6 +96,8 @@ router.post("/tasks/:taskId/delay", verifyToken, reportDelay);
 router.post("/transport-tasks/:taskId/delay", verifyToken, reportDelay); // Alias for transport tasks
 router.post("/tasks/:taskId/breakdown", verifyToken, reportBreakdown);
 router.post("/transport-tasks/:taskId/breakdown", verifyToken, reportBreakdown); // Alias for transport tasks
+router.post("/tasks/:taskId/vehicle-request", verifyToken, requestAlternateVehicle);
+router.post("/transport-tasks/:taskId/vehicle-request", verifyToken, requestAlternateVehicle); // Alias for transport tasks
 router.post("/tasks/:taskId/photos", verifyToken, uploadTripPhotos.array('photos', 10), uploadTripPhoto);
 router.post("/transport-tasks/:taskId/photos", verifyToken, uploadTripPhotos.array('photos', 10), uploadTripPhoto); // Alias for transport tasks
 router.post("/transport-tasks/:taskId/validate-count", verifyToken, validateWorkerCount);
@@ -111,6 +120,14 @@ router.get("/transport-tasks/:taskId/delay-audit", verifyToken, getDelayAuditTra
 // 🔹 Transport Delay & Attendance Impact Routes
 router.get("/transport-tasks/:taskId/attendance-impact", verifyToken, getTransportAttendanceImpact); // Get attendance impact
 router.post("/transport-tasks/:taskId/link-attendance", verifyToken, linkDelayToAttendance); // Link delay to attendance
+
+// 🔹 Photo Upload Routes (NEW)
+router.post("/transport-tasks/:taskId/pickup-photo", verifyToken, uploadPickupPhotoMulter.single('photo'), uploadPickupPhoto); // Upload pickup photo
+router.post("/transport-tasks/:taskId/dropoff-photo", verifyToken, uploadDropoffPhotoMulter.single('photo'), uploadDropoffPhoto); // Upload dropoff photo
+
+// 🔹 Geofence Violation & Worker Mismatch Routes (NEW)
+router.post("/transport-tasks/:taskId/geofence-violation", verifyToken, logGeofenceViolation); // Log geofence violation
+router.post("/transport-tasks/:taskId/worker-mismatch", verifyToken, submitWorkerMismatch); // Submit worker mismatch
 
 // 🔹 Vehicle Info Routes
 router.get("/vehicle", verifyToken, getVehicleDetails);

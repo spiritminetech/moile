@@ -24,6 +24,7 @@ import TransportTaskCard from '../../components/driver/TransportTaskCard';
 import RouteMapCard from '../../components/driver/RouteMapCard';
 import WorkerManifestCard from '../../components/driver/WorkerManifestCard';
 import VehicleStatusCard from '../../components/driver/VehicleStatusCard';
+import TripTrackingStatusCard from '../../components/driver/TripTrackingStatusCard';
 
 // Import common components
 import { 
@@ -53,6 +54,14 @@ const DriverDashboard: React.FC = () => {
   // Track total checked-in workers for today
   const [totalCheckedInToday, setTotalCheckedInToday] = useState(0);
   const [totalWorkersToday, setTotalWorkersToday] = useState(0);
+  
+  // Trip tracking state - Track per task ID
+  const [tripTrackingData, setTripTrackingData] = useState<Record<number, {
+    startTime: Date;
+    logId: string;
+    isTracking: boolean;
+  }>>({});
+  const [lastLocationUpdate, setLastLocationUpdate] = useState<Date | null>(null);
 
   // Load dashboard data
   const loadDashboardData = useCallback(async (showLoading = true) => {
@@ -213,6 +222,44 @@ const DriverDashboard: React.FC = () => {
     loadDashboardData();
   }, [loadDashboardData]);
 
+  // Auto-refresh dashboard every 30 seconds
+  useEffect(() => {
+    const autoRefreshInterval = setInterval(() => {
+      console.log('🔄 Auto-refreshing dashboard...');
+      loadDashboardData(false); // Refresh without showing loading spinner
+    }, 30000); // 30 seconds
+
+    return () => {
+      clearInterval(autoRefreshInterval);
+    };
+  }, [loadDashboardData]);
+
+  // Location tracking effect - Update location every 5 seconds when any trip is tracking
+  useEffect(() => {
+    let locationInterval: NodeJS.Timeout | null = null;
+
+    // Check if any trip is being tracked
+    const hasActiveTracking = Object.values(tripTrackingData).some(trip => trip.isTracking);
+
+    if (hasActiveTracking) {
+      locationInterval = setInterval(async () => {
+        try {
+          await getCurrentLocation();
+          setLastLocationUpdate(new Date());
+          console.log('📍 Location updated (background tracking)');
+        } catch (error) {
+          console.error('❌ Background location update error:', error);
+        }
+      }, 5000); // Update every 5 seconds
+    }
+
+    return () => {
+      if (locationInterval) {
+        clearInterval(locationInterval);
+      }
+    };
+  }, [tripTrackingData, getCurrentLocation]);
+
   // Handle refresh
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -244,15 +291,46 @@ const DriverDashboard: React.FC = () => {
   // Transport task handlers
   const handleStartRoute = useCallback(async (taskId: number) => {
     try {
+      // Capture start time and location
+      const startTime = new Date();
+      
+      // Get current location first
+      const currentLocation = await getCurrentLocation();
+      setLastLocationUpdate(startTime);
+      
+      if (!currentLocation) {
+        Alert.alert('Error', 'GPS location not available. Please enable location services.');
+        return;
+      }
+      
       const response = await driverApiService.updateTransportTaskStatus(
         taskId, 
         'en_route_pickup',
-        locationState.currentLocation || undefined,
+        currentLocation,
         'Route started from dashboard'
       );
 
       if (response.success) {
-        Alert.alert('Success', 'Route started successfully!');
+        // Generate trip log ID (use taskId and timestamp)
+        const logId = `TRIP-${taskId}-${startTime.getTime()}`;
+        
+        // Store trip tracking data for this specific task
+        setTripTrackingData(prev => ({
+          ...prev,
+          [taskId]: {
+            startTime: startTime,
+            logId: logId,
+            isTracking: true
+          }
+        }));
+        
+        // Show success with trip details
+        Alert.alert(
+          '✅ Route Started Successfully!',
+          `Trip ID: ${logId}\nStart Time: ${startTime.toLocaleTimeString()}\nGPS Location: ${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}\n\nBackground tracking is now active.`,
+          [{ text: 'OK' }]
+        );
+        
         // Refresh tasks to get updated status
         const tasksResponse = await driverApiService.getTodaysTransportTasks();
         if (tasksResponse.success && tasksResponse.data) {
@@ -265,7 +343,7 @@ const DriverDashboard: React.FC = () => {
       console.error('❌ Start route error:', error);
       Alert.alert('Error', error.message || 'Failed to start route');
     }
-  }, [locationState.currentLocation]);
+  }, [getCurrentLocation]);
 
   const handleViewRoute = useCallback((task: TransportTask) => {
     setActiveTask(task);
@@ -275,15 +353,29 @@ const DriverDashboard: React.FC = () => {
 
   const handleUpdateTaskStatus = useCallback(async (taskId: number, status: string) => {
     try {
+      // Get current location and update timestamp
+      const currentLocation = await getCurrentLocation();
+      setLastLocationUpdate(new Date());
+      
       const response = await driverApiService.updateTransportTaskStatus(
         taskId, 
         status as TransportTask['status'],
-        locationState.currentLocation || undefined,
+        currentLocation || undefined,
         `Status updated to ${status} from dashboard`
       );
 
       if (response.success) {
         Alert.alert('Success', 'Task status updated successfully!');
+        
+        // If completing trip, remove tracking for this task
+        if (status === 'completed') {
+          setTripTrackingData(prev => {
+            const updated = { ...prev };
+            delete updated[taskId];
+            return updated;
+          });
+        }
+        
         // Refresh tasks
         const tasksResponse = await driverApiService.getTodaysTransportTasks();
         if (tasksResponse.success && tasksResponse.data) {
@@ -296,7 +388,7 @@ const DriverDashboard: React.FC = () => {
       console.error('❌ Update task status error:', error);
       Alert.alert('Error', error.message || 'Failed to update task status');
     }
-  }, [locationState.currentLocation]);
+  }, [getCurrentLocation]);
 
   // Navigation handlers
   const handleNavigateToLocation = useCallback((coordinates: { latitude: number; longitude: number }, name: string) => {
@@ -313,6 +405,9 @@ const DriverDashboard: React.FC = () => {
         Alert.alert('Error', 'Location not available. Please enable GPS.');
         return;
       }
+
+      // Update last location timestamp
+      setLastLocationUpdate(new Date());
 
       const response = await driverApiService.checkInWorker(
         locationId,
@@ -372,6 +467,9 @@ const DriverDashboard: React.FC = () => {
         Alert.alert('Error', 'Location not available. Please enable GPS.');
         return;
       }
+
+      // Update last location timestamp
+      setLastLocationUpdate(new Date());
 
       const response = await driverApiService.checkOutWorker(
         locationId,
@@ -505,7 +603,17 @@ const DriverDashboard: React.FC = () => {
         {/* Quick stats summary */}
         {dashboardData && (
           <ConstructionCard variant="elevated" style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>📊 Today's Overview</Text>
+            <View style={styles.summaryHeader}>
+              <Text style={styles.summaryTitle}>📊 Today's Overview</Text>
+              {Object.keys(tripTrackingData).length > 0 && (
+                <View style={styles.trackingBadge}>
+                  <View style={styles.trackingDot} />
+                  <Text style={styles.trackingText}>
+                    {Object.keys(tripTrackingData).length} Trip{Object.keys(tripTrackingData).length > 1 ? 's' : ''} Active
+                  </Text>
+                </View>
+              )}
+            </View>
             <View style={styles.summaryGrid}>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryValue}>
@@ -552,12 +660,38 @@ const DriverDashboard: React.FC = () => {
           </ConstructionCard>
         )}
 
+        {/* Trip Tracking Status - Show ALL active trips */}
+        {transportTasks
+          .filter(task => 
+            task.status !== 'pending' && 
+            task.status !== 'completed' &&
+            tripTrackingData[task.taskId]
+          )
+          .map(task => {
+            const trackingData = tripTrackingData[task.taskId];
+            return (
+              <TripTrackingStatusCard
+                key={task.taskId}
+                task={task}
+                currentLocation={locationState.currentLocation}
+                isLocationTracking={trackingData.isTracking}
+                lastLocationUpdate={lastLocationUpdate}
+                tripStartTime={trackingData.startTime}
+                tripLogId={trackingData.logId}
+              />
+            );
+          })
+        }
+
         {/* Route Map */}
         <RouteMapCard
           task={activeTask}
           currentLocation={locationState.currentLocation}
           onNavigateToLocation={handleNavigateToLocation}
-          onRefreshLocation={getCurrentLocation}
+          onRefreshLocation={() => {
+            getCurrentLocation();
+            setLastLocationUpdate(new Date());
+          }}
           isLocationEnabled={locationState.isLocationEnabled}
         />
 
@@ -653,11 +787,36 @@ const styles = StyleSheet.create({
   summaryCard: {
     marginBottom: ConstructionTheme.spacing.lg,
   },
+  summaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: ConstructionTheme.spacing.lg,
+  },
   summaryTitle: {
     ...ConstructionTheme.typography.headlineSmall,
     color: ConstructionTheme.colors.onSurface,
-    marginBottom: ConstructionTheme.spacing.lg,
-    textAlign: 'center',
+    flex: 1,
+  },
+  trackingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: ConstructionTheme.colors.success + '20',
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingVertical: ConstructionTheme.spacing.sm,
+    borderRadius: ConstructionTheme.borderRadius.md,
+  },
+  trackingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: ConstructionTheme.colors.success,
+    marginRight: ConstructionTheme.spacing.sm,
+  },
+  trackingText: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.success,
+    fontWeight: '600',
   },
   summaryGrid: {
     flexDirection: 'row',
@@ -677,6 +836,12 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.primary,
     fontWeight: '700',
     marginBottom: 4,
+  },
+  summarySubValue: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.primary,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   summaryLabel: {
     ...ConstructionTheme.typography.bodySmall,

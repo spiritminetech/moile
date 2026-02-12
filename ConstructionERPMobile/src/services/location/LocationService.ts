@@ -78,7 +78,15 @@ export class LocationService {
    */
   async getCurrentLocation(allowFallback: boolean = true): Promise<GeoLocation> {
     try {
-      const hasPermission = await this.requestLocationPermissions();
+      // First check permission status without requesting
+      const { status: currentStatus } = await Location.getForegroundPermissionsAsync();
+      
+      // If permission is not granted, request it
+      let hasPermission = currentStatus === 'granted';
+      if (!hasPermission) {
+        hasPermission = await this.requestLocationPermissions();
+      }
+      
       if (!hasPermission) {
         if (allowFallback) {
           console.warn('⚠️ Location permission denied, using fallback location');
@@ -119,7 +127,7 @@ export class LocationService {
       
       // Check if it's a permission error
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (errorMessage.includes('Not authorized') || errorMessage.includes('permission')) {
+      if (errorMessage.includes('Not authorized') || errorMessage.includes('permission') || errorMessage.includes('denied')) {
         if (allowFallback) {
           console.warn('⚠️ Location permission error, using fallback location');
           return this.getFallbackLocation();

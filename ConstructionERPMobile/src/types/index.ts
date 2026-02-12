@@ -850,6 +850,8 @@ export interface DriverDashboardResponse {
 
 export interface TransportTask {
   taskId: number;
+  tripId?: number; // Trip log ID when route is started
+  tripStartTime?: Date; // Timestamp when route was started
   route: string;
   pickupLocations: Array<{
     locationId: number;

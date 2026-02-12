@@ -21,6 +21,11 @@ const fleetTaskPassengerSchema = new mongoose.Schema({
     required: true,
     // ref: 'Employee' // Uncomment if Employee model exists
   },
+  pickupLocationId: {
+    type: Number,
+    // Reference to approvedLocations collection
+    // Used to track which pickup location this passenger is assigned to
+  },
   pickupConfirmedAt: {
     type: Date
   },

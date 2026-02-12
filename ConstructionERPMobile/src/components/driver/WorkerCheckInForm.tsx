@@ -223,7 +223,56 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
       return;
     }
 
+    // ✅ FIX: Get workers who are checked in (either manually or via checkbox selection)
+    const checkedInWorkers = selectedLocation.workerManifest?.filter(w => w.checkedIn) || [];
     const uncheckedWorkers = selectedLocation.workerManifest?.filter(w => !w.checkedIn) || [];
+    
+    // If there are selected workers (checkboxes) but not checked in yet, check them in first
+    if (selectedWorkers.size > 0) {
+      Alert.alert(
+        'Check In Selected Workers',
+        `Check in ${selectedWorkers.size} selected workers before completing?`,
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => setIsCompletingPickup(false)
+          },
+          {
+            text: 'Check In & Complete',
+            onPress: async () => {
+              setIsCompletingPickup(true);
+              try {
+                // Check in all selected workers first
+                const currentLocation = {
+                  latitude: selectedLocation.coordinates.latitude,
+                  longitude: selectedLocation.coordinates.longitude,
+                };
+
+                for (const workerId of selectedWorkers) {
+                  const checkInData: WorkerCheckInData = {
+                    workerId,
+                    checkInTime: new Date().toISOString(),
+                    notes: checkInNotes[workerId] || '',
+                    location: currentLocation,
+                  };
+                  await onWorkerCheckIn(workerId, checkInData);
+                }
+
+                // Then complete pickup/dropoff
+                await onCompletePickup(selectedLocationId);
+                setSelectedWorkers(new Set());
+              } catch (error) {
+                console.error('Complete error:', error);
+                setIsCompletingPickup(false);
+                Alert.alert('Error', 'Failed to complete');
+              }
+            },
+          },
+        ]
+      );
+      return;
+    }
     
     if (uncheckedWorkers.length > 0 && !isDropoff) {
       Alert.alert(
@@ -254,7 +303,7 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
     } else if (uncheckedWorkers.length > 0 && isDropoff) {
       Alert.alert(
         'Incomplete Drop-off',
-        `${uncheckedWorkers.length} workers are not checked in. Complete drop-off anyway?`,
+        `${uncheckedWorkers.length} workers are not checked out. Complete drop-off anyway?`,
         [
           { 
             text: 'Cancel', 
@@ -342,12 +391,21 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
               {selectedWorkers.size} workers selected
             </Text>
             <ConstructionButton
-              title={`✅ Check In ${selectedWorkers.size} Workers`}
-              onPress={handleBulkCheckIn}
+              title={isDropoff 
+                ? `✅ Select ${selectedWorkers.size} for Drop-off` 
+                : `✅ Check In ${selectedWorkers.size} Workers`
+              }
+              onPress={isDropoff ? () => {} : handleBulkCheckIn}
               variant="success"
               size="medium"
               loading={isLoading}
+              disabled={isDropoff}  // At drop, use "Complete Drop-off" button instead
             />
+            {isDropoff && (
+              <Text style={styles.bulkActionHint}>
+                Click "Complete Drop-off" below to drop off selected workers
+              </Text>
+            )}
           </View>
         )}
 
@@ -358,31 +416,44 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
             selectedLocation.workerManifest.map((worker) => (
             <ConstructionCard
               key={worker.workerId}
-              variant={worker.checkedIn ? 'success' : 'outlined'}
+              variant={
+                isDropoff 
+                  ? (selectedWorkers.has(worker.workerId) ? 'primary' : 'outlined')  // Drop: Highlight selected
+                  : (worker.checkedIn ? 'success' : 'outlined')  // Pickup: Highlight checked in
+              }
               style={styles.workerCard}
             >
               <View style={styles.workerHeader}>
                 <TouchableOpacity
                   style={styles.workerInfo}
-                  onPress={() => !worker.checkedIn && toggleWorkerSelection(worker.workerId)}
-                  disabled={worker.checkedIn}
+                  onPress={() => toggleWorkerSelection(worker.workerId)}
+                  disabled={false}
                 >
                   <View style={styles.workerDetails}>
                     <Text style={styles.workerName}>
-                      {worker.checkedIn ? '✅' : selectedWorkers.has(worker.workerId) ? '☑️' : '☐'} {worker.name}
+                      {/* ✅ FIX: At drop location, show checkboxes even for picked-up workers */}
+                      {isDropoff 
+                        ? (selectedWorkers.has(worker.workerId) ? '☑️' : '☐')  // Drop: Always show checkbox
+                        : (worker.checkedIn ? '✅' : selectedWorkers.has(worker.workerId) ? '☑️' : '☐')  // Pickup: Show ✅ if checked in
+                      } {worker.name}
                     </Text>
                     <Text style={styles.workerPhone}>📞 {worker.phone}</Text>
-                    {worker.checkedIn && worker.checkInTime && (
+                    {worker.checkedIn && worker.checkInTime && !isDropoff && (
                       <Text style={styles.checkInTime}>
                         ✅ Checked in at: {new Date(worker.checkInTime).toLocaleTimeString()}
+                      </Text>
+                    )}
+                    {worker.checkedIn && isDropoff && (
+                      <Text style={styles.checkInTime}>
+                        🚌 On vehicle (picked up at {new Date(worker.checkInTime).toLocaleTimeString()})
                       </Text>
                     )}
                   </View>
                 </TouchableOpacity>
               </View>
 
-              {/* Notes input for unchecked workers */}
-              {!worker.checkedIn && (
+              {/* Notes input - Only show for workers not yet processed */}
+              {!worker.checkedIn && !isDropoff && (
                 <View style={styles.notesSection}>
                   <ConstructionInput
                     label="Notes (Optional)"
@@ -396,23 +467,43 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
                 </View>
               )}
 
-              {/* Action buttons */}
-              <View style={styles.workerActions}>
-                {!worker.checkedIn && (
-                  <ConstructionButton
-                    title="✅ Check In"
-                    onPress={() => handleWorkerCheckIn(worker.workerId)}
-                    variant="success"
-                    size="small"
-                    loading={isLoading}
-                  />
-                )}
-              </View>
+              {/* Action buttons - Only show individual check-in button at pickup for unchecked workers */}
+              {!isDropoff && (
+                <View style={styles.workerActions}>
+                  {!worker.checkedIn && (
+                    <ConstructionButton
+                      title="✅ Check In"
+                      onPress={() => handleWorkerCheckIn(worker.workerId)}
+                      variant="success"
+                      size="small"
+                      loading={isLoading}
+                    />
+                  )}
+                </View>
+              )}
             </ConstructionCard>
           ))
           ) : (
             <Text style={styles.errorText}>No workers in manifest</Text>
           )}
+        </View>
+
+        {/* Complete Pickup Button */}
+        <View style={styles.completePickupSection}>
+          <ConstructionButton
+            title={isDropoff ? "✅ Complete Drop-off" : "✅ Complete Pickup"}
+            onPress={handleCompletePickup}
+            variant="success"
+            size="large"
+            loading={isCompletingPickup}
+            fullWidth
+          />
+          <Text style={styles.completePickupHint}>
+            {isDropoff 
+              ? `Complete drop-off for ${checkedInCount} of ${totalWorkers} workers`
+              : `Complete pickup for ${checkedInCount} of ${totalWorkers} workers`
+            }
+          </Text>
         </View>
       </ScrollView>
     </ConstructionCard>
@@ -484,6 +575,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: 'bold',
   },
+  bulkActionHint: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSuccessContainer,
+    marginTop: ConstructionTheme.spacing.sm,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
   workerList: {
     marginBottom: ConstructionTheme.spacing.lg,
   },
@@ -534,6 +632,17 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.error,
     textAlign: 'center',
     padding: ConstructionTheme.spacing.lg,
+  },
+  completePickupSection: {
+    marginTop: ConstructionTheme.spacing.xl,
+    marginBottom: ConstructionTheme.spacing.lg,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+  },
+  completePickupHint: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginTop: ConstructionTheme.spacing.sm,
   },
 });
 

@@ -25,6 +25,7 @@ interface RouteNavigationProps {
   onCompletePickup?: (locationId: number) => void;
   onCompleteDropoff?: () => void;
   onUpdateTaskStatus?: (status: TransportTask['status']) => void;
+  onReportIssue?: () => void;
 }
 
 const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
@@ -36,6 +37,7 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
   onCompletePickup,
   onCompleteDropoff,
   onUpdateTaskStatus,
+  onReportIssue,
 }) => {
   const [selectedLocation, setSelectedLocation] = useState<number | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -181,15 +183,39 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
           />
         </View>
 
+        {/* Report Issue Button - Only show when task is in progress */}
+        {transportTask.status !== 'pending' && transportTask.status !== 'completed' && onReportIssue && (
+          <View style={styles.reportIssueSection}>
+            <ConstructionButton
+              title="🚨 Report Issue (Delay/Breakdown)"
+              onPress={onReportIssue}
+              variant="warning"
+              size="large"
+              icon="alert-circle"
+            />
+          </View>
+        )}
+
         {/* Pickup Locations */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 Pickup Locations</Text>
           {transportTask.pickupLocations.map((location, index) => (
             <ConstructionCard
               key={location.locationId}
-              variant={selectedLocation === location.locationId ? 'success' : 'outlined'}
+              variant={
+                location.actualPickupTime ? 'success' :  // ✅ Completed
+                selectedLocation === location.locationId ? 'primary' :  // Selected
+                'outlined'  // Not started
+              }
               style={styles.locationCard}
             >
+              {/* Show completion badge for completed pickups */}
+              {location.actualPickupTime && (
+                <View style={styles.completedBadgeSmall}>
+                  <Text style={styles.completedBadgeText}>✅ Pickup Completed</Text>
+                </View>
+              )}
+              
               <View style={styles.locationHeader}>
                 <Text style={styles.locationName}>
                   {index + 1}. {location.name}
@@ -308,48 +334,6 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
                 🎯 GPS Accuracy: {currentLocation?.accuracy ? `${Math.round(currentLocation.accuracy)}m` : 'Unknown'}
               </Text>
             </View>
-
-            {/* Status Update Buttons */}
-            {onUpdateTaskStatus && (
-              <View style={styles.statusActions}>
-                {transportTask.status === 'pending' && (
-                  <ConstructionButton
-                    title="🚀 Start Trip - En Route to Pickup"
-                    onPress={() => onUpdateTaskStatus('en_route_pickup')}
-                    variant="primary"
-                    size="large"
-                    fullWidth
-                  />
-                )}
-                {transportTask.status === 'en_route_pickup' && (
-                  <ConstructionButton
-                    title="📍 Arrived at Pickup Location"
-                    onPress={() => onUpdateTaskStatus('pickup_complete')}
-                    variant="secondary"
-                    size="large"
-                    fullWidth
-                  />
-                )}
-                {transportTask.status === 'pickup_complete' && (
-                  <ConstructionButton
-                    title="🚛 En Route to Drop-off"
-                    onPress={() => onUpdateTaskStatus('en_route_dropoff')}
-                    variant="primary"
-                    size="large"
-                    fullWidth
-                  />
-                )}
-                {transportTask.status === 'en_route_dropoff' && (
-                  <ConstructionButton
-                    title="🏗️ Arrived at Drop-off Site"
-                    onPress={() => onUpdateTaskStatus('completed')}
-                    variant="success"
-                    size="large"
-                    fullWidth
-                  />
-                )}
-              </View>
-            )}
           </View>
         )}
 
@@ -408,6 +392,10 @@ const styles = StyleSheet.create({
   controlButton: {
     flex: 1,
     marginHorizontal: ConstructionTheme.spacing.xs,
+  },
+  reportIssueSection: {
+    marginBottom: ConstructionTheme.spacing.lg,
+    paddingHorizontal: ConstructionTheme.spacing.md,
   },
   section: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -472,14 +460,43 @@ const styles = StyleSheet.create({
     paddingVertical: ConstructionTheme.spacing.sm,
     paddingHorizontal: ConstructionTheme.spacing.md,
     borderRadius: ConstructionTheme.borderRadius.sm,
-    flex: 1,
     alignItems: 'center',
-    marginHorizontal: ConstructionTheme.spacing.xs,
+    marginBottom: ConstructionTheme.spacing.sm,
   },
   completedBadgeText: {
     ...ConstructionTheme.typography.labelLarge,
     color: ConstructionTheme.colors.onSuccessContainer,
     fontWeight: 'bold',
+  },
+  completedBadge: {
+    backgroundColor: ConstructionTheme.colors.successContainer,
+    paddingVertical: ConstructionTheme.spacing.lg,
+    paddingHorizontal: ConstructionTheme.spacing.xl,
+    borderRadius: ConstructionTheme.borderRadius.md,
+    alignItems: 'center',
+  },
+  completedText: {
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.onSuccessContainer,
+    fontWeight: 'bold',
+  },
+  statusInfo: {
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    padding: ConstructionTheme.spacing.md,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  statusText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    marginBottom: ConstructionTheme.spacing.xs,
+  },
+  statusValue: {
+    fontWeight: 'bold',
+    color: ConstructionTheme.colors.primary,
+  },
+  statusActions: {
+    marginTop: ConstructionTheme.spacing.md,
   },
   bottomSpacing: {
     height: ConstructionTheme.spacing.xl * 2,

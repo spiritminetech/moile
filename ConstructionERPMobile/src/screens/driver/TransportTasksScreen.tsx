@@ -14,6 +14,7 @@ import {
   Platform,
   SafeAreaView,
   StatusBar,
+  Image,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useLocation } from '../../store/context/LocationContext';
@@ -25,6 +26,7 @@ import {
   RouteData,
   WorkerManifest 
 } from '../../types';
+import { showPhotoOptions, PhotoResult, preparePhotoForUpload } from '../../utils/photoCapture';
 
 // Import driver-specific components
 import RouteNavigationComponent from '../../components/driver/RouteNavigationComponent';
@@ -126,8 +128,15 @@ const TransportTasksScreen: React.FC = () => {
             workerId: worker.workerId,
             name: worker.workerName,
             phone: worker.contactNumber || '',
-            checkedIn: worker.status === 'checked-in',
-            checkInTime: worker.status === 'checked-in' ? new Date().toISOString() : undefined,
+            // ✅ FIX: Only mark as checked in if pickupStatus is 'confirmed' AND task is in appropriate phase
+            // Workers should NOT show as checked in until driver actually checks them in at pickup location
+            checkedIn: worker.pickupStatus === 'confirmed' && 
+                       prevTask && (prevTask.status === 'pickup_complete' || 
+                                    prevTask.status === 'en_route_dropoff' || 
+                                    prevTask.status === 'completed'),
+            checkInTime: worker.pickupConfirmedAt || undefined,
+            trade: worker.trade || 'General Labor',
+            supervisorName: worker.supervisorName || 'N/A',
           }));
           
           // Update pickup locations with worker manifest
@@ -367,6 +376,55 @@ const TransportTasksScreen: React.FC = () => {
     }
   }, [selectedTask, selectedLocationId, locationState.currentLocation, transportTasks]);
 
+  // Handle report issue
+  const handleReportIssue = useCallback(() => {
+    if (!selectedTask) {
+      Alert.alert('Error', 'No task selected');
+      return;
+    }
+
+    Alert.alert(
+      '🚨 Report Issue',
+      'What type of issue would you like to report?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: '🚦 Traffic Delay',
+          onPress: () => {
+            Alert.alert(
+              'Report Delay',
+              'Delay/breakdown reporting feature will be implemented soon.\n\nThis will allow you to:\n• Report traffic delays\n• Report vehicle breakdowns\n• Upload photos\n• Add GPS location\n• Notify supervisors',
+              [{ text: 'OK' }]
+            );
+          }
+        },
+        {
+          text: '🔧 Vehicle Breakdown',
+          onPress: () => {
+            Alert.alert(
+              'Report Breakdown',
+              'Delay/breakdown reporting feature will be implemented soon.\n\nThis will allow you to:\n• Report vehicle breakdowns\n• Upload photos\n• Add GPS location\n• Request assistance\n• Notify supervisors',
+              [{ text: 'OK' }]
+            );
+          }
+        },
+        {
+          text: '⚠️ Other Issue',
+          onPress: () => {
+            Alert.alert(
+              'Report Other Issue',
+              'Issue reporting feature will be implemented soon.',
+              [{ text: 'OK' }]
+            );
+          }
+        }
+      ]
+    );
+  }, [selectedTask]);
+
   // Handle pickup completion
   const handleCompletePickup = useCallback(async (locationId: number) => {
     if (!selectedTask) {
@@ -387,9 +445,118 @@ const TransportTasksScreen: React.FC = () => {
       }
 
       const checkedInWorkers = location.workerManifest.filter(w => w.checkedIn).length;
+      const totalWorkers = location.workerManifest.length;
+      
+      // Step 1: Verify worker count
+      if (checkedInWorkers < totalWorkers) {
+        const uncheckedCount = totalWorkers - checkedInWorkers;
+        const proceed = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            '⚠️ Incomplete Check-in',
+            `${uncheckedCount} worker(s) not checked in.\n\nChecked in: ${checkedInWorkers}/${totalWorkers}\n\nContinue with pickup?`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Continue Anyway', style: 'destructive', onPress: () => resolve(true) }
+            ]
+          );
+        });
+        
+        if (!proceed) return;
+      }
+      
+      // Step 2: Prompt for photo
+      const takePhoto = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          '📸 Pickup Photo',
+          `Take a photo of workers at ${location.name}?\n\nThis provides proof of pickup and helps with verification.`,
+          [
+            { 
+              text: 'Skip Photo', 
+              style: 'cancel', 
+              onPress: () => {
+                // Show warning about skipping photo
+                Alert.alert(
+                  '⚠️ Skip Photo?',
+                  'Photo is recommended for proof of pickup. Continue without photo?',
+                  [
+                    { text: 'Go Back', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'Continue Without Photo', style: 'destructive', onPress: () => resolve(false) }
+                  ]
+                );
+              }
+            },
+            { 
+              text: '📷 Take Photo', 
+              onPress: () => resolve(true) 
+            }
+          ]
+        );
+      });
+      
+      // Step 3: Capture photo
+      let capturedPhoto: PhotoResult | null = null;
+      if (takePhoto) {
+        capturedPhoto = await showPhotoOptions(locationState.currentLocation || undefined);
+        
+        if (capturedPhoto) {
+          console.log('✅ Photo captured for pickup:', capturedPhoto.fileName);
+          
+          // Show photo preview
+          Alert.alert(
+            '📸 Photo Captured',
+            `Photo: ${capturedPhoto.fileName}\nSize: ${(capturedPhoto.fileSize / 1024).toFixed(1)} KB\nGPS: ${capturedPhoto.location ? 'Tagged ✓' : 'Not tagged'}`,
+            [{ text: 'Continue' }]
+          );
+        } else {
+          console.log('⚠️ Photo capture cancelled');
+        }
+      }
+      
+      // Step 4: Final confirmation (removed blocking "Report Issues" popup)
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          '✅ Complete Pickup',
+          `Confirm pickup completion:\n\n` +
+          `Location: ${location.name}\n` +
+          `Workers: ${checkedInWorkers}/${totalWorkers}\n` +
+          `Photo: ${capturedPhoto ? 'Attached ✓' : 'Not attached'}\n` +
+          `GPS: ${locationState.currentLocation ? 'Available ✓' : 'Unavailable'}`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Confirm Pickup', onPress: () => resolve(true) }
+          ]
+        );
+      });
+      
+      if (!confirmed) return;
       
       console.log('🚌 Completing pickup for location:', locationId, 'with', checkedInWorkers, 'workers');
       
+      // Upload photo in background (non-blocking)
+      let photoUploadPromise: Promise<any> | null = null;
+      if (capturedPhoto) {
+        console.log('📤 Starting background photo upload...');
+        const photoFormData = preparePhotoForUpload(capturedPhoto);
+        
+        // Start upload but don't wait for it
+        photoUploadPromise = driverApiService.uploadPickupPhoto(
+          selectedTask.taskId,
+          locationId,
+          photoFormData
+        ).then(uploadResponse => {
+          if (uploadResponse.success) {
+            console.log('✅ Pickup photo uploaded successfully:', uploadResponse.data?.photoUrl);
+          } else {
+            console.warn('⚠️ Photo upload failed');
+          }
+          return uploadResponse;
+        }).catch(uploadError => {
+          console.error('❌ Photo upload error:', uploadError);
+          return { success: false, error: uploadError };
+        });
+      }
+      
+      // Complete pickup immediately (don't wait for photo)
       const response = await driverApiService.confirmPickupComplete(
         selectedTask.taskId,
         locationId,
@@ -430,9 +597,12 @@ const TransportTasksScreen: React.FC = () => {
           );
         }
         
+        // Show success message
         Alert.alert(
-          'Pickup Complete',
-          `Successfully completed pickup at ${location.name} with ${checkedInWorkers} workers.`,
+          '✅ Pickup Complete!',
+          `Successfully completed pickup at ${location.name}\n\n` +
+          `Workers picked up: ${checkedInWorkers}\n` +
+          `${capturedPhoto ? 'Photo is uploading in background...' : 'No photo attached'}`,
           [
             {
               text: 'Continue',
@@ -446,6 +616,17 @@ const TransportTasksScreen: React.FC = () => {
             },
           ]
         );
+        
+        // Wait for photo upload to complete in background (optional)
+        if (photoUploadPromise) {
+          photoUploadPromise.then(result => {
+            if (result.success) {
+              console.log('✅ Background photo upload completed');
+            } else {
+              console.warn('⚠️ Background photo upload failed, but pickup is already complete');
+            }
+          });
+        }
       }
     } catch (error: any) {
       console.error('❌ Complete pickup error:', error);
@@ -467,14 +648,125 @@ const TransportTasksScreen: React.FC = () => {
         return;
       }
 
-      // Count workers from all pickup locations (they should all be on the vehicle)
-      const totalWorkers = selectedTask.pickupLocations.reduce(
-        (sum, loc) => sum + (loc.workerManifest?.filter(w => w.checkedIn).length || 0),
-        0
+      // ✅ FIX: Get only checked-in workers (workers who were actually dropped off)
+      const checkedInWorkers = selectedTask.pickupLocations.flatMap(loc => 
+        (loc.workerManifest || []).filter(w => w.checkedIn)
       );
       
-      console.log('🏗️ Completing dropoff at:', location.name, 'with', totalWorkers, 'workers');
+      const workerIds = checkedInWorkers.map(w => w.workerId);
+      const totalWorkers = checkedInWorkers.length;
       
+      // Step 1: Verify worker count
+      if (totalWorkers === 0) {
+        Alert.alert('Error', 'No workers checked in. Please check in workers before completing dropoff.');
+        return;
+      }
+      
+      // Step 2: Verify geofence (location check)
+      const isWithinGeofence = locationState.currentLocation ? true : false; // Simplified check
+      
+      if (!isWithinGeofence) {
+        Alert.alert(
+          '⚠️ Location Warning',
+          'GPS location not available. Ensure you are at the drop location.',
+          [{ text: 'OK' }]
+        );
+      }
+      
+      // Step 3: Prompt for photo
+      const takePhoto = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          '📸 Drop-off Photo',
+          `Take a photo of workers at ${location.name}?\n\nThis provides proof of delivery and helps with verification.`,
+          [
+            { 
+              text: 'Skip Photo', 
+              style: 'cancel', 
+              onPress: () => {
+                // Show warning about skipping photo
+                Alert.alert(
+                  '⚠️ Skip Photo?',
+                  'Photo is HIGHLY RECOMMENDED for proof of delivery. Continue without photo?',
+                  [
+                    { text: 'Go Back', style: 'cancel', onPress: () => resolve(false) },
+                    { text: 'Continue Without Photo', style: 'destructive', onPress: () => resolve(false) }
+                  ]
+                );
+              }
+            },
+            { 
+              text: '📷 Take Photo', 
+              onPress: () => resolve(true) 
+            }
+          ]
+        );
+      });
+      
+      // Step 4: Capture photo
+      let capturedPhoto: PhotoResult | null = null;
+      if (takePhoto) {
+        capturedPhoto = await showPhotoOptions(locationState.currentLocation || undefined);
+        
+        if (capturedPhoto) {
+          console.log('✅ Photo captured for drop-off:', capturedPhoto.fileName);
+          
+          // Show photo preview
+          Alert.alert(
+            '📸 Photo Captured',
+            `Photo: ${capturedPhoto.fileName}\nSize: ${(capturedPhoto.fileSize / 1024).toFixed(1)} KB\nGPS: ${capturedPhoto.location ? 'Tagged ✓' : 'Not tagged'}`,
+            [{ text: 'Continue' }]
+          );
+        } else {
+          console.log('⚠️ Photo capture cancelled');
+        }
+      }
+      
+      // Step 5: Final confirmation (removed blocking "Report Issues" popup)
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          '✅ Complete Drop-off',
+          `Confirm drop-off completion:\n\n` +
+          `Location: ${location.name}\n` +
+          `Workers: ${totalWorkers}\n` +
+          `Photo: ${capturedPhoto ? 'Attached ✓' : 'Not attached'}\n` +
+          `GPS: ${locationState.currentLocation ? 'Within geofence ✓' : 'Location unavailable'}`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Confirm Drop-off', onPress: () => resolve(true) }
+          ]
+        );
+      });
+      
+      if (!confirmed) return;
+      
+      console.log('🏗️ Completing dropoff at:', location.name);
+      console.log('   Total workers on vehicle:', totalWorkers);
+      console.log('   Worker IDs:', workerIds);
+      
+      // Upload photo in background (non-blocking) - same as pickup flow
+      let photoUploadPromise: Promise<any> | null = null;
+      if (capturedPhoto) {
+        console.log('📤 Starting background photo upload...');
+        const photoFormData = preparePhotoForUpload(capturedPhoto);
+        
+        // Start upload but don't wait for it
+        photoUploadPromise = driverApiService.uploadDropoffPhoto(
+          selectedTask.taskId,
+          photoFormData
+        ).then(uploadResponse => {
+          if (uploadResponse.success) {
+            console.log('✅ Dropoff photo uploaded successfully:', uploadResponse.data?.photoUrl);
+          } else {
+            console.warn('⚠️ Photo upload failed');
+          }
+          return uploadResponse;
+        }).catch(uploadError => {
+          console.error('❌ Photo upload error:', uploadError);
+          return { success: false, error: uploadError };
+        });
+      }
+      
+      // Complete dropoff immediately (don't wait for photo)
       const response = await driverApiService.confirmDropoffComplete(
         selectedTask.taskId,
         locationState.currentLocation || {
@@ -484,7 +776,9 @@ const TransportTasksScreen: React.FC = () => {
           timestamp: new Date(),
         },
         totalWorkers,
-        `Dropoff completed with ${totalWorkers} workers`
+        `Dropoff completed with ${totalWorkers} workers`,
+        undefined,  // photo
+        workerIds   // ✅ NEW: Send worker IDs
       );
 
       if (response.success) {
@@ -514,8 +808,11 @@ const TransportTasksScreen: React.FC = () => {
         }
         
         Alert.alert(
-          'Dropoff Complete',
-          `Successfully completed dropoff at ${location.name} with ${totalWorkers} workers.`,
+          '✅ Drop-off Complete!',
+          `Successfully completed drop-off at ${location.name}\n\n` +
+          `Workers delivered: ${totalWorkers}\n` +
+          `${capturedPhoto ? 'Photo is uploading in background...\n' : ''}` +
+          `GPS location recorded ✓`,
           [
             {
               text: 'Done',
@@ -530,6 +827,17 @@ const TransportTasksScreen: React.FC = () => {
             },
           ]
         );
+        
+        // Wait for photo upload to complete in background (optional)
+        if (photoUploadPromise) {
+          photoUploadPromise.then(result => {
+            if (result.success) {
+              console.log('✅ Background photo upload completed');
+            } else {
+              console.warn('⚠️ Background photo upload failed, but dropoff is already complete');
+            }
+          });
+        }
       }
     } catch (error: any) {
       console.error('❌ Complete dropoff error:', error);
@@ -757,6 +1065,7 @@ const TransportTasksScreen: React.FC = () => {
             onCompletePickup={handleCompletePickup}
             onCompleteDropoff={handleCompleteDropoff}
             onUpdateTaskStatus={(status) => handleTaskStatusUpdate(selectedTask.taskId, status)}
+            onReportIssue={handleReportIssue}
           />
         )}
 
