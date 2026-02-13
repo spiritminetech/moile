@@ -55,7 +55,15 @@ import {
   uploadPickupPhotoMulter,
   uploadDropoffPhotoMulter,
   logGeofenceViolation,
-  submitWorkerMismatch
+  submitWorkerMismatch,
+  submitFuelLog,
+  getFuelLogHistory,
+  getVehicleFuelLog,
+  reportVehicleIssue,
+  getVehicleIssues,
+  submitVehicleInspection,
+  getVehicleInspections,
+  getVehicleInspectionDetails
 } from './driverController.js';
 
 import { verifyToken } from '../../middleware/authMiddleware.js';
@@ -132,6 +140,20 @@ router.post("/transport-tasks/:taskId/worker-mismatch", verifyToken, submitWorke
 // 🔹 Vehicle Info Routes
 router.get("/vehicle", verifyToken, getVehicleDetails);
 router.get("/vehicle/maintenance-alerts", verifyToken, getMaintenanceAlerts);
+
+// 🔹 Fuel Log Routes
+router.post("/vehicle/fuel-log", verifyToken, submitFuelLog); // Submit fuel log entry
+router.get("/vehicle/fuel-log", verifyToken, getFuelLogHistory); // Get fuel log history
+router.get("/vehicle/:vehicleId/fuel-log", verifyToken, getVehicleFuelLog); // Get fuel log by vehicle
+
+// 🔹 Vehicle Issue Reporting Routes
+router.post("/vehicle/report-issue", verifyToken, reportVehicleIssue); // Report vehicle issue
+router.get("/vehicle/issues", verifyToken, getVehicleIssues); // Get vehicle issues
+
+// 🔹 Vehicle Inspection (Pre-Check) Routes
+router.post("/vehicle/inspection", verifyToken, submitVehicleInspection); // Submit vehicle inspection
+router.get("/vehicle/inspections", verifyToken, getVehicleInspections); // Get vehicle inspections
+router.get("/vehicle/inspection/:id", verifyToken, getVehicleInspectionDetails); // Get inspection details
 
 // 🔹 Attendance Routes
 router.post("/attendance/clock-in", verifyToken, clockInDriver);

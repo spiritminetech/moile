@@ -13,11 +13,12 @@ import {
 } from 'react-native';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
-type ButtonVariant = 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'neutral' | 'danger' | 'outline';
+type ButtonVariant = 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'neutral' | 'danger' | 'outline' | 'outlined';
 type ButtonSize = 'small' | 'medium' | 'large' | 'extraLarge';
 
 interface ConstructionButtonProps {
   title: string;
+  subtitle?: string; // NEW: Explain what the button does
   onPress: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -27,10 +28,12 @@ interface ConstructionButtonProps {
   fullWidth?: boolean;
   style?: ViewStyle;
   textStyle?: TextStyle;
+  subtitleStyle?: TextStyle; // NEW: Custom subtitle styling
 }
 
 const ConstructionButton: React.FC<ConstructionButtonProps> = ({
   title,
+  subtitle, // NEW
   onPress,
   variant = 'primary',
   size = 'medium',
@@ -40,18 +43,19 @@ const ConstructionButton: React.FC<ConstructionButtonProps> = ({
   fullWidth = false,
   style,
   textStyle,
+  subtitleStyle, // NEW
 }) => {
   const getButtonStyle = (): ViewStyle => {
     const baseStyle: ViewStyle = {
       ...styles.baseButton,
-      height: getButtonHeight(),
+      height: subtitle ? getButtonHeight() + 20 : getButtonHeight(), // Add height for subtitle
       backgroundColor: getBackgroundColor(),
       borderRadius: ConstructionTheme.borderRadius.md,
       ...ConstructionTheme.shadows.medium,
     };
 
     // Add border for outline variant
-    if (variant === 'outline') {
+    if (variant === 'outline' || variant === 'outlined') {
       baseStyle.borderWidth = 2;
       baseStyle.borderColor = ConstructionTheme.colors.primary;
       baseStyle.shadowOpacity = 0;
@@ -66,7 +70,7 @@ const ConstructionButton: React.FC<ConstructionButtonProps> = ({
       baseStyle.backgroundColor = ConstructionTheme.colors.disabled;
       baseStyle.shadowOpacity = 0;
       baseStyle.elevation = 0;
-      if (variant === 'outline') {
+      if (variant === 'outline' || variant === 'outlined') {
         baseStyle.borderColor = ConstructionTheme.colors.disabled;
       }
     }
@@ -116,8 +120,9 @@ const ConstructionButton: React.FC<ConstructionButtonProps> = ({
     if (disabled || loading) {
       return ConstructionTheme.colors.onDisabled;
     }
-    if (variant === 'outline') {
-      return ConstructionTheme.colors.primary;
+    if (variant === 'outline' || variant === 'outlined') {
+      // Use onSurface for better visibility on light backgrounds
+      return ConstructionTheme.colors.onSurface;
     }
     return ConstructionTheme.colors.onPrimary;
   };
@@ -170,9 +175,16 @@ const ConstructionButton: React.FC<ConstructionButtonProps> = ({
                 {icon}
               </Text>
             )}
-            <Text style={[getTextStyle(), textStyle]}>
-              {title}
-            </Text>
+            <View style={subtitle ? styles.textContainer : undefined}>
+              <Text style={[getTextStyle(), textStyle]}>
+                {title}
+              </Text>
+              {subtitle && (
+                <Text style={[styles.subtitle, { color: getTextColor() }, subtitleStyle]}>
+                  {subtitle}
+                </Text>
+              )}
+            </View>
           </>
         )}
       </View>
@@ -186,15 +198,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: ConstructionTheme.spacing.lg,
     minWidth: ConstructionTheme.spacing.touchTarget * 2,
+    minHeight: ConstructionTheme.spacing.largeTouch, // ENHANCED: Minimum 60px for gloves
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  textContainer: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
   icon: {
-    fontSize: ConstructionTheme.dimensions.iconMedium,
-    marginRight: ConstructionTheme.spacing.sm,
+    fontSize: ConstructionTheme.dimensions.iconLarge, // ENHANCED: Larger icons
+    marginRight: ConstructionTheme.spacing.md,
+  },
+  subtitle: {
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 2,
+    opacity: 0.9,
   },
   loader: {
     marginRight: ConstructionTheme.spacing.sm,

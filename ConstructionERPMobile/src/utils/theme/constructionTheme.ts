@@ -17,11 +17,11 @@ export const ConstructionColors = {
   secondaryDark: '#1B5E20',
   secondaryLight: '#4CAF50',
   
-  // Status colors - high contrast
-  success: '#2E7D32', // Safety green
-  warning: '#FF8F00', // High-visibility amber
-  error: '#D32F2F', // Safety red
-  info: '#1976D2', // High-contrast blue
+  // Status colors - ENHANCED high contrast for sunlight
+  success: '#2E7D32', // Darker safety green
+  warning: '#F57C00', // Darker high-visibility amber
+  error: '#C62828', // Darker safety red
+  info: '#1565C0', // Darker high-contrast blue
   
   // Background colors - optimized for outdoor visibility
   background: '#FAFAFA', // Light gray for reduced glare
@@ -61,7 +61,7 @@ export const ConstructionColors = {
   scrim: 'rgba(0, 0, 0, 0.32)',
 };
 
-// Construction-optimized spacing - larger for gloved hands
+// Construction-optimized spacing - ENHANCED for gloved hands
 export const ConstructionSpacing = {
   xs: 4,
   sm: 8,
@@ -70,10 +70,10 @@ export const ConstructionSpacing = {
   xl: 32,
   xxl: 48,
   
-  // Touch target spacing - minimum 44pt for accessibility
-  touchTarget: 44,
-  largeTouch: 56, // For primary actions
-  extraLargeTouch: 72, // For critical actions
+  // Touch target spacing - ENHANCED for construction site use
+  touchTarget: 48,        // Increased from 44 (standard minimum)
+  largeTouch: 60,         // Increased from 56 (for gloves)
+  extraLargeTouch: 72,    // For critical actions with gloves
 };
 
 // Construction-optimized typography - larger sizes for outdoor visibility
@@ -183,13 +183,13 @@ export const ConstructionTypography = {
   },
 };
 
-// Construction-optimized component dimensions
+// Construction-optimized component dimensions - ENHANCED for gloves
 export const ConstructionDimensions = {
-  // Button heights - larger for gloved hands
-  buttonSmall: 40,
-  buttonMedium: 48,
-  buttonLarge: 56,
-  buttonExtraLarge: 64,
+  // Button heights - ENHANCED for gloved hands (60-72px recommended)
+  buttonSmall: 48,        // Increased from 40
+  buttonMedium: 60,       // Increased from 48
+  buttonLarge: 72,        // Increased from 56
+  buttonExtraLarge: 80,   // Increased from 64
   
   // Input heights
   inputSmall: 44,

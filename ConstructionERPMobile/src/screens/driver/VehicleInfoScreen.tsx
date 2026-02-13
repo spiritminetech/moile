@@ -27,6 +27,8 @@ import {
   OfflineIndicator 
 } from '../../components/common';
 import { FuelLogModal } from '../../components/driver/FuelLogModal';
+import { VehicleIssueModal } from '../../components/driver/VehicleIssueModal';
+import { VehicleInspectionModal } from '../../components/driver/VehicleInspectionModal';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
 
 const VehicleInfoScreen: React.FC = () => {
@@ -43,6 +45,9 @@ const VehicleInfoScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showFuelLogModal, setShowFuelLogModal] = useState(false);
+  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [showInspectionModal, setShowInspectionModal] = useState(false);
+  const [inspectionHistory, setInspectionHistory] = useState<any[]>([]);
 
   // Load vehicle information
   const loadVehicleInfo = useCallback(async (showLoading = true) => {
@@ -76,6 +81,15 @@ const VehicleInfoScreen: React.FC = () => {
       if (alertsResponse.success && alertsResponse.data) {
         setMaintenanceAlerts(alertsResponse.data);
         console.log('✅ Maintenance alerts loaded:', alertsResponse.data.length);
+      }
+
+      // Load inspection history
+      if (response.data?.id) {
+        const inspectionsResponse = await driverApiService.getVehicleInspections(response.data.id, 5);
+        if (inspectionsResponse.success && inspectionsResponse.data) {
+          setInspectionHistory(inspectionsResponse.data);
+          console.log('✅ Inspection history loaded:', inspectionsResponse.data.length);
+        }
       }
 
       setLastUpdated(new Date());
@@ -112,14 +126,27 @@ const VehicleInfoScreen: React.FC = () => {
   // Handle fuel log submission
   const handleFuelLogSubmit = useCallback(async (entry: FuelLogEntry) => {
     try {
-      // In a real implementation, this would call the API
-      // await driverApiService.submitFuelLog(entry);
+      console.log('⛽ Submitting fuel log entry:', entry);
       
-      console.log('Fuel log entry submitted:', entry);
-      
-      // Refresh vehicle info to show the new entry
-      await loadVehicleInfo(false);
+      // Call the API to submit fuel log
+      const response = await driverApiService.submitFuelLog({
+        vehicleId: entry.vehicleId,
+        amount: entry.amount,
+        cost: entry.cost,
+        mileage: entry.mileage,
+        location: entry.location,
+        receiptPhoto: entry.receiptPhoto
+      });
+
+      if (response.success) {
+        console.log('✅ Fuel log submitted successfully');
+        // Refresh vehicle info to show the new entry
+        await loadVehicleInfo(false);
+      } else {
+        throw new Error(response.message || 'Failed to submit fuel log');
+      }
     } catch (error: any) {
+      console.error('❌ Fuel log submission error:', error);
       throw new Error(error.message || 'Failed to submit fuel log entry');
     }
   }, [loadVehicleInfo]);
@@ -130,40 +157,51 @@ const VehicleInfoScreen: React.FC = () => {
       Alert.alert('Error', 'No vehicle assigned');
       return;
     }
-
-    Alert.alert(
-      'Report Vehicle Issue',
-      'What type of issue would you like to report?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mechanical Issue',
-          onPress: () => showIssueReportForm('mechanical'),
-        },
-        {
-          text: 'Electrical Issue',
-          onPress: () => showIssueReportForm('electrical'),
-        },
-        {
-          text: 'Safety Concern',
-          onPress: () => showIssueReportForm('safety'),
-        },
-        {
-          text: 'Other Issue',
-          onPress: () => showIssueReportForm('other'),
-        },
-      ]
-    );
+    setShowIssueModal(true);
   }, [vehicleInfo]);
 
-  // Show issue report form
-  const showIssueReportForm = useCallback((category: string) => {
-    Alert.alert(
-      `Report ${category.charAt(0).toUpperCase() + category.slice(1)} Issue`,
-      'This would open a detailed issue reporting form with:\n\n• Issue description\n• Severity level (Low/Medium/High/Critical)\n• Photo attachments\n• Current location\n• Immediate assistance needed?\n\nFeature will be fully implemented in the next update.',
-      [{ text: 'OK' }]
-    );
-  }, []);
+  // Handle issue submission
+  const handleIssueSubmit = useCallback(async (issueData: {
+    category: string;
+    description: string;
+    severity: string;
+  }) => {
+    if (!vehicleInfo) return;
+
+    try {
+      console.log('🔧 Submitting vehicle issue:', issueData);
+
+      const response = await driverApiService.reportVehicleIssue({
+        vehicleId: vehicleInfo.id,
+        category: issueData.category as 'mechanical' | 'electrical' | 'safety' | 'other',
+        description: issueData.description,
+        severity: issueData.severity as 'low' | 'medium' | 'high' | 'critical',
+        location: { latitude: null, longitude: null },
+        photos: [],
+        immediateAssistance: issueData.severity === 'critical'
+      });
+
+      if (response.success) {
+        let message = 'Vehicle issue has been reported successfully.';
+        
+        if (issueData.severity === 'critical') {
+          message += '\n\n⚠️ This vehicle is marked as OUT OF SERVICE. Please do not use it until repaired.';
+        } else if (issueData.severity === 'high') {
+          message += '\n\n⚠️ This vehicle needs repair. Use with caution.';
+        }
+
+        Alert.alert('Issue Reported', message);
+        
+        // Refresh vehicle info
+        await loadVehicleInfo(false);
+      } else {
+        throw new Error(response.message || 'Failed to report issue');
+      }
+    } catch (error: any) {
+      console.error('❌ Error reporting vehicle issue:', error);
+      throw new Error(error.message || 'Failed to report vehicle issue');
+    }
+  }, [vehicleInfo, loadVehicleInfo]);
 
   // Handle vehicle pre-check
   const handleVehiclePreCheck = useCallback(() => {
@@ -171,52 +209,98 @@ const VehicleInfoScreen: React.FC = () => {
       Alert.alert('Error', 'No vehicle assigned');
       return;
     }
-
-    Alert.alert(
-      'Vehicle Pre-Check',
-      'Perform a pre-trip vehicle inspection to ensure safety and compliance.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Start Pre-Check',
-          onPress: () => {
-            Alert.alert(
-              'Pre-Trip Inspection',
-              'This would open a comprehensive pre-check form with:\n\n• Tire condition and pressure\n• Lights and signals\n• Brakes and steering\n• Fluid levels\n• Safety equipment\n• Interior/exterior condition\n• Photo documentation\n\nFeature will be fully implemented in the next update.',
-              [{ text: 'OK' }]
-            );
-          },
-        },
-      ]
-    );
+    setShowInspectionModal(true);
   }, [vehicleInfo]);
+
+  // Handle inspection submission
+  const handleInspectionSubmit = useCallback(async (inspectionData: any) => {
+    if (!vehicleInfo) return;
+
+    try {
+      console.log('🔍 Submitting vehicle inspection:', inspectionData);
+
+      const response = await driverApiService.submitVehicleInspection(inspectionData);
+
+      if (response.success) {
+        const result = response.data;
+        let message = 'Vehicle inspection completed successfully.';
+        
+        if (result.overallStatus === 'fail') {
+          message = '❌ INSPECTION FAILED\n\nCritical issues found. This vehicle cannot be used until repaired.\n\n';
+          message += result.issuesFound.map((issue: any) => `• ${issue.description}`).join('\n');
+          Alert.alert('Inspection Failed', message);
+        } else if (result.overallStatus === 'conditional_pass') {
+          message = '⚠️ CONDITIONAL PASS\n\nMinor issues found. You can proceed with caution.\n\n';
+          message += result.issuesFound.map((issue: any) => `• ${issue.description}`).join('\n');
+          message += '\n\nThese issues have been reported to maintenance.';
+          Alert.alert('Inspection Complete', message);
+        } else {
+          Alert.alert('Inspection Passed', '✅ All checks passed! Vehicle is safe to operate.');
+        }
+        
+        // Refresh vehicle info and inspection history
+        await loadVehicleInfo(false);
+      } else {
+        throw new Error(response.message || 'Failed to submit inspection');
+      }
+    } catch (error: any) {
+      console.error('❌ Error submitting vehicle inspection:', error);
+      throw new Error(error.message || 'Failed to submit vehicle inspection');
+    }
+  }, [vehicleInfo, loadVehicleInfo]);
 
   // Handle emergency assistance
   const handleEmergencyAssistance = useCallback(() => {
     Alert.alert(
-      'Emergency Assistance',
-      'Do you need immediate assistance?',
+      '🚨 Emergency Assistance',
+      'What type of emergency are you experiencing?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Vehicle Breakdown',
+          text: '🔧 Vehicle Breakdown',
           style: 'destructive',
           onPress: () => {
             Alert.alert(
-              'Emergency Assistance Requested',
-              'Emergency assistance has been requested for vehicle breakdown. Dispatch will contact you shortly.\n\nIn case of immediate danger, please call emergency services directly.',
+              '🔧 Vehicle Breakdown Assistance',
+              '✅ Emergency assistance request has been sent to dispatch.\n\n' +
+              '📞 Dispatch will contact you shortly.\n\n' +
+              '⚠️ If you are in immediate danger:\n' +
+              '• Move to a safe location\n' +
+              '• Call emergency services: 911\n\n' +
+              '💡 While waiting:\n' +
+              '• Turn on hazard lights\n' +
+              '• Stay with the vehicle if safe\n' +
+              '• Note your exact location',
               [{ text: 'OK' }]
             );
           },
         },
         {
-          text: 'Medical Emergency',
+          text: '🚑 Medical Emergency',
           style: 'destructive',
           onPress: () => {
             Alert.alert(
-              'Medical Emergency',
-              'For medical emergencies, please call emergency services immediately.\n\nEmergency Numbers:\n• Emergency: 911\n• Company Emergency Line: Available in profile',
-              [{ text: 'OK' }]
+              '🚑 Medical Emergency',
+              '⚠️ CALL EMERGENCY SERVICES IMMEDIATELY\n\n' +
+              '📞 Emergency Numbers:\n' +
+              '• Emergency: 911\n' +
+              '• Ambulance: 911\n\n' +
+              '✅ After calling 911:\n' +
+              '• Contact company emergency line (check your profile)\n' +
+              '• Stay with the injured person\n' +
+              '• Follow dispatcher instructions\n\n' +
+              '💡 Do not move injured person unless in immediate danger',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { 
+                  text: 'Call 911 Now', 
+                  style: 'destructive',
+                  onPress: () => {
+                    // In a real app, this would trigger phone dialer
+                    Alert.alert('Calling 911', 'Emergency services will be contacted');
+                  }
+                }
+              ]
             );
           },
         },
@@ -231,46 +315,57 @@ const VehicleInfoScreen: React.FC = () => {
       return;
     }
 
-    if (!vehicleInfo.maintenanceSchedule || vehicleInfo.maintenanceSchedule.length === 0) {
-      Alert.alert(
-        'Maintenance Schedule',
-        'No scheduled maintenance items found for your vehicle.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    const upcomingItems = vehicleInfo.maintenanceSchedule.filter(item => 
-      item.status === 'upcoming' || item.status === 'due'
-    );
-
-    const overdueItems = vehicleInfo.maintenanceSchedule.filter(item => 
-      item.status === 'overdue'
-    );
-
-    let message = 'Maintenance Schedule Summary:\n\n';
+    // Build simple maintenance info
+    let message = '🔧 Maintenance Information\n\n';
     
-    if (overdueItems.length > 0) {
-      message += `🔴 OVERDUE (${overdueItems.length} items):\n`;
-      overdueItems.forEach(item => {
-        message += `• ${item.type.replace('_', ' ').toUpperCase()}\n`;
-      });
-      message += '\n';
+    // Current Mileage (most important)
+    message += `📊 Current Mileage: ${vehicleInfo.currentMileage?.toLocaleString() || 'N/A'} km\n\n`;
+    
+    // Last service
+    if (vehicleInfo.lastServiceDate) {
+      const lastService = new Date(vehicleInfo.lastServiceDate);
+      message += `📅 Last Service:\n`;
+      message += `   Date: ${lastService.toLocaleDateString()}\n`;
+      if (vehicleInfo.lastServiceMileage) {
+        message += `   Mileage: ${vehicleInfo.lastServiceMileage.toLocaleString()} km\n`;
+      }
+    } else {
+      message += `📅 Last Service: Not recorded\n`;
+    }
+    
+    message += `\n`;
+    
+    // Next service
+    if (vehicleInfo.nextServiceDate) {
+      const nextService = new Date(vehicleInfo.nextServiceDate);
+      const today = new Date();
+      const daysUntil = Math.ceil((nextService.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
+      message += `📅 Next Service:\n`;
+      message += `   Date: ${nextService.toLocaleDateString()}`;
+      
+      if (daysUntil < 0) {
+        message += ` ⚠️ OVERDUE\n`;
+      } else if (daysUntil <= 7) {
+        message += ` ⚠️ (${daysUntil} days)\n`;
+      } else {
+        message += ` (${daysUntil} days)\n`;
+      }
+      
+      if (vehicleInfo.nextServiceMileage) {
+        const kmUntilService = vehicleInfo.nextServiceMileage - (vehicleInfo.currentMileage || 0);
+        message += `   Mileage: ${vehicleInfo.nextServiceMileage.toLocaleString()} km`;
+        if (kmUntilService > 0) {
+          message += ` (${kmUntilService.toLocaleString()} km remaining)\n`;
+        } else {
+          message += ` ⚠️ OVERDUE\n`;
+        }
+      }
+    } else {
+      message += `📅 Next Service: Not scheduled\n`;
     }
 
-    if (upcomingItems.length > 0) {
-      message += `🟡 UPCOMING (${upcomingItems.length} items):\n`;
-      upcomingItems.forEach(item => {
-        const dueDate = new Date(item.dueDate).toLocaleDateString();
-        message += `• ${item.type.replace('_', ' ').toUpperCase()} - Due: ${dueDate}\n`;
-      });
-    }
-
-    if (overdueItems.length === 0 && upcomingItems.length === 0) {
-      message += '✅ All maintenance items are up to date!';
-    }
-
-    Alert.alert('Maintenance Schedule', message, [{ text: 'OK' }]);
+    Alert.alert('Maintenance Information', message, [{ text: 'OK' }]);
   }, [vehicleInfo]);
 
   // Render loading state
@@ -647,6 +742,27 @@ const VehicleInfoScreen: React.FC = () => {
           currentMileage={vehicleInfo.currentMileage}
           onClose={() => setShowFuelLogModal(false)}
           onSubmit={handleFuelLogSubmit}
+        />
+      )}
+
+      {/* Vehicle Issue Modal */}
+      {vehicleInfo && (
+        <VehicleIssueModal
+          visible={showIssueModal}
+          vehicleId={vehicleInfo.id}
+          onClose={() => setShowIssueModal(false)}
+          onSubmit={handleIssueSubmit}
+        />
+      )}
+
+      {/* Vehicle Inspection Modal */}
+      {vehicleInfo && (
+        <VehicleInspectionModal
+          visible={showInspectionModal}
+          vehicleId={vehicleInfo.id}
+          currentMileage={vehicleInfo.currentMileage}
+          onClose={() => setShowInspectionModal(false)}
+          onSubmit={handleInspectionSubmit}
         />
       )}
     </SafeAreaView>

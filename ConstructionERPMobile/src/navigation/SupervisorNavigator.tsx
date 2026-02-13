@@ -28,6 +28,17 @@ import SafetyIncidentScreen from '../screens/worker/SafetyIncidentScreen';
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
+// Permission codes for each screen
+const SCREEN_PERMISSIONS = {
+  DASHBOARD: 'SUPERVISOR_DASHBOARD_ACCESS',
+  TEAM_MANAGEMENT: 'SUPERVISOR_TEAM_MANAGEMENT_VIEW',
+  ATTENDANCE_MONITORING: 'SUPERVISOR_ATTENDANCE_MONITORING',
+  TASK_ASSIGNMENT: 'SUPERVISOR_TASK_ASSIGNMENT',
+  PROGRESS_REPORTS: 'SUPERVISOR_PROGRESS_REPORTING',
+  APPROVALS: 'SUPERVISOR_REQUEST_APPROVAL',
+  MATERIALS_TOOLS: 'SUPERVISOR_MATERIAL_MANAGEMENT',
+};
+
 // Navigation guard hook for role-based access control
 const useNavigationGuard = () => {
   const { state: authState } = useAuth();
@@ -53,7 +64,7 @@ const useNavigationGuard = () => {
       if (!hasPermission) {
         Alert.alert(
           'Insufficient Permissions',
-          'You do not have the required permissions for this action.',
+          `You don't have permission to access this screen.\n\nRequired: ${requiredPermissions.join(' or ')}`,
           [{ text: 'OK' }]
         );
         return false;
@@ -91,9 +102,7 @@ const DashboardStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess()) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.DASHBOARD]);
           },
         }}
       />
@@ -126,9 +135,7 @@ const TeamStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess(['team_management', 'worker_oversight'])) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.TEAM_MANAGEMENT]);
           },
         }}
       />
@@ -151,9 +158,7 @@ const TeamStackNavigator = () => {
         })}
         listeners={{
           focus: () => {
-            if (!checkAccess(['attendance_monitoring'])) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.ATTENDANCE_MONITORING]);
           },
         }}
       />
@@ -186,9 +191,7 @@ const TaskStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess(['task_assignment', 'task_management'])) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.TASK_ASSIGNMENT]);
           },
         }}
       />
@@ -221,9 +224,7 @@ const ReportsStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess(['progress_reporting', 'project_oversight'])) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.PROGRESS_REPORTS]);
           },
         }}
       />
@@ -256,9 +257,7 @@ const ApprovalsStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess(['request_approval', 'workflow_management'])) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.APPROVALS]);
           },
         }}
       />
@@ -291,9 +290,7 @@ const MaterialsStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess(['material_management', 'tool_allocation'])) {
-              // Navigation will be handled by the guard
-            }
+            checkAccess([SCREEN_PERMISSIONS.MATERIALS_TOOLS]);
           },
         }}
       />
@@ -326,9 +323,8 @@ const ProfileStackNavigator = () => {
         }}
         listeners={{
           focus: () => {
-            if (!checkAccess()) {
-              // Navigation will be handled by the guard
-            }
+            // Profile doesn't need specific permission, just supervisor role
+            checkAccess();
           },
         }}
       />
@@ -540,9 +536,9 @@ const SupervisorNavigator: React.FC = () => {
           tabBarLabel: 'Materials',
           // Badge for urgent material requests
           tabBarBadge: supervisorState.materialRequests?.filter(r => 
-            r.urgency === 'urgent' || r.urgency === 'high'
+            r.urgency === 'URGENT' || r.urgency === 'HIGH'
           ).length > 0 ? supervisorState.materialRequests?.filter(r => 
-            r.urgency === 'urgent' || r.urgency === 'high'
+            r.urgency === 'URGENT' || r.urgency === 'HIGH'
           ).length : undefined,
         }}
       />

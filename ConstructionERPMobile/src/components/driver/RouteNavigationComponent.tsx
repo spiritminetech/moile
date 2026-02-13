@@ -20,8 +20,6 @@ interface RouteNavigationProps {
   transportTask: TransportTask;
   currentLocation: GeoLocation | null;
   onNavigationStart: (locationId: number) => void;
-  onRouteOptimization: () => void;
-  onEmergencyReroute: () => void;
   onCompletePickup?: (locationId: number) => void;
   onCompleteDropoff?: () => void;
   onUpdateTaskStatus?: (status: TransportTask['status']) => void;
@@ -32,8 +30,6 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
   transportTask,
   currentLocation,
   onNavigationStart,
-  onRouteOptimization,
-  onEmergencyReroute,
   onCompletePickup,
   onCompleteDropoff,
   onUpdateTaskStatus,
@@ -112,23 +108,6 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
     onNavigationStart(locationId);
   };
 
-  // Handle route optimization
-  const handleRouteOptimization = () => {
-    Alert.alert(
-      'Optimize Route',
-      'Optimize pickup order based on current location and traffic?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Optimize',
-          onPress: () => {
-            onRouteOptimization();
-          },
-        },
-      ]
-    );
-  };
-
   // Handle emergency reroute
   const handleEmergencyReroute = () => {
     Alert.alert(
@@ -153,6 +132,7 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
         style={styles.container} 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        bounces={true}
       >
         {/* Route Overview */}
         <View style={styles.routeOverview}>
@@ -161,37 +141,18 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
             {transportTask.pickupLocations.length} pickup locations → {transportTask.dropoffLocation.name}
           </Text>
           <Text style={styles.workerCount}>
-            Total Workers: {transportTask.totalWorkers} | Checked In: {transportTask.checkedInWorkers}
+            Total Workers: {transportTask.pickupLocations?.flatMap(loc => loc.workerManifest || []).length || 0} | Checked In: {transportTask.pickupLocations?.flatMap(loc => loc.workerManifest || []).filter(w => w.checkedIn).length || 0}
           </Text>
-        </View>
-
-        {/* Route Controls */}
-        <View style={styles.routeControls}>
-          <ConstructionButton
-            title="🗺️ Optimize Route"
-            onPress={handleRouteOptimization}
-            variant="secondary"
-            size="medium"
-            style={styles.controlButton}
-          />
-          <ConstructionButton
-            title="🚨 Emergency Reroute"
-            onPress={handleEmergencyReroute}
-            variant="warning"
-            size="medium"
-            style={styles.controlButton}
-          />
         </View>
 
         {/* Report Issue Button - Only show when task is in progress */}
         {transportTask.status !== 'pending' && transportTask.status !== 'completed' && onReportIssue && (
           <View style={styles.reportIssueSection}>
             <ConstructionButton
-              title="🚨 Report Issue (Delay/Breakdown)"
+              title="🚨 Report Delay/Breakdown"
               onPress={onReportIssue}
               variant="warning"
-              size="large"
-              icon="alert-circle"
+              size="medium"
             />
           </View>
         )}
@@ -233,8 +194,8 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
                   {location.actualPickupTime && ` (Actual: ${location.actualPickupTime})`}
                 </Text>
                 <Text style={styles.workerInfo}>
-                  👥 {location.workerManifest.length} workers
-                  ({location.workerManifest.filter(w => w.checkedIn).length} checked in)
+                  👥 {location.workerManifest?.length || 0} workers
+                  ({location.workerManifest?.filter(w => w.checkedIn).length || 0} checked in)
                 </Text>
               </View>
 
@@ -266,9 +227,20 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🏗️ Drop-off Location</Text>
           <ConstructionCard 
-            variant={selectedLocation === -1 ? 'success' : 'outlined'} 
+            variant={
+              transportTask.dropoffLocation.actualArrival ? 'success' :  // ✅ Completed
+              selectedLocation === -1 ? 'primary' :  // Selected
+              'outlined'  // Not started
+            }
             style={styles.locationCard}
           >
+            {/* Show completion badge for completed dropoff */}
+            {transportTask.dropoffLocation.actualArrival && (
+              <View style={styles.completedBadgeSmall}>
+                <Text style={styles.completedBadgeText}>✅ Drop Completed</Text>
+              </View>
+            )}
+            
             <View style={styles.locationHeader}>
               <Text style={styles.locationName}>
                 {transportTask.dropoffLocation.name}
@@ -289,8 +261,8 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
                   ` (Actual: ${transportTask.dropoffLocation.actualArrival})`}
               </Text>
               <Text style={styles.workerInfo}>
-                👥 {transportTask.totalWorkers} workers
-                ({transportTask.checkedInWorkers} checked in)
+                👥 {transportTask.pickupLocations?.flatMap(loc => loc.workerManifest || []).length || 0} workers
+                ({transportTask.pickupLocations?.flatMap(loc => loc.workerManifest || []).filter(w => w.checkedIn).length || 0} checked in)
               </Text>
             </View>
 
@@ -356,12 +328,15 @@ const RouteNavigationComponent: React.FC<RouteNavigationProps> = ({
 const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
+    backgroundColor: ConstructionTheme.colors.background,
   },
   container: {
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: ConstructionTheme.spacing.xl * 3,
+    paddingHorizontal: ConstructionTheme.spacing.md,
+    paddingTop: ConstructionTheme.spacing.md, // ✅ Add top padding
+    paddingBottom: ConstructionTheme.spacing.xl * 5, // ✅ Extra padding to prevent cut-off
   },
   routeOverview: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -384,18 +359,9 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onPrimaryContainer,
     fontWeight: 'bold',
   },
-  routeControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: ConstructionTheme.spacing.lg,
-  },
-  controlButton: {
-    flex: 1,
-    marginHorizontal: ConstructionTheme.spacing.xs,
-  },
   reportIssueSection: {
     marginBottom: ConstructionTheme.spacing.lg,
-    paddingHorizontal: ConstructionTheme.spacing.md,
+    marginTop: ConstructionTheme.spacing.md, // ✅ Add top margin since no route controls above
   },
   section: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -447,10 +413,10 @@ const styles = StyleSheet.create({
   locationActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: ConstructionTheme.spacing.sm,
   },
   actionButton: {
     flex: 1,
-    marginHorizontal: ConstructionTheme.spacing.xs,
   },
   statusSection: {
     marginBottom: ConstructionTheme.spacing.lg,
@@ -499,7 +465,7 @@ const styles = StyleSheet.create({
     marginTop: ConstructionTheme.spacing.md,
   },
   bottomSpacing: {
-    height: ConstructionTheme.spacing.xl * 2,
+    height: ConstructionTheme.spacing.xl * 3, // ✅ Extra spacing at bottom
   },
 });
 

@@ -15,6 +15,8 @@ import {
   SafeAreaView,
   StatusBar,
   Image,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { useAuth } from '../../store/context/AuthContext';
 import { useLocation } from '../../store/context/LocationContext';
@@ -38,17 +40,10 @@ import {
   ConstructionCard, 
   ConstructionLoadingIndicator,
   ErrorDisplay,
-  OfflineIndicator 
+  OfflineIndicator,
+  Toast
 } from '../../components/common';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
-
-interface RouteOptimizationData {
-  originalRoute: TransportTask;
-  optimizedRoute: TransportTask;
-  timeSaved: number;
-  distanceSaved: number;
-  fuelSaved: number;
-}
 
 const TransportTasksScreen: React.FC = () => {
   const { state: authState } = useAuth();
@@ -59,7 +54,6 @@ const TransportTasksScreen: React.FC = () => {
   const [transportTasks, setTransportTasks] = useState<TransportTask[]>([]);
   const [selectedTask, setSelectedTask] = useState<TransportTask | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
-  const [routeOptimization, setRouteOptimization] = useState<RouteOptimizationData | null>(null);
   const [workerManifests, setWorkerManifests] = useState<WorkerManifest[]>([]);
 
   // UI state
@@ -69,9 +63,17 @@ const TransportTasksScreen: React.FC = () => {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [activeView, setActiveView] = useState<'tasks' | 'navigation' | 'workers'>('tasks');
 
-  // Route optimization state
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimizationResults, setOptimizationResults] = useState<RouteOptimizationData | null>(null);
+  // Toast state
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info' | 'warning'>('success');
+
+  // Show toast helper
+  const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastVisible(true);
+  };
 
   // Load transport tasks
   const loadTransportTasks = useCallback(async (showLoading = true) => {
@@ -85,17 +87,67 @@ const TransportTasksScreen: React.FC = () => {
 
       const response = await driverApiService.getTodaysTransportTasks();
       if (response.success && response.data) {
-        setTransportTasks(response.data);
+        // ✅ NEW: Pre-load worker manifests for all tasks to eliminate loading delay
+        const tasksWithManifests = await Promise.all(
+          response.data.map(async (task) => {
+            try {
+              // Only load manifests for active tasks (not completed)
+              if (task.status !== 'completed' && task.status !== 'COMPLETED') {
+                console.log(`📦 Pre-loading worker manifest for task ${task.taskId}`);
+                const manifestResponse = await driverApiService.getWorkerManifests(task.taskId);
+                
+                if (manifestResponse.success && manifestResponse.data) {
+                  const workers = manifestResponse.data.map((worker: any) => ({
+                    workerId: worker.workerId,
+                    name: worker.workerName,
+                    phone: worker.contactNumber || '',
+                    checkedIn: worker.pickupStatus === 'confirmed',
+                    checkInTime: worker.pickupConfirmedAt || undefined,
+                    trade: worker.trade || 'General Labor',
+                    supervisorName: worker.supervisorName || 'N/A',
+                    dropStatus: worker.dropStatus || 'pending',
+                    wasPickedUp: worker.pickupStatus === 'confirmed',
+                  }));
+                  
+                  // Update pickup locations with cached worker manifest
+                  const updatedPickupLocations = task.pickupLocations.map(loc => ({
+                    ...loc,
+                    workerManifest: workers,
+                  }));
+                  
+                  const totalWorkers = workers.length;
+                  const checkedInWorkers = workers.filter(w => w.checkedIn).length;
+                  
+                  return {
+                    ...task,
+                    pickupLocations: updatedPickupLocations,
+                    totalWorkers,
+                    checkedInWorkers,
+                  };
+                }
+              }
+              return task;
+            } catch (error) {
+              console.warn(`⚠️ Failed to pre-load manifest for task ${task.taskId}:`, error);
+              return task; // Return task without manifest on error
+            }
+          })
+        );
+        
+        setTransportTasks(tasksWithManifests);
         
         // Auto-select first active task only on initial load
-        const activeTask = response.data.find(task => 
+        const activeTask = tasksWithManifests.find(task => 
           task.status !== 'completed'
         );
         if (activeTask && !selectedTask && showLoading) {
           setSelectedTask(activeTask);
         }
         
-        console.log('✅ Transport tasks loaded:', response.data.length);
+        console.log('✅ Transport tasks loaded with cached manifests:', tasksWithManifests.length);
+        
+        // ✅ REMOVED: No toast for task loading (too many messages)
+        // Users can see the tasks appear immediately
       }
 
       setLastUpdated(new Date());
@@ -116,6 +168,8 @@ const TransportTasksScreen: React.FC = () => {
       
       const response = await driverApiService.getWorkerManifests(taskId);
       if (response.success && response.data) {
+        console.log('📦 RAW BACKEND RESPONSE:', JSON.stringify(response.data, null, 2));
+        
         setWorkerManifests(response.data);
         console.log('✅ Worker manifests loaded:', response.data.length);
         
@@ -123,54 +177,170 @@ const TransportTasksScreen: React.FC = () => {
         setSelectedTask(prevTask => {
           if (!prevTask || prevTask.taskId !== taskId) return prevTask;
           
+          // ✅ FIX: Determine if we're at pickup or dropoff phase based on task status
+          const isAtPickupPhase = prevTask.status === 'en_route_pickup' || 
+                                  prevTask.status === 'ONGOING' ||
+                                  prevTask.status === 'pending' ||
+                                  prevTask.status === 'PLANNED';
+          
+          const isAtDropoffPhase = prevTask.status === 'pickup_complete' || 
+                                   prevTask.status === 'PICKUP_COMPLETE' ||
+                                   prevTask.status === 'en_route_dropoff' || 
+                                   prevTask.status === 'ENROUTE_DROPOFF' ||
+                                   prevTask.status === 'completed' ||
+                                   prevTask.status === 'COMPLETED';
+          
+          console.log('📊 Task phase:', {
+            status: prevTask.status,
+            isAtPickupPhase,
+            isAtDropoffPhase
+          });
+          
           // Transform worker manifests to match the expected structure
-          const workers = response.data.map((worker: any) => ({
-            workerId: worker.workerId,
-            name: worker.workerName,
-            phone: worker.contactNumber || '',
-            // ✅ FIX: Only mark as checked in if pickupStatus is 'confirmed' AND task is in appropriate phase
-            // Workers should NOT show as checked in until driver actually checks them in at pickup location
-            checkedIn: worker.pickupStatus === 'confirmed' && 
-                       prevTask && (prevTask.status === 'pickup_complete' || 
-                                    prevTask.status === 'en_route_dropoff' || 
-                                    prevTask.status === 'completed'),
-            checkInTime: worker.pickupConfirmedAt || undefined,
-            trade: worker.trade || 'General Labor',
-            supervisorName: worker.supervisorName || 'N/A',
-          }));
+          const workers = response.data.map((worker: any) => {
+            console.log(`👤 Worker ${worker.workerId} (${worker.workerName}):`, {
+              pickupStatus: worker.pickupStatus,
+              dropStatus: worker.dropStatus,
+              pickupConfirmedAt: worker.pickupConfirmedAt,
+              taskStatus: prevTask.status,
+            });
+            
+            // ✅ FIX: During active pickup phase (BEFORE completion), ALWAYS show checkboxes
+            // Only trust backend data AFTER pickup is completed
+            const isActivePickupPhase = prevTask.status === 'ONGOING' || 
+                                       prevTask.status === 'PLANNED' ||
+                                       prevTask.status === 'pending' ||
+                                       prevTask.status === 'en_route_pickup';
+            
+            const checkedInValue = isActivePickupPhase ? false : (worker.pickupStatus === 'confirmed');
+            
+            console.log(`👤 Worker ${worker.workerId} transformation:`, {
+              name: worker.workerName,
+              pickupStatus: worker.pickupStatus,
+              dropStatus: worker.dropStatus,
+              isActivePickupPhase,
+              forcedCheckedIn: checkedInValue,
+              taskStatus: prevTask.status,
+            });
+            
+            return {
+              workerId: worker.workerId,
+              name: worker.workerName,
+              phone: worker.contactNumber || '',
+              // ✅ FIX: Force unchecked during active pickup, use backend data after completion
+              checkedIn: checkedInValue,
+              checkInTime: worker.pickupConfirmedAt || undefined,
+              trade: worker.trade || 'General Labor',
+              supervisorName: worker.supervisorName || 'N/A',
+              // ✅ NEW: Track dropStatus for display at dropoff completion
+              dropStatus: worker.dropStatus || 'pending',  // 'pending', 'confirmed', 'missed'
+              wasPickedUp: worker.pickupStatus === 'confirmed',  // Track if worker was picked up
+            };
+          });
+          
+          console.log('👥 Workers loaded:', workers.map(w => ({
+            id: w.workerId,
+            name: w.name,
+            checkedIn: w.checkedIn
+          })));
           
           // Update pickup locations with worker manifest
           const updatedPickupLocations = prevTask.pickupLocations.map(loc => ({
             ...loc,
-            workerManifest: workers, // Add all workers to each location for now
+            workerManifest: workers,
           }));
+          
+          // ✅ FIX: Calculate correct worker counts based on phase
+          const totalWorkers = workers.length;
+          const checkedInWorkers = workers.filter(w => w.checkedIn).length;
+          
+          console.log('📊 Updated worker counts:', {
+            totalWorkers,
+            checkedInWorkers,
+            phase: isAtDropoffPhase ? 'dropoff' : 'pickup',
+            status: prevTask.status
+          });
           
           return {
             ...prevTask,
             pickupLocations: updatedPickupLocations,
-            totalWorkers: workers.length,
-            checkedInWorkers: workers.filter(w => w.checkedIn).length,
+            totalWorkers,
+            checkedInWorkers,
           };
         });
       }
     } catch (error: any) {
       console.error('❌ Worker manifests loading error:', error);
-      // Don't show alert, just log the error
       console.warn('⚠️ Continuing without worker manifests');
     }
-  }, []);
+  }, []); // ✅ Empty dependency - function doesn't depend on any state
 
   // Initial load - only run once on mount
   useEffect(() => {
     loadTransportTasks();
   }, []); // Empty dependency array - run only once
 
+  // ✅ NEW: Auto-refresh when app regains focus (after returning from Google Maps)
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        console.log('📱 App became active - refreshing transport tasks...');
+        loadTransportTasks(false); // Refresh without loading spinner
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadTransportTasks]);
+
+  // ✅ NEW: Auto-refresh every 15 seconds when there are active tasks
+  // BUT stop auto-refresh when navigation screen is active to prevent disruption
+  useEffect(() => {
+    const hasActiveTasks = transportTasks.some(task => 
+      task.status !== 'completed' && task.status !== 'pending'
+    );
+
+    // ✅ Stop auto-refresh when navigation screen is active
+    if (!hasActiveTasks || activeView === 'navigation') {
+      return; // No auto-refresh if no active tasks or on navigation screen
+    }
+
+    console.log('🔄 Starting auto-refresh interval (15s) for active tasks');
+    const autoRefreshInterval = setInterval(() => {
+      console.log('🔄 Auto-refreshing transport tasks...');
+      loadTransportTasks(false); // Refresh without loading spinner
+    }, 15000); // 15 seconds
+
+    return () => {
+      console.log('🛑 Stopping auto-refresh interval');
+      clearInterval(autoRefreshInterval);
+    };
+  }, [transportTasks, loadTransportTasks, activeView]); // ✅ Added activeView dependency
+
   // Load worker manifests when task is selected - use taskId to prevent infinite loop
   useEffect(() => {
     if (selectedTask?.taskId) {
-      loadWorkerManifests(selectedTask.taskId);
+      const hasWorkerData = selectedTask.pickupLocations?.[0]?.workerManifest?.length > 0;
+      
+      console.log('🔍 useEffect manifest check:', {
+        taskId: selectedTask.taskId,
+        status: selectedTask.status,
+        hasWorkerData
+      });
+      
+      // ✅ OPTIMIZED: Only load if worker data is missing (should rarely happen now)
+      // Worker manifests are pre-cached during task loading
+      if (!hasWorkerData) {
+        console.log('⚠️ Worker data missing - loading now (fallback)');
+        loadWorkerManifests(selectedTask.taskId);
+      } else {
+        console.log('✅ Using pre-cached worker data');
+      }
     }
-  }, [selectedTask?.taskId]); // Only re-run when taskId changes, not entire selectedTask object
+  }, [selectedTask?.taskId, loadWorkerManifests]); // ✅ Include loadWorkerManifests to prevent stale closure
 
   // Handle refresh
   const handleRefresh = useCallback(() => {
@@ -180,109 +350,58 @@ const TransportTasksScreen: React.FC = () => {
 
   // Handle task selection
   const handleTaskSelection = useCallback((task: TransportTask) => {
+    // ✅ FIX: Only clear worker manifest data during ACTIVE pickup phase IF data exists
+    // This prevents the brief "No workers found" error while loading
+    const isActivePickupPhase = task.status === 'ONGOING' || 
+                               task.status === 'PLANNED' ||
+                               task.status === 'pending' ||
+                               task.status === 'en_route_pickup';
+    
+    const isCompleted = task.status === 'completed' || 
+                       task.status === 'COMPLETED' ||
+                       task.status === 'pickup_complete' ||
+                       task.status === 'PICKUP_COMPLETE' ||
+                       task.status === 'en_route_dropoff' ||
+                       task.status === 'ENROUTE_DROPOFF';
+    
+    const hasWorkerData = task.pickupLocations?.[0]?.workerManifest?.length > 0;
+    
+    console.log('🎯 Task selection:', {
+      taskId: task.taskId,
+      status: task.status,
+      isActivePickupPhase,
+      isCompleted,
+      hasWorkerData,
+      willClearManifests: false,  // ✅ Never clear - let useEffect handle loading
+      workerCount: task.pickupLocations?.[0]?.workerManifest?.length || 0,
+      sampleWorkerName: task.pickupLocations?.[0]?.workerManifest?.[0]?.name || 'N/A'
+    });
+    
+    // ✅ FIX: Don't clear manifests - just set the task as-is
+    // The useEffect will handle loading if needed, but we keep existing data to avoid flicker
     setSelectedTask(task);
     setSelectedLocationId(null);
     setActiveView('navigation');
   }, []);
 
-  // Handle route optimization
-  const handleRouteOptimization = useCallback(async () => {
-    if (!selectedTask) {
-      Alert.alert('Error', 'Please select a transport task first');
-      return;
-    }
-
-    try {
-      setIsOptimizing(true);
-      console.log('🗺️ Optimizing route for task:', selectedTask.taskId);
-
-      const response = await driverApiService.optimizeRoute(selectedTask.taskId);
-      if (response.success && response.data) {
-        // Create optimization comparison data
-        const optimizationData: RouteOptimizationData = {
-          originalRoute: selectedTask,
-          optimizedRoute: {
-            ...selectedTask,
-            pickupLocations: response.data.optimizedPickupOrder || selectedTask.pickupLocations,
-          },
-          timeSaved: response.data.timeSaved || 0,
-          distanceSaved: response.data.distanceSaved || 0,
-          fuelSaved: response.data.fuelSaved || 0,
-        };
-
-        setOptimizationResults(optimizationData);
-        
-        Alert.alert(
-          'Route Optimization Complete',
-          `Optimized route will save:\n• ${optimizationData.timeSaved} minutes\n• ${optimizationData.distanceSaved.toFixed(1)} km\n• ${optimizationData.fuelSaved.toFixed(1)}L fuel\n\nApply optimization?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Apply Optimization',
-              onPress: () => {
-                setSelectedTask(optimizationData.optimizedRoute);
-                Alert.alert('Success', 'Route optimization applied!');
-              },
-            },
-          ]
-        );
-      }
-    } catch (error: any) {
-      console.error('❌ Route optimization error:', error);
-      Alert.alert('Error', error.message || 'Failed to optimize route');
-    } finally {
-      setIsOptimizing(false);
-    }
-  }, [selectedTask]);
-
   // Handle emergency reroute
-  const handleEmergencyReroute = useCallback(async () => {
-    if (!selectedTask) {
-      Alert.alert('Error', 'Please select a transport task first');
-      return;
-    }
-
-    Alert.alert(
-      'Emergency Reroute',
-      'Request emergency reroute due to road closure, accident, or other incident?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Request Reroute',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // This would typically call a backend service for emergency rerouting
-              console.log('🚨 Requesting emergency reroute for task:', selectedTask.taskId);
-              
-              Alert.alert(
-                'Emergency Reroute Requested',
-                'Dispatch has been notified. You will receive updated route instructions shortly.',
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => {
-                      // Refresh tasks to get updated route
-                      handleRefresh();
-                    },
-                  },
-                ]
-              );
-            } catch (error: any) {
-              console.error('❌ Emergency reroute error:', error);
-              Alert.alert('Error', 'Failed to request emergency reroute');
-            }
-          },
-        },
-      ]
-    );
-  }, [selectedTask, handleRefresh]);
-
   // Handle navigation start
   const handleNavigationStart = useCallback((locationId: number) => {
-    setSelectedLocationId(locationId);
-    setActiveView('workers');
-  }, []);
+      setSelectedLocationId(locationId);
+      setActiveView('workers');
+
+      // ✅ OPTIMIZED: Worker data is now pre-cached, no need to reload
+      if (selectedTask) {
+        const hasWorkerData = selectedTask.pickupLocations?.[0]?.workerManifest?.length > 0;
+        
+        if (hasWorkerData) {
+          console.log('✅ Using pre-cached worker data - instant display');
+        } else {
+          console.log('⚠️ No cached worker data - loading now');
+          loadWorkerManifests(selectedTask.taskId);
+        }
+      }
+    }, [selectedTask, loadWorkerManifests]);
 
   // Handle worker check-in
   const handleWorkerCheckIn = useCallback(async (workerId: number, checkInData: any) => {
@@ -292,25 +411,39 @@ const TransportTasksScreen: React.FC = () => {
     }
 
     try {
-      console.log('✅ Checking in worker:', workerId, 'at location:', selectedLocationId);
+      console.log('✅ Checking in worker:', {
+        workerId,
+        locationId: selectedLocationId,
+        taskId: selectedTask.taskId,
+        checkInData
+      });
+      
+      // ✅ FIX: Ensure we have valid location data
+      const location = locationState.currentLocation || checkInData.location || {
+        latitude: 0,
+        longitude: 0,
+        accuracy: 10,
+        timestamp: new Date(),
+      };
+      
+      console.log('📍 Check-in location:', location);
       
       const response = await driverApiService.checkInWorker(
         selectedLocationId,
         workerId,
-        locationState.currentLocation || {
-          latitude: 0,
-          longitude: 0,
-          accuracy: 0,
-          timestamp: new Date(),
-        }
+        location
       );
 
+      console.log('📦 Check-in response:', response);
+
       if (response.success) {
+        console.log('✅ Worker checked in successfully');
+        
         // Update local task data
         const updatedTask = { ...selectedTask };
-        const location = updatedTask.pickupLocations.find(loc => loc.locationId === selectedLocationId);
-        if (location) {
-          const worker = location.workerManifest.find(w => w.workerId === workerId);
+        const locationData = updatedTask.pickupLocations.find(loc => loc.locationId === selectedLocationId);
+        if (locationData) {
+          const worker = locationData.workerManifest.find(w => w.workerId === workerId);
           if (worker) {
             worker.checkedIn = true;
             worker.checkInTime = new Date().toISOString();
@@ -323,10 +456,31 @@ const TransportTasksScreen: React.FC = () => {
           task.taskId === selectedTask.taskId ? updatedTask : task
         );
         setTransportTasks(updatedTasks);
+        
+        // ✅ REMOVED: No toast notification for individual check-ins (too irritating)
+      } else {
+        console.error('❌ Check-in failed:', response);
+        throw new Error(response.message || 'Failed to check in worker');
       }
     } catch (error: any) {
-      console.error('❌ Worker check-in error:', error);
-      throw error; // Re-throw to let the form handle the error
+      console.error('❌ Worker check-in error:', {
+        error,
+        workerId,
+        locationId: selectedLocationId,
+        response: error.response?.data
+      });
+      // Provide user-friendly error message
+      const errorMessage = error.response?.data?.message || 
+                          error.message || 
+                          'Failed to check in worker. Please try again.';
+      
+      // Check if it's a network error
+      if (errorMessage.includes('network') || errorMessage.includes('Network') || !navigator.onLine) {
+        showToast('⚠️ Network error - check-in saved offline', 'warning');
+      } else {
+        showToast(`❌ ${errorMessage}`, 'error');
+      }
+      throw new Error(errorMessage); // Re-throw with friendly message
     }
   }, [selectedTask, selectedLocationId, locationState.currentLocation, transportTasks]);
 
@@ -393,30 +547,18 @@ const TransportTasksScreen: React.FC = () => {
         },
         {
           text: '🚦 Traffic Delay',
-          onPress: () => {
-            Alert.alert(
-              'Report Delay',
-              'Delay/breakdown reporting feature will be implemented soon.\n\nThis will allow you to:\n• Report traffic delays\n• Report vehicle breakdowns\n• Upload photos\n• Add GPS location\n• Notify supervisors',
-              [{ text: 'OK' }]
-            );
-          }
+          onPress: () => handleReportDelay()
         },
         {
           text: '🔧 Vehicle Breakdown',
-          onPress: () => {
-            Alert.alert(
-              'Report Breakdown',
-              'Delay/breakdown reporting feature will be implemented soon.\n\nThis will allow you to:\n• Report vehicle breakdowns\n• Upload photos\n• Add GPS location\n• Request assistance\n• Notify supervisors',
-              [{ text: 'OK' }]
-            );
-          }
+          onPress: () => handleReportBreakdown()
         },
         {
           text: '⚠️ Other Issue',
           onPress: () => {
             Alert.alert(
               'Report Other Issue',
-              'Issue reporting feature will be implemented soon.',
+              'Please contact dispatch for other issues.',
               [{ text: 'OK' }]
             );
           }
@@ -425,8 +567,207 @@ const TransportTasksScreen: React.FC = () => {
     );
   }, [selectedTask]);
 
+  // Handle report delay
+  const handleReportDelay = useCallback(async () => {
+    if (!selectedTask) return;
+
+    // Delay reasons
+    const delayReasons = [
+      'Heavy Traffic',
+      'Road Closure',
+      'Accident on Route',
+      'Weather Conditions',
+      'Construction Work',
+      'Other'
+    ];
+
+    // Show reason selection
+    Alert.alert(
+      '🚦 Report Traffic Delay',
+      'Select delay reason:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...delayReasons.map(reason => ({
+          text: reason,
+          onPress: () => promptDelayDetails(reason)
+        }))
+      ]
+    );
+  }, [selectedTask]);
+
+  // Prompt for delay details
+  const promptDelayDetails = useCallback(async (reason: string) => {
+    if (!selectedTask) return;
+
+    // Estimated delay options
+    const delayOptions = [
+      { label: '15 minutes', value: 15 },
+      { label: '30 minutes', value: 30 },
+      { label: '45 minutes', value: 45 },
+      { label: '1 hour', value: 60 },
+      { label: '1.5 hours', value: 90 },
+      { label: '2+ hours', value: 120 }
+    ];
+
+    Alert.alert(
+      '⏰ Estimated Delay',
+      'How long do you expect the delay?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...delayOptions.map(option => ({
+          text: option.label,
+          onPress: () => submitDelayReport(reason, option.value)
+        }))
+      ]
+    );
+  }, [selectedTask]);
+
+  // Submit delay report
+  const submitDelayReport = useCallback(async (reason: string, estimatedDelay: number) => {
+    if (!selectedTask) return;
+
+    try {
+      console.log('📝 Submitting delay report:', { reason, estimatedDelay });
+
+      const response = await driverApiService.reportDelay(selectedTask.taskId, {
+        reason,
+        estimatedDelay,
+        location: locationState.currentLocation || undefined,
+        description: `Driver reported ${reason} causing ${estimatedDelay} minute delay`,
+      });
+
+      if (response.success) {
+        console.log('✅ Delay report submitted:', response.data);
+        
+        Alert.alert(
+          '✅ Delay Reported',
+          `Your delay report has been submitted successfully.\n\n` +
+          `Reason: ${reason}\n` +
+          `Estimated Delay: ${estimatedDelay} minutes\n` +
+          `Incident ID: ${response.data?.incidentId}\n\n` +
+          `Dispatch and supervisors have been notified.`,
+          [{ text: 'OK' }]
+        );
+
+        // Refresh tasks to get updated status
+        setTimeout(() => {
+          loadTransportTasks(false);
+        }, 500);
+      }
+    } catch (error: any) {
+      console.error('❌ Delay report error:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to submit delay report. Please try again or contact dispatch.'
+      );
+    }
+  }, [selectedTask, locationState.currentLocation, loadTransportTasks]);
+
+  // Handle report breakdown
+  const handleReportBreakdown = useCallback(async () => {
+    if (!selectedTask) return;
+
+    // Breakdown reasons
+    const breakdownReasons = [
+      'Engine Problem',
+      'Flat Tire',
+      'Battery Dead',
+      'Overheating',
+      'Brake Issue',
+      'Transmission Problem',
+      'Other Mechanical Issue'
+    ];
+
+    Alert.alert(
+      '🔧 Report Vehicle Breakdown',
+      'Select breakdown type:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...breakdownReasons.map(reason => ({
+          text: reason,
+          onPress: () => promptBreakdownSeverity(reason)
+        }))
+      ]
+    );
+  }, [selectedTask]);
+
+  // Prompt for breakdown severity
+  const promptBreakdownSeverity = useCallback(async (breakdownType: string) => {
+    if (!selectedTask) return;
+
+    Alert.alert(
+      '⚠️ Breakdown Severity',
+      'How severe is the breakdown?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Minor - Can continue slowly',
+          onPress: () => submitBreakdownReport(breakdownType, 'minor')
+        },
+        {
+          text: 'Moderate - Need assistance soon',
+          onPress: () => submitBreakdownReport(breakdownType, 'moderate')
+        },
+        {
+          text: 'Severe - Cannot continue',
+          style: 'destructive',
+          onPress: () => submitBreakdownReport(breakdownType, 'severe')
+        }
+      ]
+    );
+  }, [selectedTask]);
+
+  // Submit breakdown report
+  const submitBreakdownReport = useCallback(async (breakdownType: string, severity: string) => {
+    if (!selectedTask) return;
+
+    try {
+      console.log('📝 Submitting breakdown report:', { breakdownType, severity });
+
+      const response = await driverApiService.reportBreakdown(selectedTask.taskId, {
+        breakdownType,
+        severity,
+        requiresAssistance: severity === 'moderate' || severity === 'severe',
+        location: locationState.currentLocation || undefined,
+        description: `Driver reported ${breakdownType} with ${severity} severity`,
+      });
+
+      if (response.success) {
+        console.log('✅ Breakdown report submitted:', response.data);
+        
+        Alert.alert(
+          '✅ Breakdown Reported',
+          `Your breakdown report has been submitted successfully.\n\n` +
+          `Issue: ${breakdownType}\n` +
+          `Severity: ${severity.toUpperCase()}\n` +
+          `Incident ID: ${response.data?.incidentId}\n\n` +
+          `${severity === 'severe' ? 'Emergency assistance has been requested. ' : ''}Dispatch will contact you shortly.`,
+          [{ text: 'OK' }]
+        );
+
+        // Refresh tasks to get updated status
+        setTimeout(() => {
+          loadTransportTasks(false);
+        }, 500);
+      }
+    } catch (error: any) {
+      console.error('❌ Breakdown report error:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to submit breakdown report. Please call dispatch immediately.'
+      );
+    }
+  }, [selectedTask, locationState.currentLocation, loadTransportTasks]);
+
   // Handle pickup completion
-  const handleCompletePickup = useCallback(async (locationId: number) => {
+  const handleCompletePickup = useCallback(async (locationId: number, selectedWorkerIds?: number[], providedPhoto?: PhotoResult) => {
+    console.log('🔍 handleCompletePickup called:', {
+      locationId,
+      selectedWorkerIds,
+      hasProvidedPhoto: !!providedPhoto,
+      providedPhotoFileName: providedPhoto?.fileName,
+    });
+    
     if (!selectedTask) {
       Alert.alert('Error', 'No task selected');
       return;
@@ -434,7 +775,8 @@ const TransportTasksScreen: React.FC = () => {
 
     // Check if this is a dropoff (locationId === -1)
     if (locationId === -1) {
-      return handleCompleteDropoff(locationId);
+      console.log('🔄 Redirecting to handleCompleteDropoff with photo:', !!providedPhoto);
+      return handleCompleteDropoff(locationId, selectedWorkerIds, providedPhoto);
     }
 
     try {
@@ -446,6 +788,16 @@ const TransportTasksScreen: React.FC = () => {
 
       const checkedInWorkers = location.workerManifest.filter(w => w.checkedIn).length;
       const totalWorkers = location.workerManifest.length;
+      
+      // ✅ FIX: Require at least 1 worker checked in
+      if (checkedInWorkers === 0) {
+        Alert.alert(
+          '❌ No Workers Checked In',
+          'You must check in at least one worker before completing pickup.\n\nPlease check in workers first.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       
       // Step 1: Verify worker count
       if (checkedInWorkers < totalWorkers) {
@@ -464,55 +816,22 @@ const TransportTasksScreen: React.FC = () => {
         if (!proceed) return;
       }
       
-      // Step 2: Prompt for photo
-      const takePhoto = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          '📸 Pickup Photo',
-          `Take a photo of workers at ${location.name}?\n\nThis provides proof of pickup and helps with verification.`,
-          [
-            { 
-              text: 'Skip Photo', 
-              style: 'cancel', 
-              onPress: () => {
-                // Show warning about skipping photo
-                Alert.alert(
-                  '⚠️ Skip Photo?',
-                  'Photo is recommended for proof of pickup. Continue without photo?',
-                  [
-                    { text: 'Go Back', style: 'cancel', onPress: () => resolve(false) },
-                    { text: 'Continue Without Photo', style: 'destructive', onPress: () => resolve(false) }
-                  ]
-                );
-              }
-            },
-            { 
-              text: '📷 Take Photo', 
-              onPress: () => resolve(true) 
-            }
-          ]
-        );
+      // Step 2: Use provided photo (no popup asking for photo)
+      let capturedPhoto: PhotoResult | null = providedPhoto ? providedPhoto : null;
+      
+      console.log('📸 Photo check in handleCompletePickup:', {
+        providedPhoto,
+        providedPhotoExists: !!providedPhoto,
+        capturedPhoto,
+        capturedPhotoExists: !!capturedPhoto,
       });
       
-      // Step 3: Capture photo
-      let capturedPhoto: PhotoResult | null = null;
-      if (takePhoto) {
-        capturedPhoto = await showPhotoOptions(locationState.currentLocation || undefined);
-        
-        if (capturedPhoto) {
-          console.log('✅ Photo captured for pickup:', capturedPhoto.fileName);
-          
-          // Show photo preview
-          Alert.alert(
-            '📸 Photo Captured',
-            `Photo: ${capturedPhoto.fileName}\nSize: ${(capturedPhoto.fileSize / 1024).toFixed(1)} KB\nGPS: ${capturedPhoto.location ? 'Tagged ✓' : 'Not tagged'}`,
-            [{ text: 'Continue' }]
-          );
-        } else {
-          console.log('⚠️ Photo capture cancelled');
-        }
-      }
+      // ✅ REMOVED: No photo popup at all
+      // User already had the option to take photo inline
+      // If they didn't take it, they don't want it
+      console.log(capturedPhoto ? '✅ Using photo from form' : 'ℹ️ No photo provided - user chose not to take photo');
       
-      // Step 4: Final confirmation (removed blocking "Report Issues" popup)
+      // Step 3: Final confirmation
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
           '✅ Complete Pickup',
@@ -547,11 +866,13 @@ const TransportTasksScreen: React.FC = () => {
           if (uploadResponse.success) {
             console.log('✅ Pickup photo uploaded successfully:', uploadResponse.data?.photoUrl);
           } else {
-            console.warn('⚠️ Photo upload failed');
+            console.warn('⚠️ Photo upload failed (non-critical):', uploadResponse.message);
           }
           return uploadResponse;
         }).catch(uploadError => {
-          console.error('❌ Photo upload error:', uploadError);
+          console.error('❌ Photo upload error (non-critical):', uploadError.message || uploadError);
+          // ✅ Don't show error to user - photo is optional
+          // Backend endpoint might not be implemented yet
           return { success: false, error: uploadError };
         });
       }
@@ -571,17 +892,29 @@ const TransportTasksScreen: React.FC = () => {
       );
 
       if (response.success) {
-        // Immediately update local state with new status
+        console.log('✅ Pickup completed successfully');
+        
+        // ✅ FIX: Immediately update local state with new status FIRST
         const newStatus = response.data?.status || 'PICKUP_COMPLETE';
         
-        // Update selected task
+        // Calculate checked-in workers from current state
+        const checkedInWorkers = location.workerManifest.filter(w => w.checkedIn).length;
+        
+        // Update selected task immediately
         if (selectedTask) {
           const updatedTask = {
             ...selectedTask,
             status: newStatus,
+            checkedInWorkers: checkedInWorkers,  // ✅ Update count immediately
+            totalWorkers: location.workerManifest.length,
             pickupLocations: selectedTask.pickupLocations.map(loc =>
               loc.locationId === locationId
-                ? { ...loc, completed: true }
+                ? { 
+                    ...loc, 
+                    completed: true, 
+                    actualPickupTime: new Date().toISOString(),
+                    workerManifest: location.workerManifest  // ✅ Use location data (correct status)
+                  }
                 : loc
             ),
           };
@@ -597,45 +930,60 @@ const TransportTasksScreen: React.FC = () => {
           );
         }
         
-        // Show success message
-        Alert.alert(
-          '✅ Pickup Complete!',
-          `Successfully completed pickup at ${location.name}\n\n` +
-          `Workers picked up: ${checkedInWorkers}\n` +
-          `${capturedPhoto ? 'Photo is uploading in background...' : 'No photo attached'}`,
-          [
-            {
-              text: 'Continue',
-              onPress: () => {
-                // Move to next location or navigation view
-                setActiveView('navigation');
-                setSelectedLocationId(null);
-                // Refresh tasks in background to sync with server
-                handleRefresh();
-              },
-            },
-          ]
-        );
+        // ✅ NEW: Immediately refresh task list from backend to sync status
+        console.log('🔄 Refreshing task list immediately after pickup completion...');
+        setTimeout(() => {
+          loadTransportTasks(false); // Refresh without loading spinner
+        }, 500); // Small delay to allow backend to process
+        
+        // ✅ FIX: DON'T reload worker manifests - keep the correct data we just set
+        // The backend might return incorrect data, so we trust our local state
+        console.log('✅ Pickup state updated, NOT reloading manifests to preserve correct data');
+        
+        console.log('✅ State updated, showing success message');
+        
+        // Move to next location or navigation view
+        setActiveView('navigation');
+        setSelectedLocationId(null);
+        
+        // ✅ REMOVED: No toast for pickup complete (too many messages)
+        // The UI already shows completion status clearly
+        console.log(`✅ Pickup complete at ${location.name} - ${checkedInWorkers} workers picked up`);
         
         // Wait for photo upload to complete in background (optional)
         if (photoUploadPromise) {
           photoUploadPromise.then(result => {
             if (result.success) {
               console.log('✅ Background photo upload completed');
+              // ✅ REMOVED: No toast for photo upload (silent background operation)
             } else {
               console.warn('⚠️ Background photo upload failed, but pickup is already complete');
+              // ✅ REMOVED: Don't show warning toast - photo is optional and backend might not support it yet
             }
           });
         }
       }
     } catch (error: any) {
       console.error('❌ Complete pickup error:', error);
-      Alert.alert('Error', error.message || 'Failed to complete pickup');
+      
+      // Check if it's a network error
+      if (error.message?.includes('network') || error.message?.includes('Network') || !navigator.onLine) {
+        showToast('⚠️ Network error - pickup saved offline and will sync later', 'warning');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to complete pickup');
+      }
     }
   }, [selectedTask, locationState.currentLocation, handleRefresh, handleCompleteDropoff]);
 
   // Handle complete dropoff
-  const handleCompleteDropoff = useCallback(async (locationId: number) => {
+  const handleCompleteDropoff = useCallback(async (locationId: number, selectedWorkerIds?: number[], providedPhoto?: PhotoResult) => {
+    console.log('🔍 handleCompleteDropoff called:', {
+      locationId,
+      selectedWorkerIds,
+      hasProvidedPhoto: !!providedPhoto,
+      providedPhotoFileName: providedPhoto?.fileName,
+    });
+    
     if (!selectedTask) {
       Alert.alert('Error', 'No task selected');
       return;
@@ -648,17 +996,28 @@ const TransportTasksScreen: React.FC = () => {
         return;
       }
 
-      // ✅ FIX: Get only checked-in workers (workers who were actually dropped off)
+      // ✅ FIX: Use selectedWorkerIds if provided, otherwise get all checked-in workers
       const checkedInWorkers = selectedTask.pickupLocations.flatMap(loc => 
         (loc.workerManifest || []).filter(w => w.checkedIn)
       );
       
-      const workerIds = checkedInWorkers.map(w => w.workerId);
-      const totalWorkers = checkedInWorkers.length;
+      // If specific workers selected, use those; otherwise use all checked-in workers
+      const workerIds = selectedWorkerIds && selectedWorkerIds.length > 0
+        ? selectedWorkerIds
+        : checkedInWorkers.map(w => w.workerId);
+      
+      const totalWorkers = workerIds.length;
+      
+      console.log('🚌 Dropoff worker selection:', {
+        selectedWorkerIds,
+        totalCheckedIn: checkedInWorkers.length,
+        droppingOff: totalWorkers,
+        workerIds
+      });
       
       // Step 1: Verify worker count
       if (totalWorkers === 0) {
-        Alert.alert('Error', 'No workers checked in. Please check in workers before completing dropoff.');
+        Alert.alert('Error', 'No workers selected for dropoff. Please select workers or check in workers first.');
         return;
       }
       
@@ -673,55 +1032,22 @@ const TransportTasksScreen: React.FC = () => {
         );
       }
       
-      // Step 3: Prompt for photo
-      const takePhoto = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          '📸 Drop-off Photo',
-          `Take a photo of workers at ${location.name}?\n\nThis provides proof of delivery and helps with verification.`,
-          [
-            { 
-              text: 'Skip Photo', 
-              style: 'cancel', 
-              onPress: () => {
-                // Show warning about skipping photo
-                Alert.alert(
-                  '⚠️ Skip Photo?',
-                  'Photo is HIGHLY RECOMMENDED for proof of delivery. Continue without photo?',
-                  [
-                    { text: 'Go Back', style: 'cancel', onPress: () => resolve(false) },
-                    { text: 'Continue Without Photo', style: 'destructive', onPress: () => resolve(false) }
-                  ]
-                );
-              }
-            },
-            { 
-              text: '📷 Take Photo', 
-              onPress: () => resolve(true) 
-            }
-          ]
-        );
+      // Step 3: Use provided photo (no popup asking for photo)
+      let capturedPhoto: PhotoResult | null = providedPhoto ? providedPhoto : null;
+      
+      console.log('📸 Photo check in handleCompleteDropoff:', {
+        providedPhoto,
+        providedPhotoExists: !!providedPhoto,
+        capturedPhoto,
+        capturedPhotoExists: !!capturedPhoto,
       });
       
-      // Step 4: Capture photo
-      let capturedPhoto: PhotoResult | null = null;
-      if (takePhoto) {
-        capturedPhoto = await showPhotoOptions(locationState.currentLocation || undefined);
-        
-        if (capturedPhoto) {
-          console.log('✅ Photo captured for drop-off:', capturedPhoto.fileName);
-          
-          // Show photo preview
-          Alert.alert(
-            '📸 Photo Captured',
-            `Photo: ${capturedPhoto.fileName}\nSize: ${(capturedPhoto.fileSize / 1024).toFixed(1)} KB\nGPS: ${capturedPhoto.location ? 'Tagged ✓' : 'Not tagged'}`,
-            [{ text: 'Continue' }]
-          );
-        } else {
-          console.log('⚠️ Photo capture cancelled');
-        }
-      }
+      // ✅ REMOVED: No photo popup at all
+      // User already had the option to take photo inline
+      // If they didn't take it, they don't want it
+      console.log(capturedPhoto ? '✅ Using photo from form' : 'ℹ️ No photo provided - user chose not to take photo');
       
-      // Step 5: Final confirmation (removed blocking "Report Issues" popup)
+      // Step 4: Final confirmation
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
           '✅ Complete Drop-off',
@@ -757,11 +1083,12 @@ const TransportTasksScreen: React.FC = () => {
           if (uploadResponse.success) {
             console.log('✅ Dropoff photo uploaded successfully:', uploadResponse.data?.photoUrl);
           } else {
-            console.warn('⚠️ Photo upload failed');
+            console.warn('⚠️ Photo upload failed (non-critical):', uploadResponse.message);
           }
           return uploadResponse;
         }).catch(uploadError => {
-          console.error('❌ Photo upload error:', uploadError);
+          console.error('❌ Photo upload error (non-critical):', uploadError.message || uploadError);
+          // ✅ Don't show error to user - photo is optional
           return { success: false, error: uploadError };
         });
       }
@@ -782,19 +1109,53 @@ const TransportTasksScreen: React.FC = () => {
       );
 
       if (response.success) {
-        // Immediately update local state with new status
+        console.log('✅ Dropoff completed successfully');
+        
+        // ✅ FIX: Immediately update local state with new status FIRST
         const newStatus = response.data?.status || 'COMPLETED';
         
-        // Update selected task
+        // Update selected task immediately
         if (selectedTask) {
+          // ✅ FIX: Update worker manifests with dropStatus
+          const updatedPickupLocations = selectedTask.pickupLocations.map(loc => ({
+            ...loc,
+            workerManifest: loc.workerManifest.map(w => {
+              const newDropStatus = workerIds && workerIds.includes(w.workerId) ? 'confirmed' : w.dropStatus || 'pending';
+              console.log(`👤 Updating worker ${w.workerId} (${w.name}):`, {
+                oldDropStatus: w.dropStatus,
+                newDropStatus,
+                isInWorkerIds: workerIds?.includes(w.workerId),
+                workerIds
+              });
+              return {
+                ...w,
+                // ✅ Set dropStatus based on whether worker was in the workerIds list
+                dropStatus: newDropStatus,
+              };
+            })
+          }));
+          
           const updatedTask = {
             ...selectedTask,
             status: newStatus,
+            checkedInWorkers: totalWorkers,  // ✅ Update count immediately
+            totalWorkers: totalWorkers,
+            pickupLocations: updatedPickupLocations,  // ✅ Update with dropStatus
             dropoffLocation: {
               ...location,
               actualArrival: new Date().toISOString(),
             },
           };
+          
+          console.log('📊 Updated task with dropStatus:', {
+            workerIds,
+            updatedWorkers: updatedPickupLocations[0]?.workerManifest?.map(w => ({
+              id: w.workerId,
+              name: w.name,
+              dropStatus: w.dropStatus,
+            }))
+          });
+          
           setSelectedTask(updatedTask);
           
           // Update tasks list
@@ -807,41 +1168,49 @@ const TransportTasksScreen: React.FC = () => {
           );
         }
         
-        Alert.alert(
-          '✅ Drop-off Complete!',
-          `Successfully completed drop-off at ${location.name}\n\n` +
-          `Workers delivered: ${totalWorkers}\n` +
-          `${capturedPhoto ? 'Photo is uploading in background...\n' : ''}` +
-          `GPS location recorded ✓`,
-          [
-            {
-              text: 'Done',
-              onPress: () => {
-                // Return to tasks view
-                setActiveView('tasks');
-                setSelectedLocationId(null);
-                setSelectedTask(null);
-                // Refresh tasks in background to sync with server
-                handleRefresh();
-              },
-            },
-          ]
-        );
+        // ✅ NEW: Immediately refresh task list from backend to sync status
+        console.log('🔄 Refreshing task list immediately after dropoff completion...');
+        setTimeout(() => {
+          loadTransportTasks(false); // Refresh without loading spinner
+        }, 500); // Small delay to allow backend to process
+        
+        // ✅ FIX: DON'T reload worker manifests - keep the correct data we just set
+        // The backend might return incorrect data, so we trust our local state
+        console.log('✅ Dropoff state updated, NOT reloading manifests to preserve correct data');
+        
+        console.log('✅ State updated, showing success message');
+        
+        // Return to tasks view
+        setActiveView('tasks');
+        setSelectedLocationId(null);
+        setSelectedTask(null);
+        
+        // ✅ REMOVED: No toast for dropoff complete (too many messages)
+        // The UI already shows completion status clearly
+        console.log(`✅ Drop-off complete at ${location.name} - ${totalWorkers} workers delivered`);
         
         // Wait for photo upload to complete in background (optional)
         if (photoUploadPromise) {
           photoUploadPromise.then(result => {
             if (result.success) {
               console.log('✅ Background photo upload completed');
+              // ✅ REMOVED: No toast for photo upload (silent background operation)
             } else {
               console.warn('⚠️ Background photo upload failed, but dropoff is already complete');
+              // ✅ REMOVED: Don't show warning toast - photo is optional
             }
           });
         }
       }
     } catch (error: any) {
       console.error('❌ Complete dropoff error:', error);
-      Alert.alert('Error', error.message || 'Failed to complete dropoff');
+      
+      // Check if it's a network error
+      if (error.message?.includes('network') || error.message?.includes('Network') || !navigator.onLine) {
+        showToast('⚠️ Network error - dropoff saved offline and will sync later', 'warning');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to complete dropoff');
+      }
     }
   }, [selectedTask, locationState.currentLocation, handleRefresh]);
 
@@ -868,11 +1237,18 @@ const TransportTasksScreen: React.FC = () => {
           setSelectedTask({ ...selectedTask, status });
         }
         
-        Alert.alert('Success', `Task status updated to ${status.replace('_', ' ')}`);
+        // ✅ REMOVED: No toast for status update (too many messages)
+        console.log(`✅ Task status updated to ${status.replace('_', ' ')}`);
       }
     } catch (error: any) {
       console.error('❌ Task status update error:', error);
-      Alert.alert('Error', error.message || 'Failed to update task status');
+      
+      // Check if it's a network error
+      if (error.message?.includes('network') || error.message?.includes('Network') || !navigator.onLine) {
+        showToast('⚠️ Network error - status update will sync when online', 'warning');
+      } else {
+        showToast(`❌ ${error.message || 'Failed to update task status'}`, 'error');
+      }
     }
   }, [transportTasks, selectedTask, locationState.currentLocation]);
 
@@ -1060,8 +1436,6 @@ const TransportTasksScreen: React.FC = () => {
             transportTask={selectedTask}
             currentLocation={locationState.currentLocation}
             onNavigationStart={handleNavigationStart}
-            onRouteOptimization={handleRouteOptimization}
-            onEmergencyReroute={handleEmergencyReroute}
             onCompletePickup={handleCompletePickup}
             onCompleteDropoff={handleCompleteDropoff}
             onUpdateTaskStatus={(status) => handleTaskStatusUpdate(selectedTask.taskId, status)}
@@ -1081,18 +1455,6 @@ const TransportTasksScreen: React.FC = () => {
           />
         )}
 
-        {/* Route Optimization Results */}
-        {optimizationResults && (
-          <ConstructionCard title="Route Optimization Results" variant="success" style={styles.optimizationCard}>
-            <Text style={styles.optimizationTitle}>🎯 Optimization Benefits</Text>
-            <View style={styles.optimizationStats}>
-              <Text style={styles.optimizationStat}>⏱️ Time Saved: {optimizationResults.timeSaved} minutes</Text>
-              <Text style={styles.optimizationStat}>📏 Distance Saved: {optimizationResults.distanceSaved.toFixed(1)} km</Text>
-              <Text style={styles.optimizationStat}>⛽ Fuel Saved: {optimizationResults.fuelSaved.toFixed(1)} L</Text>
-            </View>
-          </ConstructionCard>
-        )}
-
         {/* Last updated info */}
         {lastUpdated && (
           <View style={styles.lastUpdatedContainer}>
@@ -1105,6 +1467,15 @@ const TransportTasksScreen: React.FC = () => {
         {/* Bottom spacing */}
         <View style={styles.bottomSpacing} />
       </ScrollView>
+
+      {/* Toast Notification */}
+      <Toast
+        visible={toastVisible}
+        message={toastMessage}
+        type={toastType}
+        onDismiss={() => setToastVisible(false)}
+        duration={3000}
+      />
     </SafeAreaView>
   );
 };

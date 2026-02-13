@@ -17,6 +17,7 @@ interface TransportTaskCardProps {
   onStartRoute: (taskId: number) => void;
   onViewRoute: (task: TransportTask) => void;
   onUpdateStatus: (taskId: number, status: string) => void;
+  hasActiveTask?: boolean;  // Indicates if another task is already active
 }
 
 const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
@@ -24,6 +25,7 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
   onStartRoute,
   onViewRoute,
   onUpdateStatus,
+  hasActiveTask = false,
 }) => {
   // Get status color
   const getStatusColor = (status: string): string => {
@@ -47,30 +49,37 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
   const getStatusText = (status: string): string => {
     switch (status) {
       case 'pending':
-        return 'Ready to Start';
+        return '⏳ Ready to Start';
       case 'en_route_pickup':
-        return 'En Route to Pickup';
+        return '🚛 En Route to Pickup';
       case 'pickup_complete':
-        return 'Pickup Complete';
+        return '✅ Pickup Complete';
       case 'en_route_dropoff':
-        return 'En Route to Site';
+        return '🚛 En Route to Site';
       case 'completed':
-        return 'Trip Complete';
+        return '✅ Trip Complete';
       default:
         return 'Unknown Status';
     }
   };
 
-  // Handle start route
+  // Get next status text for subtitle
+  const getNextStatusText = (status: string): string => {
+    switch (status) {
+      case 'en_route_pickup':
+        return 'Mark pickup complete';
+      case 'pickup_complete':
+        return 'Start to dropoff';
+      case 'en_route_dropoff':
+        return 'Complete trip';
+      default:
+        return '';
+    }
+  };
+
+  // Handle start route - Direct action without confirmation popup
   const handleStartRoute = () => {
-    Alert.alert(
-      'Start Route',
-      `Are you sure you want to start route "${task.route}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Start', onPress: () => onStartRoute(task.taskId) },
-      ]
-    );
+    onStartRoute(task.taskId);
   };
 
   // Handle view route
@@ -125,6 +134,11 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
     });
   };
 
+  // Worker summary - ENHANCED with progress bar
+  const workerProgress = task.totalWorkers > 0 
+    ? (task.checkedInWorkers / task.totalWorkers) * 100 
+    : 0;
+
   return (
     <ConstructionCard
       variant="elevated"
@@ -133,61 +147,77 @@ const TransportTaskCard: React.FC<TransportTaskCardProps> = ({
       {/* Header with status */}
       <View style={styles.header}>
         <View style={styles.titleContainer}>
-          <Text style={styles.routeName}>{task.route}</Text>
+          <Text style={styles.routeName}>🚛 {task.route}</Text>
         </View>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(task.status) }]}>
           <Text style={styles.statusText}>{getStatusText(task.status)}</Text>
         </View>
       </View>
 
+      {/* Progress bar for worker check-in */}
+      {task.status !== 'completed' && task.totalWorkers > 0 && (
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${workerProgress}%` }]} />
+          </View>
+          <Text style={styles.progressText}>
+            {task.checkedInWorkers}/{task.totalWorkers} workers checked in
+          </Text>
+        </View>
+      )}
+
       {/* Worker summary */}
       <View style={styles.summaryContainer}>
         <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Total Workers:</Text>
+          <Text style={styles.summaryIcon}>👥</Text>
           <Text style={styles.summaryValue}>{task.totalWorkers}</Text>
+          <Text style={styles.summaryLabel}>Workers</Text>
         </View>
         <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Checked In:</Text>
+          <Text style={styles.summaryIcon}>✅</Text>
           <Text style={styles.summaryValue}>{task.checkedInWorkers}</Text>
+          <Text style={styles.summaryLabel}>Checked In</Text>
         </View>
         <View style={styles.summaryItem}>
-          <Text style={styles.summaryLabel}>Pickup Locations:</Text>
+          <Text style={styles.summaryIcon}>📍</Text>
           <Text style={styles.summaryValue}>{task.pickupLocations?.length || 0}</Text>
+          <Text style={styles.summaryLabel}>Locations</Text>
         </View>
       </View>
 
-      {/* Action buttons */}
+      {/* Action buttons - SIMPLIFIED: Only essential buttons */}
       <View style={styles.actionsContainer}>
         {task.status === 'pending' && (
-          <ConstructionButton
-            title="Start Route"
-            onPress={handleStartRoute}
-            variant="success"
-            size="medium"
-            icon="🚗"
-            style={styles.actionButton}
-          />
+          <>
+            <ConstructionButton
+              title="Start Route & Navigate"
+              subtitle="Opens Google Maps directions"
+              onPress={handleStartRoute}
+              variant="success"
+              size="large"
+              style={styles.primaryActionButton}
+              disabled={hasActiveTask}
+            />
+            {hasActiveTask && (
+              <Text style={styles.disabledHint}>
+                ⚠️ Complete current task first
+              </Text>
+            )}
+          </>
         )}
         
-        {['en_route_pickup', 'pickup_complete', 'en_route_dropoff'].includes(task.status) && (
+        {/* REMOVED: Update Status button - not necessary, status updates automatically */}
+        
+        {task.status !== 'pending' && task.status !== 'completed' && (
           <ConstructionButton
-            title="Update Status"
-            onPress={handleStatusUpdate}
+            title="View Route Details"
+            subtitle="Workers & locations"
+            onPress={handleViewRoute}
             variant="primary"
-            size="medium"
-            icon="📍"
-            style={styles.actionButton}
+            size="large"
+            style={styles.primaryActionButton}
           />
         )}
-        
-        <ConstructionButton
-          title="View Route"
-          onPress={handleViewRoute}
-          variant="neutral"
-          size="medium"
-          icon="🗺️"
-          style={styles.actionButton}
-        />
       </View>
     </ConstructionCard>
   );
@@ -208,51 +238,92 @@ const styles = StyleSheet.create({
     marginRight: ConstructionTheme.spacing.md,
   },
   routeName: {
-    ...ConstructionTheme.typography.headlineSmall,
+    ...ConstructionTheme.typography.headlineMedium, // ENHANCED: Larger text
     color: ConstructionTheme.colors.onSurface,
+    fontWeight: '700',
     marginBottom: 4,
   },
   statusBadge: {
     paddingHorizontal: ConstructionTheme.spacing.md,
-    paddingVertical: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.md, // ENHANCED: More padding
     borderRadius: ConstructionTheme.borderRadius.lg,
+    minWidth: 120,
+    alignItems: 'center',
   },
   statusText: {
     color: ConstructionTheme.colors.onPrimary,
-    ...ConstructionTheme.typography.labelMedium,
-    textTransform: 'uppercase',
+    ...ConstructionTheme.typography.labelLarge, // ENHANCED: Larger text
+    fontWeight: '700',
+  },
+  progressContainer: {
+    marginBottom: ConstructionTheme.spacing.md,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: ConstructionTheme.colors.surfaceVariant,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+    overflow: 'hidden',
+    marginBottom: ConstructionTheme.spacing.sm,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: ConstructionTheme.colors.success,
+    borderRadius: ConstructionTheme.borderRadius.sm,
+  },
+  progressText: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onSurfaceVariant,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   summaryContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'space-around',
     marginBottom: ConstructionTheme.spacing.lg,
-    paddingVertical: ConstructionTheme.spacing.sm,
+    paddingVertical: ConstructionTheme.spacing.lg, // ENHANCED: More padding
     backgroundColor: ConstructionTheme.colors.surfaceVariant,
-    borderRadius: ConstructionTheme.borderRadius.sm,
+    borderRadius: ConstructionTheme.borderRadius.md,
     paddingHorizontal: ConstructionTheme.spacing.md,
   },
   summaryItem: {
     alignItems: 'center',
+    flex: 1,
+  },
+  summaryIcon: {
+    fontSize: 32, // ENHANCED: Larger icons
+    marginBottom: 4,
   },
   summaryLabel: {
     ...ConstructionTheme.typography.bodySmall,
     color: ConstructionTheme.colors.onSurfaceVariant,
-    marginBottom: 4,
+    marginTop: 4,
+    fontWeight: '600',
   },
   summaryValue: {
-    ...ConstructionTheme.typography.headlineSmall,
+    ...ConstructionTheme.typography.headlineLarge, // ENHANCED: Larger numbers
     color: ConstructionTheme.colors.primary,
     fontWeight: '700',
   },
   actionsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: ConstructionTheme.spacing.sm,
+    flexDirection: 'column',
+    gap: ConstructionTheme.spacing.md,
     marginBottom: ConstructionTheme.spacing.sm,
   },
-  actionButton: {
-    flex: 1,
-    minWidth: 120,
+  primaryActionButton: {
+    width: '100%',
+    minHeight: ConstructionTheme.spacing.extraLargeTouch, // 72px for gloves
+  },
+  secondaryActionButton: {
+    width: '100%',
+    minHeight: ConstructionTheme.spacing.largeTouch, // 60px
+  },
+  disabledHint: {
+    ...ConstructionTheme.typography.bodySmall,
+    color: ConstructionTheme.colors.warning,
+    textAlign: 'center',
+    marginTop: ConstructionTheme.spacing.xs,
+    fontStyle: 'italic',
+    width: '100%',
   },
 });
 

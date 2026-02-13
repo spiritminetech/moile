@@ -123,13 +123,21 @@ export class LocationService {
       console.log('✅ Location obtained successfully:', geoLocation);
       return geoLocation;
     } catch (error) {
-      console.error('❌ Error getting current location:', error);
+      // ✅ FIX: Check error type BEFORE logging to avoid spam
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isPermissionError = errorMessage.includes('Not authorized') || 
+                               errorMessage.includes('permission') || 
+                               errorMessage.includes('denied');
+      
+      // Only log non-permission errors (permission errors are expected and handled with fallback)
+      if (!isPermissionError) {
+        console.error('❌ Error getting current location:', error);
+      }
       
       // Check if it's a permission error
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (errorMessage.includes('Not authorized') || errorMessage.includes('permission') || errorMessage.includes('denied')) {
+      if (isPermissionError) {
         if (allowFallback) {
-          console.warn('⚠️ Location permission error, using fallback location');
+          console.log('📍 Using fallback location (permission not granted)');
           return this.getFallbackLocation();
         }
         throw new Error('Location permission denied. Please enable location permissions in your device settings.');

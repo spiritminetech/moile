@@ -120,13 +120,13 @@ router.get('/approvals/:approvalId/details', verifyToken, getApprovalDetails);
 
 
 // Get checked-in workers for a project
-router.get('/checked-in-workers/:projectId', getCheckedInWorkers);
+router.get('/checked-in-workers/:projectId', verifyToken, getCheckedInWorkers);
 
 // Get tasks for a project
-router.get('/projects/:projectId/tasks', getProjectTasks);
+router.get('/projects/:projectId/tasks', verifyToken, getProjectTasks);
 
 // Get supervisor projects
-router.get('/projects', getSupervisorProjects);
+router.get('/projects', verifyToken, getSupervisorProjects);
 
 /**
  * ========================================
@@ -160,7 +160,7 @@ router.put('/task-assignments/:assignmentId/priority', verifyToken, updateTaskPr
  * GET /api/supervisor/active-tasks/:projectId
  * Returns: Task completion status with worker details
  */
-router.get('/active-tasks/:projectId', getActiveTasks);
+router.get('/active-tasks/:projectId', verifyToken, getActiveTasks);
 
 /**
  * Assign tasks to workers
@@ -193,20 +193,20 @@ router.put('/daily-targets', verifyToken, updateDailyTargets);
 // Send overtime instructions to workers
 router.post('/overtime-instructions', verifyToken, sendOvertimeInstructions);
 
-router.post("/complete",  completeTask);
-router.get("/worker/daily",  getWorkerTasksForDay);
+router.post("/complete", verifyToken, completeTask);
+router.get("/worker/daily", verifyToken, getWorkerTasksForDay);
 
 /**
  * Route to fetch workers assigned to a specific project
  * GET /api/supervisor/workers-assigned
  */
-router.get('/workers-assigned', getAssignedWorkers);
+router.get('/workers-assigned', verifyToken, getAssignedWorkers);
 
 /**
  * Route to fetch late and absent workers for a project
  * GET /api/supervisor/late-absent-workers
  */
-router.get('/late-absent-workers', getLateAbsentWorkers);
+router.get('/late-absent-workers', verifyToken, getLateAbsentWorkers);
 
 /**
  * Route to send attendance alert to workers
@@ -218,13 +218,13 @@ router.post('/send-attendance-alert', verifyToken, sendAttendanceAlert);
  * Route to get real-time geofence violations
  * GET /api/supervisor/geofence-violations
  */
-router.get('/geofence-violations', getGeofenceViolations);
+router.get('/geofence-violations', verifyToken, getGeofenceViolations);
 
 /**
  * Route to get workers for manual attendance override
  * GET /api/supervisor/manual-attendance-workers
  */
-router.get('/manual-attendance-workers', getManualAttendanceWorkers);
+router.get('/manual-attendance-workers', verifyToken, getManualAttendanceWorkers);
 
 /**
  * Route to submit manual attendance override
@@ -236,42 +236,42 @@ router.post('/manual-attendance-override', verifyToken, submitManualAttendanceOv
  * Route to get comprehensive attendance monitoring data
  * GET /api/supervisor/attendance-monitoring
  */
-router.get('/attendance-monitoring', getAttendanceMonitoring);
+router.get('/attendance-monitoring', verifyToken, getAttendanceMonitoring);
 
 /**
  * Route to get pending attendance corrections for review
  * GET /api/supervisor/pending-attendance-corrections
  */
-router.get('/pending-attendance-corrections', getPendingAttendanceCorrections);
+router.get('/pending-attendance-corrections', verifyToken, getPendingAttendanceCorrections);
 
 /**
  * Route to approve or reject attendance correction
  * POST /api/supervisor/attendance-correction/:correctionId/review
  */
-router.post('/attendance-correction/:correctionId/review', reviewAttendanceCorrection);
+router.post('/attendance-correction/:correctionId/review', verifyToken, reviewAttendanceCorrection);
 
 /**
  * Route to export the daily attendance report (CSV/PDF)
  * GET /api/supervisor/export-report
  */
-router.get('/export-report', exportReport);
+router.get('/export-report', verifyToken, exportReport);
 
 /**
  * Route to refresh workers' attendance data for UI updates
  * GET /api/supervisor/refresh-attendance
  */
-router.get('/refresh-attendance', refreshAttendance);
+router.get('/refresh-attendance', verifyToken, refreshAttendance);
 
 router.get(
   "/projects/:projectId/worker-submissions/today",
-
+  verifyToken,
   getTodayWorkerSubmissions
 );
 
 
 router.patch(
   "/worker-progress/:progressId/review",
-
+  verifyToken,
   reviewWorkerProgress
 );
 
@@ -508,46 +508,46 @@ router.get('/team-list', verifyToken, getAssignedWorkers);
  * POST /api/supervisor/mark-absence-reason
  * Mark absence reason for a worker
  */
-router.post('/mark-absence-reason', markAbsenceReason);
+router.post('/mark-absence-reason', verifyToken, markAbsenceReason);
 
 /**
  * POST /api/supervisor/create-escalation
  * Create attendance escalation
  */
-router.post('/create-escalation', createAttendanceEscalation);
+router.post('/create-escalation', verifyToken, createAttendanceEscalation);
 
 /**
  * GET /api/supervisor/escalations
  * Get escalations for a project
  */
-router.get('/escalations', getEscalations);
+router.get('/escalations', verifyToken, getEscalations);
 
 /**
  * POST /api/supervisor/issue-escalation
  * Create general issue escalation to manager
  * Body: { issueType, severity, title, description, escalateTo, photos, projectId, notes, immediateActionRequired, estimatedImpact, suggestedSolution, supervisorId, supervisorName }
  */
-router.post('/issue-escalation', createIssueEscalation);
+router.post('/issue-escalation', verifyToken, createIssueEscalation);
 
 /**
  * GET /api/supervisor/issue-escalations
  * Get issue escalations for a project
  * Query: projectId?, status?, issueType?, severity?, limit?, offset?
  */
-router.get('/issue-escalations', getIssueEscalations);
+router.get('/issue-escalations', verifyToken, getIssueEscalations);
 
 /**
  * PUT /api/supervisor/issue-escalation/:escalationId
  * Update issue escalation status
  * Body: { status, notes?, resolution? }
  */
-router.put('/issue-escalation/:escalationId', updateIssueEscalation);
+router.put('/issue-escalation/:escalationId', verifyToken, updateIssueEscalation);
 
 /**
  * GET /api/supervisor/export-attendance-report
  * Export attendance report in JSON or CSV format
  */
-router.get('/export-attendance-report', exportAttendanceReport);
+router.get('/export-attendance-report', verifyToken, exportAttendanceReport);
 
 
 export default router; 

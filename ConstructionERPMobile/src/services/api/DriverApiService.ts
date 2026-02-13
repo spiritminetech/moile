@@ -39,77 +39,10 @@ export class DriverApiService {
       if (response.success && response.data) {
         // Transform backend response to match TransportTask interface
         const tasks = Array.isArray(response.data) ? response.data.map((task: any) => {
-          // Create a basic worker manifest from the counts with enhanced details
+          // ✅ FIX: Don't create fake worker data - leave it empty
+          // Worker manifests will be loaded separately via getWorkerManifests API
           const totalWorkers = task.totalWorkers || task.passengers || 0;
           const checkedInWorkers = task.checkedInWorkers || 0;
-          
-          // Sample trades and supervisors for demonstration
-          const trades = ['Carpenter', 'Electrician', 'Plumber', 'Mason', 'Welder', 'General Labor'];
-          const supervisors = [
-            { id: 1, name: 'John Smith' },
-            { id: 2, name: 'Mike Johnson' },
-            { id: 3, name: 'David Brown' },
-            { id: 4, name: 'Robert Wilson' }
-          ];
-          const skillLevels = ['trainee', 'skilled', 'senior', 'specialist'] as const;
-          const attendanceStatuses = ['present', 'late', 'absent', 'on_leave'] as const;
-          
-          const workerManifest = Array.from({ length: totalWorkers }, (_, i) => {
-            const trade = trades[i % trades.length];
-            const supervisor = supervisors[i % supervisors.length];
-            const skillLevel = skillLevels[i % skillLevels.length];
-            const attendanceStatus = i < checkedInWorkers ? 'present' : 
-                                   (Math.random() > 0.8 ? 'late' : 'present');
-            
-            return {
-              workerId: task.taskId * 1000 + i + 1,
-              name: `Worker ${i + 1}`,
-              phone: `+65 9${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`,
-              checkedIn: i < checkedInWorkers,
-              checkInTime: i < checkedInWorkers ? new Date().toISOString() : undefined,
-              profileImage: undefined,
-              // Enhanced worker details
-              trade: trade,
-              supervisorId: supervisor.id,
-              supervisorName: supervisor.name,
-              employeeId: `EMP${String(task.taskId * 1000 + i + 1).padStart(4, '0')}`,
-              department: 'Construction',
-              skillLevel: skillLevel,
-              emergencyContact: `+65 8${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`,
-              // Permission-based visibility (driver can see all details)
-              canViewDetails: true,
-              canCall: true,
-              canCheckIn: true,
-              // Additional status info
-              attendanceStatus: attendanceStatus,
-              leaveReason: attendanceStatus === 'on_leave' ? 'Medical Leave' : undefined,
-              expectedArrival: attendanceStatus === 'late' ? 
-                new Date(Date.now() + 30 * 60000).toISOString() : undefined
-            };
-          });
-
-          // Generate trade-wise breakdown
-          const tradeBreakdown = trades.map(trade => {
-            const tradeWorkers = workerManifest.filter(w => w.trade === trade);
-            return {
-              trade: trade,
-              totalWorkers: tradeWorkers.length,
-              checkedInWorkers: tradeWorkers.filter(w => w.checkedIn).length,
-              workers: tradeWorkers.map(w => w.workerId)
-            };
-          }).filter(t => t.totalWorkers > 0);
-
-          // Generate supervisor-wise breakdown
-          const supervisorBreakdown = supervisors.map(supervisor => {
-            const supervisorWorkers = workerManifest.filter(w => w.supervisorId === supervisor.id);
-            return {
-              supervisorId: supervisor.id,
-              supervisorName: supervisor.name,
-              totalWorkers: supervisorWorkers.length,
-              checkedInWorkers: supervisorWorkers.filter(w => w.checkedIn).length,
-              workers: supervisorWorkers.map(w => w.workerId)
-            };
-          }).filter(s => s.totalWorkers > 0);
 
           return {
             taskId: task.taskId,
@@ -122,9 +55,7 @@ export class DriverApiService {
                 latitude: 0, // TODO: Get from backend
                 longitude: 0
               },
-              workerManifest: workerManifest,  // Use enhanced manifest
-              tradeBreakdown: tradeBreakdown,
-              supervisorBreakdown: supervisorBreakdown,
+              workerManifest: [],  // ✅ Empty - will be loaded via getWorkerManifests
               estimatedPickupTime: task.startTime,
               actualPickupTime: undefined
             }],
@@ -587,64 +518,168 @@ export class DriverApiService {
     }
   }
 
-  // Basic fuel logging only - no advanced features
-  async addFuelLog(fuelData: {
+  // Fuel Log Management APIs - Requirement 12.4
+  async submitFuelLog(fuelData: {
     vehicleId: number;
     amount: number;
     cost: number;
     mileage: number;
     location: string;
-    receiptPhoto?: File;
-  }): Promise<ApiResponse<{
-    success: boolean;
-    message: string;
-    fuelLogId: number;
-    currentFuelLevel: number;
-  }>> {
-    const formData = new FormData();
-    formData.append('vehicleId', fuelData.vehicleId.toString());
-    formData.append('amount', fuelData.amount.toString());
-    formData.append('cost', fuelData.cost.toString());
-    formData.append('mileage', fuelData.mileage.toString());
-    formData.append('location', fuelData.location);
-    
-    if (fuelData.receiptPhoto) {
-      formData.append('receiptPhoto', fuelData.receiptPhoto);
+    receiptPhoto?: string;
+    gpsLocation?: { latitude: number; longitude: number };
+  }): Promise<ApiResponse<any>> {
+    try {
+      console.log('⛽ Submitting fuel log:', fuelData);
+
+      const response = await apiClient.post('/driver/vehicle/fuel-log', {
+        vehicleId: fuelData.vehicleId,
+        date: new Date().toISOString(),
+        amount: fuelData.amount,
+        cost: fuelData.cost,
+        mileage: fuelData.mileage,
+        location: fuelData.location,
+        receiptPhoto: fuelData.receiptPhoto || null,
+        gpsLocation: fuelData.gpsLocation || { latitude: null, longitude: null }
+      });
+
+      console.log('✅ Fuel log submitted successfully:', response);
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error submitting fuel log:', error);
+      throw error;
     }
-    
-    return apiClient.uploadFile('/driver/vehicle/fuel-log', formData);
   }
 
+  async getFuelLogHistory(vehicleId?: number, limit: number = 10): Promise<ApiResponse<any>> {
+    try {
+      const params: any = { limit };
+      if (vehicleId) {
+        params.vehicleId = vehicleId;
+      }
+
+      const response = await apiClient.get('/driver/vehicle/fuel-log', { params });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error getting fuel log history:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleFuelLog(vehicleId: number, limit: number = 5): Promise<ApiResponse<any>> {
+    try {
+      const response = await apiClient.get(`/driver/vehicle/${vehicleId}/fuel-log`, {
+        params: { limit }
+      });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error getting vehicle fuel log:', error);
+      throw error;
+    }
+  }
+
+  // Vehicle Issue Reporting APIs - Requirement 12.5
   async reportVehicleIssue(issueData: {
     vehicleId: number;
+    category: 'mechanical' | 'electrical' | 'safety' | 'other';
     description: string;
     severity: 'low' | 'medium' | 'high' | 'critical';
-    category: 'mechanical' | 'electrical' | 'body' | 'safety' | 'other';
-    location: GeoLocation;
-    photos?: File[];
-  }): Promise<ApiResponse<{
-    success: boolean;
-    message: string;
-    issueId: string;
-    maintenanceRequired: boolean;
-  }>> {
-    const formData = new FormData();
-    formData.append('vehicleId', issueData.vehicleId.toString());
-    formData.append('description', issueData.description);
-    formData.append('severity', issueData.severity);
-    formData.append('category', issueData.category);
-    formData.append('latitude', issueData.location.latitude.toString());
-    formData.append('longitude', issueData.location.longitude.toString());
-    formData.append('accuracy', issueData.location.accuracy.toString());
-    formData.append('timestamp', issueData.location.timestamp.toISOString());
-    
-    if (issueData.photos && issueData.photos.length > 0) {
-      issueData.photos.forEach((photo, index) => {
-        formData.append('photos', photo);
-      });
+    location?: { latitude: number; longitude: number; address?: string };
+    photos?: string[];
+    immediateAssistance?: boolean;
+  }): Promise<ApiResponse<any>> {
+    try {
+      console.log('🔧 Reporting vehicle issue:', issueData);
+
+      const response = await apiClient.post('/driver/vehicle/report-issue', issueData);
+
+      console.log('✅ Vehicle issue reported successfully:', response);
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error reporting vehicle issue:', error);
+      throw error;
     }
-    
-    return apiClient.uploadFile('/driver/vehicle/issue-report', formData);
+  }
+
+  async getVehicleIssues(vehicleId?: number, status?: string, limit: number = 10): Promise<ApiResponse<any>> {
+    try {
+      const params: any = { limit };
+      if (vehicleId) {
+        params.vehicleId = vehicleId;
+      }
+      if (status) {
+        params.status = status;
+      }
+
+      const response = await apiClient.get('/driver/vehicle/issues', { params });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error getting vehicle issues:', error);
+      throw error;
+    }
+  }
+
+  // Vehicle Inspection (Pre-Check) APIs - Requirement 12.5
+  async submitVehicleInspection(inspectionData: {
+    vehicleId: number;
+    checklist: {
+      tires: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      lights: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      brakes: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      steering: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      fluids: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      mirrors: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      seatbelts: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      horn: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      wipers: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      emergencyEquipment: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      interior: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+      exterior: { status: 'pass' | 'fail' | 'needs_attention'; notes?: string; photos?: string[] };
+    };
+    odometerReading: number;
+    location?: { latitude: number; longitude: number; address?: string };
+    signature?: string;
+    inspectionType?: 'pre_trip' | 'post_trip' | 'scheduled';
+  }): Promise<ApiResponse<any>> {
+    try {
+      console.log('🔍 Submitting vehicle inspection:', {
+        vehicleId: inspectionData.vehicleId,
+        odometerReading: inspectionData.odometerReading,
+        hasSignature: !!inspectionData.signature
+      });
+
+      const response = await apiClient.post('/driver/vehicle/inspection', inspectionData);
+
+      console.log('✅ Vehicle inspection submitted successfully:', response);
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error submitting vehicle inspection:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleInspections(vehicleId?: number, limit: number = 5): Promise<ApiResponse<any>> {
+    try {
+      const params: any = { limit };
+      if (vehicleId) {
+        params.vehicleId = vehicleId;
+      }
+
+      const response = await apiClient.get('/driver/vehicle/inspections', { params });
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error getting vehicle inspections:', error);
+      throw error;
+    }
+  }
+
+  async getVehicleInspectionDetails(inspectionId: number): Promise<ApiResponse<any>> {
+    try {
+      const response = await apiClient.get(`/driver/vehicle/inspection/${inspectionId}`);
+      return response;
+    } catch (error: any) {
+      console.error('❌ Error getting vehicle inspection details:', error);
+      throw error;
+    }
   }
 
   async performVehiclePreCheck(checkData: {
@@ -1324,6 +1359,30 @@ export class DriverApiService {
       return response;
     } catch (error: any) {
       console.error('❌ Vehicle request error:', error);
+      throw error;
+    }
+  }
+
+  // Optimize route for pickup locations
+  async optimizeRoute(taskId: number): Promise<ApiResponse<{
+    optimizedPickupOrder: any[];
+    timeSaved: number;
+    distanceSaved: number;
+    fuelSaved: number;
+    optimizationMethod: string;
+  }>> {
+    try {
+      console.log('🗺️ Optimizing route for task:', taskId);
+
+      const response = await apiClient.post(
+        `/driver/transport-tasks/${taskId}/optimize-route`,
+        {}
+      );
+
+      console.log('✅ Route optimized successfully');
+      return response;
+    } catch (error: any) {
+      console.error('❌ Route optimization error:', error);
       throw error;
     }
   }

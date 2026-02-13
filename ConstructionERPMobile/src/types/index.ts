@@ -887,6 +887,9 @@ export interface TransportTask {
       attendanceStatus: 'present' | 'absent' | 'late' | 'on_leave';
       leaveReason?: string;
       expectedArrival?: string;
+      // ✅ NEW: Dropoff status tracking
+      dropStatus?: 'pending' | 'confirmed' | 'missed';
+      wasPickedUp?: boolean;
     }>;
     // Trade-wise breakdown for this location
     tradeBreakdown: Array<{

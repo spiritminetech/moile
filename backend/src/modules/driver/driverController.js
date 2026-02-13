@@ -24,6 +24,17 @@ import FleetTaskPhoto from "../fleetTask/models/FleetTaskPhoto.js";  // ✅ Add 
 import { validateGeofence, isValidCoordinates } from "../../../utils/geofenceUtil.js";  // ✅ Add geofence utilities
 
 // ==============================
+// Helper function to safely get or create mongoose models
+// ==============================
+const getOrCreateModel = (modelName, schema, collectionName) => {
+  try {
+    return mongoose.model(modelName);
+  } catch (error) {
+    return mongoose.model(modelName, schema, collectionName);
+  }
+};
+
+// ==============================
 // Multer Configuration for Driver Photo Upload
 // ==============================
 const storage = multer.diskStorage({
@@ -767,16 +778,67 @@ export const confirmPickup = async (req, res) => {
       });
     }
 
+    // ✅ FIX 1: Validate task is in ONGOING status
+    if (task.status !== 'ONGOING') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot complete pickup. Task is currently in ${task.status} status.`,
+        error: 'INVALID_STATUS_FOR_PICKUP',
+        currentStatus: task.status,
+        requiredStatus: 'ONGOING',
+        hint: task.status === 'PLANNED' ? 'Please start the route first.' :
+              task.status === 'PICKUP_COMPLETE' ? 'Pickup already completed.' :
+              task.status === 'COMPLETED' ? 'Trip already completed.' :
+              'Invalid status for pickup completion.'
+      });
+    }
+
+    // ✅ FIX 2: Get all passengers and validate at least one is checked in
+    const allPassengers = await FleetTaskPassenger.find({ 
+      fleetTaskId: Number(taskId) 
+    }).lean();
+
+    if (allPassengers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No workers assigned to this task.",
+        error: 'NO_WORKERS_ASSIGNED'
+      });
+    }
+
+    const checkedInPassengers = allPassengers.filter(p => 
+      p.pickupStatus === 'confirmed'
+    );
+
+    // ✅ FIX 3: Require at least one worker to be checked in
+    if (checkedInPassengers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot complete pickup: No workers have been checked in yet.",
+        error: 'NO_WORKERS_CHECKED_IN',
+        details: {
+          totalWorkers: allPassengers.length,
+          checkedInWorkers: 0,
+          message: 'Please check in at least one worker before completing pickup.'
+        }
+      });
+    }
+
+    // ✅ FIX 4: Warn if not all workers are checked in
+    if (checkedInPassengers.length < allPassengers.length) {
+      console.log(`⚠️ Warning: Only ${checkedInPassengers.length} of ${allPassengers.length} workers checked in`);
+      // Allow completion but log warning
+    }
+
     // Handle new format (locationId + workerCount) from transport tasks screen
     if (locationId !== undefined && workerCount !== undefined) {
       console.log(`📌 Using new format: locationId=${locationId}, workerCount=${workerCount}`);
-      
-      // ✅ FIX: Do NOT update passenger status here!
-      // Passenger status should ONLY be updated by checkInWorker endpoint
-      // This endpoint only updates the TASK status, not individual passengers
-      
-      // Just log the worker count for reference
       console.log(`📌 Completing pickup with ${workerCount} workers at location ${locationId}`);
+      
+      // Validate workerCount matches checked-in count
+      if (workerCount !== checkedInPassengers.length) {
+        console.log(`⚠️ Warning: Reported workerCount (${workerCount}) doesn't match checked-in count (${checkedInPassengers.length})`);
+      }
     } 
     // Handle old format (confirmed/missed arrays)
     else {
@@ -815,14 +877,9 @@ export const confirmPickup = async (req, res) => {
 
     const currentTime = new Date();
     
-    // Determine the new status based on pickup completion
-    // If all pickups are done, move to next phase
-    const allPassengers = await FleetTaskPassenger.find({ fleetTaskId: Number(taskId) }).lean();
-    const allPickedUp = allPassengers.every(p => 
-      p.pickupStatus === 'confirmed' || p.pickupStatus === 'missed'
-    );
-    
-    const newStatus = allPickedUp ? 'PICKUP_COMPLETE' : 'ENROUTE_DROPOFF';
+    // Determine the new status - always set to PICKUP_COMPLETE
+    // (EN_ROUTE_DROPOFF is set automatically when driver starts driving)
+    const newStatus = 'PICKUP_COMPLETE';
     
     await FleetTask.updateOne(
       { id: Number(taskId) },
@@ -864,12 +921,17 @@ export const confirmPickup = async (req, res) => {
         pickupPoint: p.pickupPoint,
         pickupStatus: p.pickupStatus || 'pending',
         dropStatus: p.dropStatus || 'pending'
-      }))
+      })),
+      summary: {
+        totalWorkers: allPassengers.length,
+        checkedInWorkers: checkedInPassengers.length,
+        missedWorkers: allPassengers.length - checkedInPassengers.length
+      }
     };
 
     console.log(`✅ Pickup confirmed for task ${taskId}`);
     console.log(`✅ Task status updated to: ${updatedTask.status}`);
-    console.log(`✅ Actual start time set to: ${currentTime}`);
+    console.log(`✅ Workers checked in: ${checkedInPassengers.length}/${allPassengers.length}`);
     
     return res.status(200).json(response);
 
@@ -921,16 +983,49 @@ export const confirmDrop = async (req, res) => {
       });
     }
 
+    // ✅ FIX 1: Validate task is in correct status for dropoff
+    const validDropoffStatuses = ['PICKUP_COMPLETE', 'EN_ROUTE_DROPOFF'];
+    if (!validDropoffStatuses.includes(task.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot complete dropoff. Task is currently in ${task.status} status.`,
+        error: 'INVALID_STATUS_FOR_DROPOFF',
+        currentStatus: task.status,
+        requiredStatus: validDropoffStatuses,
+        hint: task.status === 'PLANNED' ? 'Please start the route first.' :
+              task.status === 'ONGOING' ? 'Please complete pickup first.' :
+              task.status === 'COMPLETED' ? 'Trip already completed.' :
+              'Invalid status for dropoff completion.'
+      });
+    }
+
+    // ✅ FIX 2: Validate at least one worker was picked up
+    const allPassengers = await FleetTaskPassenger.find({ 
+      fleetTaskId: Number(taskId)
+    }).lean();
+    
+    const pickedUpPassengers = allPassengers.filter(p => p.pickupStatus === "confirmed");
+    
+    if (pickedUpPassengers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot complete dropoff: No workers were picked up.",
+        error: 'NO_WORKERS_PICKED_UP',
+        details: {
+          totalWorkers: allPassengers.length,
+          pickedUpWorkers: 0,
+          message: 'You must pick up at least one worker before completing dropoff.'
+        }
+      });
+    }
+
     // Handle new format (workerCount) from transport tasks screen
     if (workerCount !== undefined) {
       console.log(`📌 Using new format: workerCount=${workerCount}`);
-      console.log(`📌 workerIds provided: ${workerIds ? JSON.stringify(workerIds) : 'NO'}`);
+      console.log(`📌 workerIds provided: ${workerIds ? JSON.stringify(workerIds) : 'NO (undefined or null)'}`);
+      console.log(`📌 workerIds type: ${typeof workerIds}`);
+      console.log(`📌 workerIds is array: ${Array.isArray(workerIds)}`);
       
-      const allPassengers = await FleetTaskPassenger.find({ 
-        fleetTaskId: Number(taskId)
-      }).lean();
-      
-      const pickedUpPassengers = allPassengers.filter(p => p.pickupStatus === "confirmed");
       const droppedPassengers = allPassengers.filter(p => p.dropStatus === "confirmed");
       
       console.log(`📊 Task completion summary:`);
@@ -952,20 +1047,61 @@ export const confirmDrop = async (req, res) => {
         console.log(`👤 Individual drop: Updating ${workerIds.length} specific workers`);
         console.log(`   Worker IDs to update: ${workerIds.join(', ')}`);
         
+        // ✅ FIX: Log the exact query being used
+        const query = { 
+          fleetTaskId: Number(taskId),
+          workerEmployeeId: { $in: workerIds.map(id => Number(id)) }
+        };
+        console.log(`   Query:`, JSON.stringify(query));
+        
+        // ✅ FIX: First check if documents exist
+        const existingDocs = await FleetTaskPassenger.find(query).lean();
+        console.log(`   Found ${existingDocs.length} matching documents`);
+        existingDocs.forEach(doc => {
+          console.log(`     - Worker ${doc.workerEmployeeId}: current dropStatus="${doc.dropStatus}"`);
+        });
+        
+        // ✅ FIX: Use updateMany with explicit write concern
         const updateResult = await FleetTaskPassenger.updateMany(
-          { 
-            fleetTaskId: Number(taskId),
-            workerEmployeeId: { $in: workerIds.map(id => Number(id)) }
-          },
+          query,
           {
             $set: {
               dropStatus: "confirmed",
               dropConfirmedAt: new Date(),
             },
-          }
+          },
+          { writeConcern: { w: 'majority' } }  // ✅ Ensure write is committed
         );
         
         console.log(`✅ Update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
+        
+        // ✅ FIX: Verify the update worked
+        const updatedDocs = await FleetTaskPassenger.find(query).lean();
+        console.log(`   After update:`);
+        updatedDocs.forEach(doc => {
+          console.log(`     - Worker ${doc.workerEmployeeId}: dropStatus="${doc.dropStatus}"`);
+        });
+        
+        // ✅ FIX: If update didn't work, try individual updates
+        if (updateResult.modifiedCount === 0 && existingDocs.length > 0) {
+          console.log(`⚠️ Bulk update failed, trying individual updates...`);
+          for (const workerId of workerIds) {
+            const singleUpdate = await FleetTaskPassenger.findOneAndUpdate(
+              { 
+                fleetTaskId: Number(taskId),
+                workerEmployeeId: Number(workerId)
+              },
+              {
+                $set: {
+                  dropStatus: "confirmed",
+                  dropConfirmedAt: new Date(),
+                }
+              },
+              { new: true }
+            );
+            console.log(`   Updated worker ${workerId}: ${singleUpdate ? 'SUCCESS' : 'FAILED'}`);
+          }
+        }
       }
       // Option 2: Workers already checked out via checkOutWorker endpoint
       else if (droppedPassengers.length > 0) {
@@ -1467,13 +1603,16 @@ export const getVehicleDetails = async (req, res) => {
       
       insuranceExpiry: vehicle.insuranceExpiry,
       lastServiceDate: vehicle.lastServiceDate,
+      nextServiceDate: vehicle.nextServiceDate,
+      lastServiceMileage: vehicle.lastServiceMileage,
+      nextServiceMileage: vehicle.nextServiceMileage,
       odometer: vehicle.odometer,
       assignedTasks: todaysTasks.length,
       
       // Maintenance schedule - empty for now, can be populated from maintenance records
       maintenanceSchedule: [],
       
-      // Fuel log - empty for now, can be populated from fuel records
+      // Fuel log - load from fuelLogs collection
       fuelLog: [],
       
       // Include predefined route information
@@ -1486,6 +1625,30 @@ export const getVehicleDetails = async (req, res) => {
         estimatedDuration: vehicle.assignedRoute.estimatedDuration
       } : null
     };
+
+    // Load fuel log data from fuelLogs collection
+    try {
+      const FuelLog = (await import('./models/FuelLog.js')).default;
+      const fuelLogs = await FuelLog.find({ vehicleId: vehicle.id })
+        .sort({ date: -1 })
+        .limit(5)
+        .lean();
+      
+      vehicleDetails.fuelLog = fuelLogs.map(log => ({
+        id: log.id,
+        date: log.date,
+        amount: log.amount,
+        cost: log.cost,
+        mileage: log.mileage,
+        location: log.location,
+        receiptPhoto: log.receiptPhoto
+      }));
+      
+      console.log(`✅ Loaded ${fuelLogs.length} fuel log entries for vehicle ${vehicle.id}`);
+    } catch (fuelLogError) {
+      console.warn('⚠️ Could not load fuel logs:', fuelLogError.message);
+      // Continue without fuel logs if there's an error
+    }
 
     // Debug logging
     console.log('🚗 Vehicle from DB:', {
@@ -2210,6 +2373,22 @@ export const updateTaskStatus = async (req, res) => {
     const backendStatus = statusMap[status] || status;
     console.log(`📊 Status mapping: ${status} → ${backendStatus}`);
 
+    // ✅ FIX 1: ONLY allow "Start Route" action (PLANNED → ONGOING) or CANCELLED
+    // All other status changes must go through their specific endpoints
+    if (backendStatus !== 'ONGOING' && backendStatus !== 'CANCELLED') {
+      return res.status(400).json({
+        success: false,
+        message: 'This endpoint only handles route start. Use the appropriate endpoint for other actions.',
+        error: 'INVALID_ENDPOINT_FOR_STATUS',
+        requestedStatus: backendStatus,
+        hint: {
+          'PICKUP_COMPLETE': 'Use POST /transport-tasks/:taskId/pickup-complete',
+          'EN_ROUTE_DROPOFF': 'Automatically set after pickup complete',
+          'COMPLETED': 'Use POST /transport-tasks/:taskId/dropoff-complete'
+        }
+      });
+    }
+
     const task = await FleetTask.findOne({
       id: Number(taskId),
       driverId,
@@ -2223,21 +2402,24 @@ export const updateTaskStatus = async (req, res) => {
       });
     }
 
-    // ✅ FIX 2: Validate status transitions to prevent starting task twice
-    if (status === 'en_route_pickup' || backendStatus === 'ONGOING') {
-      // Validate task is in PLANNED status before allowing route start
+    // ✅ FIX 2: Validate task is in PLANNED status before allowing route start
+    if (backendStatus === 'ONGOING') {
       if (task.status !== 'PLANNED') {
         return res.status(400).json({
           success: false,
-          message: `Cannot start route. Task is currently in ${task.status} status. Only tasks in PLANNED status can be started.`,
+          message: `Cannot start route. Task is currently in ${task.status} status.`,
           error: 'INVALID_STATUS_TRANSITION',
           currentStatus: task.status,
           requiredStatus: 'PLANNED',
-          taskId: task.id
+          taskId: task.id,
+          hint: task.status === 'ONGOING' ? 'Route already started. Proceed to check in workers.' : 
+                task.status === 'PICKUP_COMPLETE' ? 'Pickup already complete. Proceed to dropoff.' :
+                task.status === 'COMPLETED' ? 'Trip already completed.' : 
+                'Invalid status for route start.'
         });
       }
 
-      // ✅ FIX 2.5: Validate driver has clocked in today before starting route
+      // ✅ FIX 3: Validate driver has clocked in today before starting route
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const endOfDay = new Date(today);
@@ -2263,7 +2445,7 @@ export const updateTaskStatus = async (req, res) => {
 
       console.log(`✅ Driver attendance verified: Clocked in at ${attendance.checkIn}`);
 
-      // ✅ FIX 3: Validate driver is at approved location before starting route
+      // ✅ FIX 4: Validate driver is at approved location before starting route
       if (location && isValidCoordinates(location.latitude, location.longitude)) {
         const approvedLocations = await ApprovedLocation.find({
           companyId,
@@ -2312,61 +2494,61 @@ export const updateTaskStatus = async (req, res) => {
       }
 
       // Set actualStartTime when starting route
-      if (!task.actualStartTime) {
-        task.actualStartTime = new Date();
+      task.actualStartTime = new Date();
+      task.status = 'ONGOING';
+      
+      if (location) {
+        task.currentLocation = {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          timestamp: location.timestamp || new Date()
+        };
       }
-    }
+      
+      if (notes) {
+        task.notes = notes;
+      }
+      
+      task.updatedAt = new Date();
+      await task.save();
 
-    // Validate other status transitions
-    const validTransitions = {
-      'PLANNED': ['ONGOING', 'CANCELLED'],
-      'ONGOING': ['PICKUP_COMPLETE', 'CANCELLED'],
-      'PICKUP_COMPLETE': ['EN_ROUTE_DROPOFF', 'CANCELLED'],
-      'EN_ROUTE_DROPOFF': ['COMPLETED', 'CANCELLED'],
-      'COMPLETED': [],  // Cannot transition from completed
-      'CANCELLED': []   // Cannot transition from cancelled
-    };
+      console.log(`✅ Task ${taskId} status updated: ${task.status}`);
 
-    const allowedNextStatuses = validTransitions[task.status] || [];
-    if (!allowedNextStatuses.includes(backendStatus) && task.status !== backendStatus) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid status transition from ${task.status} to ${backendStatus}`,
-        error: 'INVALID_STATUS_TRANSITION',
-        currentStatus: task.status,
-        requestedStatus: backendStatus,
-        allowedStatuses: allowedNextStatuses
+      return res.status(200).json({
+        success: true,
+        message: 'Route started successfully',
+        data: {
+          taskId: task.id,
+          status: task.status,
+          actualStartTime: task.actualStartTime,
+          updatedAt: task.updatedAt
+        }
       });
     }
 
-    // Use the mapped backend status
-    task.status = backendStatus;
-    if (location) {
-      task.currentLocation = {
-        latitude: location.latitude,
-        longitude: location.longitude,
-        timestamp: location.timestamp || new Date()
-      };
-    }
-    if (notes) {
-      task.notes = notes;
-    }
-    task.updatedAt = new Date();
-
-    await task.save();
-
-    console.log(`✅ Task ${taskId} status updated: ${task.status}`);
-
-    res.json({
-      success: true,
-      message: 'Task status updated successfully',
-      data: {
-        taskId: task.id,
-        status: backendStatus,
-        actualStartTime: task.actualStartTime,
-        updatedAt: task.updatedAt
+    // Handle CANCELLED status
+    if (backendStatus === 'CANCELLED') {
+      task.status = 'CANCELLED';
+      task.updatedAt = new Date();
+      
+      if (notes) {
+        task.notes = notes;
       }
-    });
+      
+      await task.save();
+
+      console.log(`✅ Task ${taskId} cancelled`);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Task cancelled successfully',
+        data: {
+          taskId: task.id,
+          status: task.status,
+          updatedAt: task.updatedAt
+        }
+      });
+    }
 
   } catch (err) {
     console.error("❌ Error updating task status:", err);
@@ -2405,53 +2587,63 @@ export const getWorkerManifests = async (req, res) => {
     }).lean();
 
     const employeeIds = passengers.map(p => p.workerEmployeeId);  // ✅ Use workerEmployeeId
+    
+    console.log('🔍 Looking up employees:', {
+      employeeIds,
+      companyId,
+      query: { id: { $in: employeeIds }, companyId }
+    });
+    
     const employees = await Employee.find({
       id: { $in: employeeIds },
       companyId
     }).lean();
+    
+    console.log('✅ Employees found:', {
+      count: employees.length,
+      employees: employees.map(e => ({ id: e.id, name: e.fullName }))
+    });
 
     const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]));
 
-    // ✅ Check attendance for today to determine check-in status
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    // Use raw MongoDB collection to ensure we're querying the right collection
-    const db = mongoose.connection.db;
-    const attendanceCol = db.collection('attendance');
-    
-    const todayAttendance = await attendanceCol.find({
-      employeeId: { $in: employeeIds },
-      date: { $gte: today, $lt: tomorrow },
-      checkIn: { $ne: null }
-    }).toArray();
-
-    console.log(`🔍 DEBUG getWorkerManifests - task ${taskId}:`);
-    console.log(`   Employee IDs: [${employeeIds.join(', ')}]`);
-    console.log(`   Date range: ${today.toISOString()} to ${tomorrow.toISOString()}`);
-    console.log(`   Found ${todayAttendance.length} attendance records`);
-    todayAttendance.forEach(att => {
-      console.log(`   ✅ Employee ${att.employeeId}: checkIn = ${att.checkIn}`);
+    console.log('📊 Employee lookup:', {
+      passengerCount: passengers.length,
+      employeeCount: employees.length,
+      employeeIds: employeeIds,
+      foundEmployeeIds: employees.map(e => e.id),
+      missingEmployeeIds: employeeIds.filter(id => !employeeMap[id])
     });
-
-    const checkedInEmployeeIds = new Set(todayAttendance.map(att => att.employeeId));
 
     const manifests = passengers.map(p => {
       const employee = employeeMap[p.workerEmployeeId];  // ✅ Use workerEmployeeId
-      const isCheckedIn = checkedInEmployeeIds.has(p.workerEmployeeId);  // ✅ Check attendance
+      
+      console.log(`👤 Passenger ${p.workerEmployeeId}:`, {
+        found: !!employee,
+        fullName: employee?.fullName,
+        employeeId: employee?.employeeId,
+        phone: employee?.phone
+      });
+      
+      // ✅ FIX: Use pickupStatus from FleetTaskPassenger, NOT attendance
+      // pickupStatus can be: 'confirmed' (picked up), 'missed' (not picked up), or null/undefined (pending)
+      const pickupStatus = p.pickupStatus || 'pending';
       
       return {
         workerId: p.workerEmployeeId,  // ✅ Use workerEmployeeId
-        workerName: employee?.fullName || 'Unknown',
+        workerName: employee?.fullName || `Worker ${p.workerEmployeeId}`,  // ✅ Fallback to Worker ID
         employeeId: employee?.employeeId || 'N/A',
         department: employee?.department || 'N/A',
         contactNumber: employee?.phone || 'N/A',
         roomNumber: employee?.roomNumber || 'N/A',
-        status: isCheckedIn ? 'checked-in' : 'Pending',  // ✅ Based on attendance
+        trade: employee?.trade || 'General Labor',
+        supervisorName: employee?.supervisorName || 'N/A',
+        // ✅ Return pickup status from FleetTaskPassenger
+        pickupStatus: pickupStatus,  // 'confirmed', 'missed', or 'pending'
+        pickupConfirmedAt: p.pickupConfirmedAt || null,
         pickupLocation: p.pickupLocation || task.pickupLocation,
-        dropLocation: p.dropLocation || task.dropLocation
+        dropLocation: p.dropLocation || task.dropLocation,
+        dropStatus: p.dropStatus || 'pending',
+        dropConfirmedAt: p.dropConfirmedAt || null
       };
     });
 
@@ -4781,6 +4973,912 @@ export const requestAlternateVehicle = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error while requesting vehicle",
+      error: err.message
+    });
+  }
+};
+
+// ============================================
+// FUEL LOG MANAGEMENT
+// ============================================
+
+/**
+ * Submit Fuel Log Entry
+ * POST /api/v1/driver/vehicle/fuel-log
+ */
+export const submitFuelLog = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const companyId = req.user.companyId;
+    const { vehicleId, date, amount, cost, mileage, location, receiptPhoto, gpsLocation } = req.body;
+
+    console.log('🔹 Submit fuel log request:', { driverId, vehicleId, amount, cost, mileage, location });
+
+    // Validation
+    if (!vehicleId || !amount || !cost || !mileage || !location) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: vehicleId, amount, cost, mileage, location'
+      });
+    }
+
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fuel amount must be greater than 0'
+      });
+    }
+
+    if (cost <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cost must be greater than 0'
+      });
+    }
+
+    if (mileage < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mileage cannot be negative'
+      });
+    }
+
+    // Import FuelLog model
+    const FuelLog = (await import('./models/FuelLog.js')).default;
+
+    // Get driver record - use imported Driver model
+    const driver = await Driver.findOne({ id: driverId, companyId });
+    
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    // Get driver name from employees collection using employeeId
+    let driverName = 'Unknown Driver';
+    if (driver.employeeId) {
+      const employee = await Employee.findOne({ 
+        id: driver.employeeId, 
+        companyId 
+      });
+      
+      if (employee) {
+        driverName = employee.name || employee.fullName || 'Unknown Driver';
+        console.log(`✅ Found driver name from employee: ${driverName} (employeeId: ${driver.employeeId})`);
+      } else {
+        console.warn(`⚠️ Employee not found for employeeId: ${driver.employeeId}`);
+        // Fallback to driver record name fields
+        driverName = driver.name || driver.username || 'Unknown Driver';
+      }
+    } else {
+      console.warn(`⚠️ Driver ${driverId} has no employeeId`);
+      // Fallback to driver record name fields
+      driverName = driver.name || driver.username || 'Unknown Driver';
+    }
+
+    // Verify vehicle exists - use imported FleetVehicle model
+    const vehicle = await FleetVehicle.findOne({ id: Number(vehicleId), companyId });
+    
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vehicle not found'
+      });
+    }
+
+    // Check if mileage is valid (should be >= vehicle's current mileage)
+    if (vehicle.currentMileage && mileage < vehicle.currentMileage) {
+      return res.status(400).json({
+        success: false,
+        message: `Mileage must be at least ${vehicle.currentMileage} km (current vehicle mileage)`
+      });
+    }
+
+    // Get next fuel log ID
+    const lastFuelLog = await FuelLog.findOne().sort({ id: -1 });
+    const nextId = lastFuelLog ? lastFuelLog.id + 1 : 1;
+
+    // Create fuel log entry
+    const fuelLog = new FuelLog({
+      id: nextId,
+      vehicleId: Number(vehicleId),
+      driverId,
+      driverName: driverName,
+      date: date ? new Date(date) : new Date(),
+      amount: Number(amount),
+      cost: Number(cost),
+      pricePerLiter: Number(cost) / Number(amount),
+      mileage: Number(mileage),
+      location: location.trim(),
+      receiptPhoto: receiptPhoto || null,
+      gpsLocation: gpsLocation || { latitude: null, longitude: null },
+      status: 'pending'
+    });
+
+    await fuelLog.save();
+
+    // Update vehicle's current mileage and fuel level if provided
+    await FleetVehicle.updateOne(
+      { id: Number(vehicleId), companyId },
+      { 
+        $set: { 
+          currentMileage: Number(mileage),
+          odometer: Number(mileage),
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    console.log(`✅ Fuel log created: ${nextId} for vehicle ${vehicleId}`);
+
+    res.json({
+      success: true,
+      message: 'Fuel log entry saved successfully',
+      data: {
+        id: fuelLog.id,
+        vehicleId: fuelLog.vehicleId,
+        date: fuelLog.date,
+        amount: fuelLog.amount,
+        cost: fuelLog.cost,
+        pricePerLiter: fuelLog.pricePerLiter,
+        mileage: fuelLog.mileage,
+        location: fuelLog.location,
+        status: fuelLog.status,
+        createdAt: fuelLog.createdAt
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error submitting fuel log:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while submitting fuel log",
+      error: err.message
+    });
+  }
+};
+
+/**
+ * Get Fuel Log History
+ * GET /api/v1/driver/vehicle/fuel-log
+ */
+export const getFuelLogHistory = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const companyId = req.user.companyId;
+    const { vehicleId, limit = 10, status } = req.query;
+
+    console.log('🔹 Get fuel log history:', { driverId, vehicleId, limit, status });
+
+    // Import FuelLog model
+    const FuelLog = (await import('./models/FuelLog.js')).default;
+
+    // Build query
+    const query = { driverId };
+    
+    if (vehicleId) {
+      query.vehicleId = Number(vehicleId);
+    }
+    
+    if (status) {
+      query.status = status;
+    }
+
+    // Get fuel logs
+    const fuelLogs = await FuelLog.find(query)
+      .sort({ date: -1 })
+      .limit(Number(limit));
+
+    // Calculate summary statistics
+    const totalEntries = await FuelLog.countDocuments(query);
+    const totalCost = fuelLogs.reduce((sum, log) => sum + log.cost, 0);
+    const totalAmount = fuelLogs.reduce((sum, log) => sum + log.amount, 0);
+    const avgPricePerLiter = totalAmount > 0 ? totalCost / totalAmount : 0;
+
+    res.json({
+      success: true,
+      data: {
+        fuelLogs: fuelLogs.map(log => ({
+          id: log.id,
+          vehicleId: log.vehicleId,
+          date: log.date,
+          amount: log.amount,
+          cost: log.cost,
+          pricePerLiter: log.pricePerLiter,
+          mileage: log.mileage,
+          location: log.location,
+          receiptPhoto: log.receiptPhoto,
+          status: log.status,
+          createdAt: log.createdAt
+        })),
+        summary: {
+          totalEntries,
+          totalCost: totalCost.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
+          avgPricePerLiter: avgPricePerLiter.toFixed(2)
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error getting fuel log history:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while getting fuel log history",
+      error: err.message
+    });
+  }
+};
+
+/**
+ * Get Fuel Log by Vehicle
+ * GET /api/v1/driver/vehicle/:vehicleId/fuel-log
+ */
+export const getVehicleFuelLog = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const companyId = req.user.companyId;
+    const { vehicleId } = req.params;
+    const { limit = 5 } = req.query;
+
+    console.log('🔹 Get vehicle fuel log:', { vehicleId, limit });
+
+    // Import FuelLog model
+    const FuelLog = (await import('./models/FuelLog.js')).default;
+
+    // Verify vehicle exists - use imported FleetVehicle model
+    const vehicle = await FleetVehicle.findOne({ id: Number(vehicleId), companyId });
+    
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vehicle not found'
+      });
+    }
+
+    // Get fuel logs for this vehicle
+    const fuelLogs = await FuelLog.find({ vehicleId: Number(vehicleId) })
+      .sort({ date: -1 })
+      .limit(Number(limit));
+
+    res.json({
+      success: true,
+      data: fuelLogs.map(log => ({
+        id: log.id,
+        date: log.date,
+        amount: log.amount,
+        cost: log.cost,
+        pricePerLiter: log.pricePerLiter,
+        mileage: log.mileage,
+        location: log.location,
+        receiptPhoto: log.receiptPhoto,
+        status: log.status
+      }))
+    });
+
+  } catch (err) {
+    console.error("❌ Error getting vehicle fuel log:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while getting vehicle fuel log",
+      error: err.message
+    });
+  }
+};
+
+
+// ============================================
+// VEHICLE ISSUE REPORTING
+// ============================================
+
+/**
+ * Report Vehicle Issue
+ * POST /api/v1/driver/vehicle/report-issue
+ */
+export const reportVehicleIssue = async (req, res) => {
+  try {
+    const driverId = req.user?.id || req.user?.userId;
+    const companyId = req.user?.companyId;
+    const { vehicleId, category, description, severity, location, photos, immediateAssistance } = req.body;
+
+    console.log('🔧 Report vehicle issue request:', { 
+      driverId, 
+      companyId, 
+      vehicleId, 
+      category, 
+      severity,
+      hasLocation: !!location,
+      hasPhotos: !!photos,
+      userObject: req.user
+    });
+
+    // Validation - check user data first
+    if (!driverId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver ID not found in user session'
+      });
+    }
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company ID not found in user session'
+      });
+    }
+
+    // Validation - check request body
+    if (!vehicleId || !category || !description || !severity) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: vehicleId, category, description, severity'
+      });
+    }
+
+    // Validate category
+    const validCategories = ['mechanical', 'electrical', 'safety', 'other'];
+    if (!validCategories.includes(category)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid category. Must be one of: ${validCategories.join(', ')}`
+      });
+    }
+
+    // Validate severity
+    const validSeverities = ['low', 'medium', 'high', 'critical'];
+    if (!validSeverities.includes(severity)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid severity. Must be one of: ${validSeverities.join(', ')}`
+      });
+    }
+
+    // Import VehicleIssue model
+    const VehicleIssue = (await import('./models/VehicleIssue.js')).default;
+
+    // Get driver record
+    const driver = await Driver.findOne({ id: driverId, companyId });
+    
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    // Get driver name from employees collection
+    let driverName = 'Unknown Driver';
+    if (driver.employeeId) {
+      const employee = await Employee.findOne({ 
+        id: driver.employeeId, 
+        companyId 
+      });
+      
+      if (employee) {
+        driverName = employee.name || employee.fullName || 'Unknown Driver';
+      } else {
+        driverName = driver.name || driver.username || 'Unknown Driver';
+      }
+    } else {
+      driverName = driver.name || driver.username || 'Unknown Driver';
+    }
+
+    // Verify vehicle exists
+    const vehicle = await FleetVehicle.findOne({ id: Number(vehicleId), companyId });
+    
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vehicle not found'
+      });
+    }
+
+    // Get next issue ID
+    const lastIssue = await VehicleIssue.findOne().sort({ id: -1 });
+    const nextId = lastIssue ? lastIssue.id + 1 : 1;
+
+    // Determine vehicle status based on severity
+    let vehicleStatus = 'operational';
+    if (severity === 'critical') {
+      vehicleStatus = 'out_of_service';
+    } else if (severity === 'high') {
+      vehicleStatus = 'needs_repair';
+    }
+
+    // Prepare location data - only include non-null values
+    const locationData = {};
+    if (location?.latitude !== null && location?.latitude !== undefined) {
+      locationData.latitude = location.latitude;
+    }
+    if (location?.longitude !== null && location?.longitude !== undefined) {
+      locationData.longitude = location.longitude;
+    }
+    if (location?.address) {
+      locationData.address = location.address;
+    }
+
+    // Create vehicle issue - only include required fields and non-null optional fields
+    const issueData = {
+      id: nextId,
+      vehicleId: Number(vehicleId),
+      driverId: Number(driverId),
+      driverName: String(driverName),
+      companyId: Number(companyId),
+      category: String(category),
+      description: String(description).trim(),
+      severity: String(severity),
+      reportedAt: new Date(),
+      immediateAssistance: Boolean(immediateAssistance),
+      status: 'reported',
+      vehicleStatus: String(vehicleStatus)
+    };
+
+    // Only add location if it has data
+    if (Object.keys(locationData).length > 0) {
+      issueData.location = locationData;
+    }
+
+    // Only add photos if array has items
+    if (Array.isArray(photos) && photos.length > 0) {
+      issueData.photos = photos;
+    }
+
+    const vehicleIssue = new VehicleIssue(issueData);
+
+    console.log('📝 Vehicle issue object created:', {
+      id: vehicleIssue.id,
+      vehicleId: vehicleIssue.vehicleId,
+      driverId: vehicleIssue.driverId,
+      companyId: vehicleIssue.companyId,
+      category: vehicleIssue.category,
+      severity: vehicleIssue.severity
+    });
+
+    await vehicleIssue.save();
+
+    console.log(`✅ Vehicle issue saved to database: ${nextId} for vehicle ${vehicleId}`);
+
+    res.json({
+      success: true,
+      message: 'Vehicle issue reported successfully',
+      data: {
+        id: vehicleIssue.id,
+        vehicleId: vehicleIssue.vehicleId,
+        category: vehicleIssue.category,
+        description: vehicleIssue.description,
+        severity: vehicleIssue.severity,
+        status: vehicleIssue.status,
+        vehicleStatus: vehicleIssue.vehicleStatus,
+        reportedAt: vehicleIssue.reportedAt,
+        immediateAssistance: vehicleIssue.immediateAssistance
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error reporting vehicle issue:", err);
+    console.error("❌ Error stack:", err.stack);
+    res.status(500).json({
+      success: false,
+      message: "Server error while reporting vehicle issue",
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+};
+
+/**
+ * Get Vehicle Issues
+ * GET /api/v1/driver/vehicle/issues
+ */
+export const getVehicleIssues = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const companyId = req.user.companyId;
+    const { vehicleId, status, limit = 10 } = req.query;
+
+    console.log('🔧 Get vehicle issues:', { driverId, vehicleId, status, limit });
+
+    // Import VehicleIssue model
+    const VehicleIssue = (await import('./models/VehicleIssue.js')).default;
+
+    // Build query
+    const query = { companyId };
+    
+    if (vehicleId) {
+      query.vehicleId = Number(vehicleId);
+    }
+    
+    if (status) {
+      query.status = status;
+    }
+
+    // Get vehicle issues
+    const issues = await VehicleIssue.find(query)
+      .sort({ reportedAt: -1 })
+      .limit(Number(limit));
+
+    res.json({
+      success: true,
+      data: issues.map(issue => ({
+        id: issue.id,
+        vehicleId: issue.vehicleId,
+        driverId: issue.driverId,
+        driverName: issue.driverName,
+        category: issue.category,
+        description: issue.description,
+        severity: issue.severity,
+        status: issue.status,
+        vehicleStatus: issue.vehicleStatus,
+        reportedAt: issue.reportedAt,
+        immediateAssistance: issue.immediateAssistance,
+        photos: issue.photos,
+        location: issue.location
+      }))
+    });
+
+  } catch (err) {
+    console.error("❌ Error getting vehicle issues:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while getting vehicle issues",
+      error: err.message
+    });
+  }
+};
+
+// VEHICLE INSPECTION (PRE-CHECK)
+// ============================================
+
+/**
+ * Submit Vehicle Inspection
+ * POST /api/v1/driver/vehicle/inspection
+ */
+export const submitVehicleInspection = async (req, res) => {
+  try {
+    const driverId = req.user?.id || req.user?.userId;
+    const companyId = req.user?.companyId;
+    const { 
+      vehicleId, 
+      checklist, 
+      odometerReading, 
+      location, 
+      signature,
+      inspectionType = 'pre_trip'
+    } = req.body;
+
+    console.log('🔍 Submit vehicle inspection request:', { 
+      driverId, 
+      companyId, 
+      vehicleId, 
+      odometerReading,
+      inspectionType,
+      hasChecklist: !!checklist,
+      hasSignature: !!signature
+    });
+
+    // Validation
+    if (!driverId || !companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver ID or Company ID not found in user session'
+      });
+    }
+
+    if (!vehicleId || !checklist || odometerReading === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: vehicleId, checklist, odometerReading'
+      });
+    }
+
+    // Validate checklist has all required items
+    const requiredItems = [
+      'tires', 'lights', 'brakes', 'steering', 'fluids', 
+      'mirrors', 'seatbelts', 'horn', 'wipers', 
+      'emergencyEquipment', 'interior', 'exterior'
+    ];
+
+    for (const item of requiredItems) {
+      if (!checklist[item] || !checklist[item].status) {
+        return res.status(400).json({
+          success: false,
+          message: `Missing or invalid checklist item: ${item}`
+        });
+      }
+    }
+
+    // Import VehicleInspection model
+    const VehicleInspection = (await import('./models/VehicleInspection.js')).default;
+
+    // Get driver record
+    const driver = await Driver.findOne({ id: driverId, companyId });
+    
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    // Get driver name from employees collection
+    let driverName = 'Unknown Driver';
+    if (driver.employeeId) {
+      const employee = await Employee.findOne({ 
+        id: driver.employeeId, 
+        companyId 
+      });
+      
+      if (employee) {
+        driverName = employee.name || employee.fullName || 'Unknown Driver';
+      } else {
+        driverName = driver.name || driver.username || 'Unknown Driver';
+      }
+    } else {
+      driverName = driver.name || driver.username || 'Unknown Driver';
+    }
+
+    // Verify vehicle exists
+    const vehicle = await FleetVehicle.findOne({ id: Number(vehicleId), companyId });
+    
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vehicle not found'
+      });
+    }
+
+    // Calculate overall status and find issues
+    let passCount = 0;
+    let failCount = 0;
+    let needsAttentionCount = 0;
+    const issuesFound = [];
+
+    for (const [itemName, itemData] of Object.entries(checklist)) {
+      if (itemData.status === 'pass') {
+        passCount++;
+      } else if (itemData.status === 'fail') {
+        failCount++;
+        
+        // Determine severity based on item type
+        let severity = 'medium';
+        if (['brakes', 'steering', 'tires', 'lights'].includes(itemName)) {
+          severity = 'high';
+        }
+        if (itemName === 'brakes') {
+          severity = 'critical';
+        }
+        
+        issuesFound.push({
+          item: itemName,
+          severity: severity,
+          description: itemData.notes || `${itemName} inspection failed`,
+          actionRequired: `Repair or replace ${itemName}`
+        });
+      } else if (itemData.status === 'needs_attention') {
+        needsAttentionCount++;
+        issuesFound.push({
+          item: itemName,
+          severity: 'low',
+          description: itemData.notes || `${itemName} needs attention`,
+          actionRequired: `Inspect and service ${itemName}`
+        });
+      }
+    }
+
+    // Determine overall status
+    let overallStatus = 'pass';
+    let canProceed = true;
+
+    if (failCount > 0) {
+      // Check if any critical items failed
+      const criticalFailed = issuesFound.some(issue => issue.severity === 'critical');
+      if (criticalFailed) {
+        overallStatus = 'fail';
+        canProceed = false;
+      } else {
+        overallStatus = 'conditional_pass';
+        canProceed = true;
+      }
+    } else if (needsAttentionCount > 0) {
+      overallStatus = 'conditional_pass';
+      canProceed = true;
+    }
+
+    // Get next inspection ID
+    const lastInspection = await VehicleInspection.findOne().sort({ id: -1 });
+    const nextId = lastInspection ? lastInspection.id + 1 : 1;
+
+    // Prepare location data
+    const locationData = {};
+    if (location?.latitude !== null && location?.latitude !== undefined) {
+      locationData.latitude = location.latitude;
+    }
+    if (location?.longitude !== null && location?.longitude !== undefined) {
+      locationData.longitude = location.longitude;
+    }
+    if (location?.address) {
+      locationData.address = location.address;
+    }
+
+    // Create vehicle inspection
+    const inspectionData = {
+      id: nextId,
+      vehicleId: Number(vehicleId),
+      driverId: Number(driverId),
+      driverName: String(driverName),
+      companyId: Number(companyId),
+      inspectionDate: new Date(),
+      inspectionType: String(inspectionType),
+      checklist: checklist,
+      overallStatus: String(overallStatus),
+      canProceed: Boolean(canProceed),
+      issuesFound: issuesFound,
+      odometerReading: Number(odometerReading)
+    };
+
+    if (Object.keys(locationData).length > 0) {
+      inspectionData.location = locationData;
+    }
+
+    if (signature) {
+      inspectionData.signature = signature;
+    }
+
+    const vehicleInspection = new VehicleInspection(inspectionData);
+
+    await vehicleInspection.save();
+
+    console.log(`✅ Vehicle inspection saved: ${nextId} for vehicle ${vehicleId} - Status: ${overallStatus}`);
+
+    // If inspection failed or has issues, create VehicleIssue entries
+    if (issuesFound.length > 0 && (overallStatus === 'fail' || overallStatus === 'conditional_pass')) {
+      const VehicleIssue = (await import('./models/VehicleIssue.js')).default;
+      
+      for (const issue of issuesFound) {
+        // Only create issues for failed items (not needs_attention)
+        if (issue.severity !== 'low') {
+          const lastIssue = await VehicleIssue.findOne().sort({ id: -1 });
+          const issueId = lastIssue ? lastIssue.id + 1 : 1;
+
+          const vehicleIssue = new VehicleIssue({
+            id: issueId,
+            vehicleId: Number(vehicleId),
+            driverId: Number(driverId),
+            driverName: String(driverName),
+            companyId: Number(companyId),
+            category: 'safety',
+            description: `Pre-check inspection: ${issue.description}`,
+            severity: issue.severity,
+            reportedAt: new Date(),
+            status: 'reported',
+            vehicleStatus: issue.severity === 'critical' ? 'out_of_service' : 'needs_repair',
+            location: Object.keys(locationData).length > 0 ? locationData : undefined
+          });
+
+          await vehicleIssue.save();
+          console.log(`✅ Auto-created vehicle issue ${issueId} from inspection`);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Vehicle inspection submitted successfully',
+      data: {
+        id: vehicleInspection.id,
+        vehicleId: vehicleInspection.vehicleId,
+        inspectionDate: vehicleInspection.inspectionDate,
+        overallStatus: vehicleInspection.overallStatus,
+        canProceed: vehicleInspection.canProceed,
+        issuesFound: vehicleInspection.issuesFound,
+        odometerReading: vehicleInspection.odometerReading
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Error submitting vehicle inspection:", err);
+    console.error("❌ Error stack:", err.stack);
+    res.status(500).json({
+      success: false,
+      message: "Server error while submitting vehicle inspection",
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+};
+
+/**
+ * Get Vehicle Inspections
+ * GET /api/v1/driver/vehicle/inspections
+ */
+export const getVehicleInspections = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const companyId = req.user.companyId;
+    const { vehicleId, limit = 5 } = req.query;
+
+    console.log('🔍 Get vehicle inspections:', { driverId, vehicleId, limit });
+
+    // Import VehicleInspection model
+    const VehicleInspection = (await import('./models/VehicleInspection.js')).default;
+
+    // Build query
+    const query = { companyId };
+    
+    if (vehicleId) {
+      query.vehicleId = Number(vehicleId);
+    }
+
+    // Get vehicle inspections
+    const inspections = await VehicleInspection.find(query)
+      .sort({ inspectionDate: -1 })
+      .limit(Number(limit));
+
+    res.json({
+      success: true,
+      data: inspections.map(inspection => ({
+        id: inspection.id,
+        vehicleId: inspection.vehicleId,
+        driverId: inspection.driverId,
+        driverName: inspection.driverName,
+        inspectionDate: inspection.inspectionDate,
+        inspectionType: inspection.inspectionType,
+        overallStatus: inspection.overallStatus,
+        canProceed: inspection.canProceed,
+        issuesFound: inspection.issuesFound,
+        odometerReading: inspection.odometerReading,
+        location: inspection.location
+      }))
+    });
+
+  } catch (err) {
+    console.error("❌ Error getting vehicle inspections:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while getting vehicle inspections",
+      error: err.message
+    });
+  }
+};
+
+/**
+ * Get Single Vehicle Inspection Details
+ * GET /api/v1/driver/vehicle/inspection/:id
+ */
+export const getVehicleInspectionDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user.companyId;
+
+    console.log('🔍 Get vehicle inspection details:', { id, companyId });
+
+    // Import VehicleInspection model
+    const VehicleInspection = (await import('./models/VehicleInspection.js')).default;
+
+    const inspection = await VehicleInspection.findOne({ 
+      id: Number(id), 
+      companyId 
+    });
+
+    if (!inspection) {
+      return res.status(404).json({
+        success: false,
+        message: 'Inspection not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: inspection
+    });
+
+  } catch (err) {
+    console.error("❌ Error getting vehicle inspection details:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while getting vehicle inspection details",
       error: err.message
     });
   }
