@@ -1,6 +1,8 @@
 // Worker API Service - Handles all worker-specific API endpoints
 // Requirements: 10.1, 10.2, 10.3
 
+import { Platform } from 'react-native';
+import * as Device from 'expo-device';
 import { apiClient } from './client';
 import { attendanceApiService } from './AttendanceApiService';
 import {
@@ -20,6 +22,9 @@ import {
   SubmitDailyReportRequest,
   SubmitDailyReportResponse,
   GetDailyReportsResponse,
+  InstructionReadStatus,
+  PerformanceMetrics,
+  DeviceInfo,
 } from '../../types';
 
 export class WorkerApiService {
@@ -187,7 +192,10 @@ export class WorkerApiService {
             assignmentId: task.assignmentId || task.id || 0,
             projectId: response.data.project?.id || 1,
             projectName: response.data.project?.name || 'Unknown Project',
+            projectCode: response.data.project?.code || undefined,
             clientName: response.data.project?.clientName || undefined,
+            siteName: response.data.project?.siteName || undefined,
+            natureOfWork: response.data.project?.natureOfWork || undefined,
             taskName: task.taskName || task.name || 'Unknown Task',
             description: task.description || '',
             dependencies: task.dependencies || [],
@@ -197,6 +205,11 @@ export class WorkerApiService {
             workArea: task.workArea || undefined,
             floor: task.floor || undefined,
             zone: task.zone || undefined,
+            trade: task.trade || undefined,
+            activity: task.activity || undefined,
+            workType: task.workType || undefined,
+            requiredTools: task.requiredTools || [],
+            requiredMaterials: task.requiredMaterials || [],
             location: {
               latitude: response.data.project?.geofence?.latitude || 0,
               longitude: response.data.project?.geofence?.longitude || 0,
@@ -208,13 +221,24 @@ export class WorkerApiService {
               longitude: response.data.project.geofence.longitude,
               radius: response.data.project.geofence.radius || 100
             } : undefined,
+            // Map supervisor information from task-level fields (backend provides per-task)
+            supervisorName: task.supervisorName || response.data.supervisor?.name || undefined,
+            supervisorContact: task.supervisorContact || response.data.supervisor?.phone || undefined,
+            supervisorEmail: task.supervisorEmail || response.data.supervisor?.email || undefined,
             estimatedHours: task.timeEstimate?.estimated ? task.timeEstimate.estimated / 60 : 8,
             actualHours: task.timeEstimate?.elapsed ? task.timeEstimate.elapsed / 60 : undefined,
+            actualOutput: task.progress?.completed || undefined,
             dailyTarget: task.dailyTarget ? {
               description: task.dailyTarget.description || '',
               quantity: task.dailyTarget.quantity || 0,
               unit: task.dailyTarget.unit || '',
-              targetCompletion: task.dailyTarget.targetCompletion || 100
+              targetCompletion: task.dailyTarget.targetCompletion || 100,
+              // Enhanced daily target fields
+              targetType: task.dailyTarget.targetType || undefined,
+              areaLevel: task.dailyTarget.areaLevel || undefined,
+              startTime: task.dailyTarget.startTime || undefined,
+              expectedFinish: task.dailyTarget.expectedFinish || undefined,
+              progressToday: task.dailyTarget.progressToday || undefined
             } : undefined,
             progress: task.progress ? {
               percentage: task.progress.percentage || 0,
@@ -285,7 +309,7 @@ export class WorkerApiService {
   }
 
   // Helper method to map API task status to TaskAssignment status
-  private mapTaskStatus(apiStatus: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' {
+  private mapTaskStatus(apiStatus: string): 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'paused' {
     switch (apiStatus?.toLowerCase()) {
       case 'queued':
         return 'pending';
@@ -295,6 +319,8 @@ export class WorkerApiService {
         return 'completed';
       case 'cancelled':
         return 'cancelled';
+      case 'paused':
+        return 'paused';
       default:
         return 'pending';
     }
@@ -439,6 +465,30 @@ export class WorkerApiService {
       },
       actualQuantityCompleted: options?.actualQuantityCompleted,
       qualityCheck: options?.qualityCheck,
+    });
+  }
+
+  async pauseTask(taskId: number): Promise<ApiResponse<{
+    assignmentId: number;
+    status: string;
+    pausedAt: string;
+    previousStatus: string;
+  }>> {
+    return apiClient.post(`/worker/tasks/${taskId}/pause`, {});
+  }
+
+  async resumeTask(taskId: number, location: GeoLocation): Promise<ApiResponse<{
+    assignmentId: number;
+    status: string;
+    resumedAt: string;
+    previousStatus: string;
+  }>> {
+    return apiClient.post(`/worker/tasks/${taskId}/resume`, {
+      location: {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+      },
     });
   }
 
@@ -1418,6 +1468,85 @@ export class WorkerApiService {
     category: string;
   }>>> {
     return apiClient.get('/worker/support/faqs');
+  }
+
+  // Today's Task Critical Features - New Methods
+
+  /**
+   * Mark supervisor instructions as read
+   */
+  async markInstructionsAsRead(
+    assignmentId: number,
+    location?: GeoLocation
+  ): Promise<ApiResponse<{ readAt: Date; acknowledged: boolean }>> {
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+      
+      const response = await apiClient.post(
+        `/worker/tasks/${assignmentId}/instructions/read`,
+        {
+          location,
+          deviceInfo
+        }
+      );
+      
+      return response;
+    } catch (error) {
+      console.error('Error marking instructions as read:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Acknowledge understanding of supervisor instructions
+   */
+  async acknowledgeInstructions(
+    assignmentId: number,
+    notes?: string,
+    location?: GeoLocation
+  ): Promise<ApiResponse<InstructionReadStatus>> {
+    try {
+      const deviceInfo = await this.getDeviceInfo();
+      
+      const response = await apiClient.post(
+        `/worker/tasks/${assignmentId}/instructions/acknowledge`,
+        {
+          notes,
+          location,
+          deviceInfo
+        }
+      );
+      
+      return response;
+    } catch (error) {
+      console.error('Error acknowledging instructions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get worker performance metrics
+   */
+  async getPerformanceMetrics(): Promise<ApiResponse<PerformanceMetrics>> {
+    try {
+      const response = await apiClient.get('/worker/performance');
+      return response;
+    } catch (error) {
+      console.error('Error fetching performance metrics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get device information for audit trail
+   */
+  private async getDeviceInfo(): Promise<DeviceInfo> {
+    return {
+      platform: Platform.OS,
+      version: String(Platform.Version),
+      model: Device.modelName || 'Unknown',
+      manufacturer: Device.manufacturer || 'Unknown'
+    };
   }
 }
 

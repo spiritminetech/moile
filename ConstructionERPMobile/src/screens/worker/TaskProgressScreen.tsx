@@ -28,6 +28,7 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
   const [progressPercent, setProgressPercent] = useState(currentProgress);
   const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
+  const [completedQuantity, setCompletedQuantity] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,16 +61,34 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
           updatedAt: new Date().toISOString(), // Default if not provided
           startedAt: response.data.startTime || undefined,
           completedAt: undefined, // API doesn't provide this field
+          dailyTarget: response.data.dailyTarget || undefined, // Include daily target data
         };
         setTask(mappedTask);
         
-        // Set current progress if task has actual hours
-        if (mappedTask.actualHours !== undefined && mappedTask.estimatedHours) {
-          const currentProgressPercent = Math.min(
+        // Set current progress from progressPercent or dailyTarget.progressToday
+        let initialProgress = currentProgress || 0;
+        
+        // Priority 1: Use existing progressPercent from API
+        if (response.data.progress?.percentage !== undefined) {
+          initialProgress = response.data.progress.percentage;
+        }
+        // Priority 2: Use dailyTarget.progressToday.percentage
+        else if (response.data.dailyTarget?.progressToday?.percentage !== undefined) {
+          initialProgress = response.data.dailyTarget.progressToday.percentage;
+        }
+        // Priority 3: Calculate from actual/estimated hours (fallback)
+        else if (mappedTask.actualHours !== undefined && mappedTask.estimatedHours) {
+          initialProgress = Math.min(
             (mappedTask.actualHours / mappedTask.estimatedHours) * 100,
             100
           );
-          setProgressPercent(currentProgressPercent);
+        }
+        
+        setProgressPercent(initialProgress);
+        
+        // Set completed quantity if available
+        if (response.data.dailyTarget?.progressToday?.completed) {
+          setCompletedQuantity(response.data.dailyTarget.progressToday.completed);
         }
       } else {
         setError(response.message || 'Failed to load task details');
@@ -85,6 +104,78 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
   useEffect(() => {
     loadTaskDetails();
   }, [loadTaskDetails]);
+
+  // Auto-start or resume task if needed before allowing progress updates
+  const autoStartOrResumeTask = useCallback(async () => {
+    if (!task || !currentLocation) return;
+    
+    // If task is pending or queued (paused), we need to start or resume it first
+    if (task.status === 'pending' || task.status === 'queued') {
+      try {
+        console.log('🚀 Task is pending, attempting to start/resume...');
+        
+        // Try to resume first (for paused tasks)
+        // If task was never started, resume will fail and we'll start it
+        let response;
+        try {
+          console.log('   Attempting resume...');
+          response = await workerApiService.resumeTask(
+            task.assignmentId, 
+            currentLocation
+          );
+          console.log('✅ Task resumed successfully');
+        } catch (resumeError: any) {
+          // If resume fails because task was never started, try starting it
+          if (resumeError.details?.error === 'TASK_NEVER_STARTED' || 
+              resumeError.details?.error === 'TASK_NOT_PAUSED') {
+            console.log('   Resume failed, attempting start...');
+            response = await workerApiService.startTask(
+              task.assignmentId, 
+              currentLocation
+            );
+            console.log('✅ Task started successfully');
+          } else {
+            throw resumeError;
+          }
+        }
+        
+        if (response.success) {
+          // Reload task details to get updated status
+          await loadTaskDetails();
+        } else {
+          Alert.alert(
+            'Cannot Update Progress',
+            response.message || 'Task must be started first. Please go back and start the task.',
+            [
+              {
+                text: 'Go Back',
+                onPress: () => navigation.goBack()
+              }
+            ]
+          );
+        }
+      } catch (error: any) {
+        console.error('❌ Error auto-starting/resuming task:', error);
+        Alert.alert(
+          'Cannot Update Progress',
+          error.message || 'Failed to start task. Please go back and start the task manually.',
+          [
+            {
+              text: 'Go Back',
+              onPress: () => navigation.goBack()
+            }
+          ]
+        );
+      }
+    }
+  }, [task, currentLocation, loadTaskDetails, navigation]);
+
+  // Call auto-start/resume after loading task details
+  useEffect(() => {
+    if (task && currentLocation) {
+      autoStartOrResumeTask();
+    }
+  }, [task, currentLocation, autoStartOrResumeTask]);
 
   // Validate form
   const validateForm = (): boolean => {
@@ -138,7 +229,12 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
         taskId,
         progressPercent,
         description.trim(),
-        currentLocation
+        currentLocation,
+        {
+          notes: notes.trim(),
+          completedQuantity: completedQuantity > 0 ? completedQuantity : undefined,
+          issuesEncountered: []
+        }
       );
 
       if (response.success) {
@@ -172,7 +268,7 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [taskId, progressPercent, description, currentLocation, navigation]);
+  }, [taskId, progressPercent, description, notes, completedQuantity, currentLocation, navigation]);
 
   // Handle complete task
   const handleCompleteTask = useCallback(async () => {
@@ -284,6 +380,11 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
       {/* Progress Slider */}
       <View style={styles.progressContainer}>
         <Text style={styles.sectionTitle}>Progress Percentage</Text>
+        {task?.dailyTarget && (
+          <Text style={styles.helperText}>
+            💡 Tip: Enter completed quantity below to auto-calculate progress
+          </Text>
+        )}
         <View style={styles.progressDisplay}>
           <Text style={[styles.progressText, { color: getProgressColor(progressPercent) }]}>
             {Math.round(progressPercent)}%
@@ -308,6 +409,43 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
           <Text style={styles.progressLabel}>100%</Text>
         </View>
       </View>
+
+      {/* Completed Quantity Input */}
+      {task?.dailyTarget && (
+        <View style={styles.inputContainer}>
+          <Text style={styles.sectionTitle}>
+            Completed Quantity ({task.dailyTarget.unit || 'units'})
+          </Text>
+          <Text style={styles.helperText}>
+            Target: {task.dailyTarget.quantity} {task.dailyTarget.unit || 'units'}
+          </Text>
+          <TextInput
+            style={styles.quantityInput}
+            placeholder={`Enter completed ${task.dailyTarget.unit || 'units'}...`}
+            value={completedQuantity > 0 ? completedQuantity.toString() : ''}
+            onChangeText={(text) => {
+              const num = parseInt(text) || 0;
+              setCompletedQuantity(num);
+              
+              // Auto-calculate progress percentage from quantity
+              if (num > 0 && task.dailyTarget?.quantity) {
+                const calculatedProgress = Math.min(
+                  Math.round((num / task.dailyTarget.quantity) * 100),
+                  100
+                );
+                setProgressPercent(calculatedProgress);
+              }
+            }}
+            keyboardType="numeric"
+            maxLength={6}
+          />
+          {completedQuantity > 0 && task.dailyTarget?.quantity && (
+            <Text style={styles.autoCalculatedText}>
+              ✓ Progress auto-calculated: {Math.round((completedQuantity / task.dailyTarget.quantity) * 100)}%
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Work Description */}
       <View style={styles.inputContainer}>
@@ -483,6 +621,28 @@ const styles = StyleSheet.create({
     color: '#333333',
     backgroundColor: '#FAFAFA',
     minHeight: 100,
+  },
+  quantityInput: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    backgroundColor: '#FAFAFA',
+    textAlign: 'center',
+  },
+  helperText: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 8,
+  },
+  autoCalculatedText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    marginTop: 8,
+    fontWeight: '500',
   },
   characterCount: {
     fontSize: 12,

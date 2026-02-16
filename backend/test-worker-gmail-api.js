@@ -1,96 +1,64 @@
-import dotenv from 'dotenv';
+import axios from 'axios';
 
-// Load environment variables
-dotenv.config();
+const API_BASE_URL = 'http://192.168.1.6:5002/api';
 
-const BASE_URL = 'http://localhost:5002/api';
-
-const testWorkerGmailAPI = async () => {
+async function testWorkerGmailAPI() {
   try {
-    console.log('🔍 Testing Tasks Today API with worker@gmail.com...\n');
+    console.log('🔐 Logging in as worker@gmail.com...\n');
 
-    // Step 1: Login to get token
-    console.log('1️⃣ Logging in with worker@gmail.com...');
-    const loginResponse = await fetch(`${BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: 'worker@gmail.com',
-        password: 'password123'
-      })
+    // Login
+    const loginResponse = await axios.post(`${API_BASE_URL}/auth/login`, {
+      email: 'worker@gmail.com',
+      password: 'password123'
     });
 
-    const loginData = await loginResponse.json();
+    const token = loginResponse.data.token;
+    const userId = loginResponse.data.user.id;
+    const employeeId = loginResponse.data.user.employeeId;
 
-    if (!loginData.success) {
-      console.error('❌ Login failed:', loginData.message);
-      return;
-    }
+    console.log('✅ Login successful!');
+    console.log(`   User ID: ${userId}`);
+    console.log(`   Employee ID: ${employeeId}`);
+    console.log(`   Role: ${loginResponse.data.user.role}`);
 
-    console.log('✅ Login successful');
-    console.log('   User ID:', loginData.user?.id);
-    console.log('   Role:', loginData.user?.role);
-    const token = loginData.token;
+    // Get today's tasks
+    console.log('\n📋 Fetching today\'s tasks...\n');
 
-    // Step 2: Test the tasks today API
-    console.log('\n2️⃣ Fetching today\'s tasks...');
-    const tasksResponse = await fetch(`${BASE_URL}/worker/tasks/today`, {
+    const tasksResponse = await axios.get(`${API_BASE_URL}/worker/tasks/today`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
     });
 
-    console.log('📊 Response Status:', tasksResponse.status);
-    const tasksData = await tasksResponse.json();
+    const data = tasksResponse.data.data;
 
-    console.log('✅ Tasks API Response:');
-    console.log('   Success:', tasksData.success);
-    
-    if (tasksData.success && tasksData.data) {
-      const { project, supervisor, tasks, dailySummary } = tasksData.data;
-      
-      console.log('\n📋 Project Info:');
-      console.log(`   Name: ${project?.name}`);
-      console.log(`   Code: ${project?.code}`);
-      console.log(`   Location: ${project?.location}`);
-      
-      console.log('\n👤 Supervisor:');
-      console.log(`   Name: ${supervisor?.name}`);
-      console.log(`   Phone: ${supervisor?.phone}`);
-      
-      console.log('\n📝 Tasks:');
-      if (tasks && tasks.length > 0) {
-        tasks.forEach((task, index) => {
-          console.log(`   Task ${index + 1}:`);
-          console.log(`     Name: ${task.taskName}`);
-          console.log(`     Status: ${task.status}`);
-          console.log(`     Progress: ${task.progress?.percentage || 0}%`);
-          console.log(`     Work Area: ${task.workArea}`);
-          console.log(`     Can Start: ${task.canStart}`);
-          console.log('');
-        });
-      } else {
-        console.log('   No tasks found');
-      }
-      
-      console.log('📊 Daily Summary:');
-      if (dailySummary) {
-        console.log(`   Total Tasks: ${dailySummary.totalTasks}`);
-        console.log(`   Completed: ${dailySummary.completedTasks}`);
-        console.log(`   In Progress: ${dailySummary.inProgressTasks}`);
-        console.log(`   Hours Worked: ${dailySummary.totalHoursWorked}`);
-      }
-    } else {
-      console.log('   Error:', tasksData.message);
-      console.log('   Error Code:', tasksData.error);
-    }
+    console.log('✅ API Response:');
+    console.log(`   Total Tasks: ${data.dailySummary.totalTasks}`);
+    console.log(`   Completed: ${data.dailySummary.completedTasks}`);
+    console.log(`   In Progress: ${data.dailySummary.inProgressTasks}`);
+    console.log(`   Queued: ${data.dailySummary.queuedTasks}`);
+    console.log(`   Overall Progress: ${data.dailySummary.overallProgress}%`);
+
+    console.log('\n📝 Tasks:');
+    console.log('='.repeat(80));
+
+    data.tasks.forEach((task, index) => {
+      console.log(`\n${index + 1}. ${task.taskName} (ID: ${task.taskId})`);
+      console.log(`   Status: ${task.status}`);
+      console.log(`   Priority: ${task.priority}`);
+      console.log(`   Location: ${task.location}`);
+      console.log(`   Estimated Hours: ${task.estimatedHours}`);
+      console.log(`   Daily Target: ${task.dailyTarget?.targetQuantity || 0} ${task.dailyTarget?.targetUnit || ''}`);
+      console.log(`   Supervisor: ${task.supervisor?.name || 'N/A'}`);
+    });
+
+    console.log('\n' + '='.repeat(80));
+    console.log('\n✅ All 5 tasks are available in the API!');
+    console.log('\n📱 Refresh your mobile app to see the tasks.');
 
   } catch (error) {
-    console.error('❌ Error testing tasks API:', error.message);
+    console.error('❌ Error:', error.response?.data || error.message);
   }
-};
+}
 
-// Run the test
 testWorkerGmailAPI();

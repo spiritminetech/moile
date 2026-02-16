@@ -1,29 +1,30 @@
-// Check all project coordinates to find the issue
-
 import mongoose from 'mongoose';
-import Project from './src/modules/project/models/Project.js';
+import dotenv from 'dotenv';
 
-const MONGODB_URI = 'mongodb+srv://anbarasus2410_db_user:f9YX0Aa0E4jdxAbn@erp.hlff2qz.mongodb.net/erp?appName=erp';
+dotenv.config();
+
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/construction_erp';
 
 async function checkAllProjects() {
   try {
     await mongoose.connect(MONGODB_URI);
-    console.log('🔍 Checking ALL project coordinates...');
+    console.log('✅ Connected to MongoDB');
+
+    const Project = mongoose.model('Project', new mongoose.Schema({}, { strict: false }), 'projects');
+
+    const allProjects = await Project.find({}).limit(5);
     
-    const projects = await Project.find({}).select('id name latitude longitude geofence geofenceRadius');
-    
-    console.log('📍 Found', projects.length, 'projects:');
-    projects.forEach(project => {
-      console.log(`  Project ${project.id}: ${project.name}`);
-      console.log(`    Old coords: ${project.latitude}, ${project.longitude}`);
-      console.log(`    Geofence center: ${project.geofence?.center?.latitude}, ${project.geofence?.center?.longitude}`);
-      console.log(`    Radius: ${project.geofenceRadius} / ${project.geofence?.radius}`);
-      console.log('');
+    console.log('\n📋 First 5 Projects (full data):');
+    allProjects.forEach((p, index) => {
+      console.log(`\n--- Project ${index + 1} ---`);
+      console.log(JSON.stringify(p.toObject(), null, 2));
     });
-    
-    await mongoose.disconnect();
+
   } catch (error) {
     console.error('❌ Error:', error.message);
+  } finally {
+    await mongoose.connection.close();
+    console.log('\n🔌 Database connection closed');
   }
 }
 

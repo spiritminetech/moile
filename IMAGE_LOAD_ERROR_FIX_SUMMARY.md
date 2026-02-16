@@ -5,7 +5,7 @@ The mobile app was showing "image load error: [object object]" when trying to di
 
 ## Root Causes Identified
 
-1. **URL Mismatch**: Backend was constructing URLs with `localhost` but mobile app was accessing from `192.168.0.3`
+1. **URL Mismatch**: Backend was constructing URLs with `localhost` but mobile app was accessing from `192.168.1.6`
 2. **CORS Issues**: Static file serving didn't have proper CORS headers for mobile app access
 3. **Error Object Logging**: Error objects weren't being properly stringified in console logs
 4. **Network Accessibility**: Mobile app couldn't access images due to network configuration
@@ -17,7 +17,7 @@ The mobile app was showing "image load error: [object object]" when trying to di
 #### 1. Environment Configuration (`.env`)
 ```env
 # Changed from localhost to actual IP
-BASE_URL=http://192.168.0.3:5002
+BASE_URL=http://192.168.1.6:5002
 ```
 
 #### 2. CORS Configuration (`src/config/app.config.js`)
@@ -66,7 +66,7 @@ const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
 let baseUrl = process.env.BASE_URL;
 if (!baseUrl) {
   if (host.includes('localhost') || host.includes('127.0.0.1')) {
-    baseUrl = `${protocol}://192.168.0.3:5002`;
+    baseUrl = `${protocol}://192.168.1.6:5002`;
   } else {
     baseUrl = `${protocol}://${host}`;
   }
@@ -127,8 +127,8 @@ node test-image-access.js
 5. Verify the photo displays correctly
 
 ### 3. Network Verification
-- Ensure backend server is accessible at `http://192.168.0.3:5002`
-- Test image URLs directly in browser: `http://192.168.0.3:5002/uploads/workers/[filename]`
+- Ensure backend server is accessible at `http://192.168.1.6:5002`
+- Test image URLs directly in browser: `http://192.168.1.6:5002/uploads/workers/[filename]`
 - Check mobile device can reach the backend server
 
 ## Expected Results
@@ -147,7 +147,7 @@ If images still don't load:
 1. **Check Network Connectivity**:
    ```bash
    # From mobile device/emulator, test if backend is reachable
-   curl http://192.168.0.3:5002/api/health
+   curl http://192.168.1.6:5002/api/health
    ```
 
 2. **Verify Image URLs**:

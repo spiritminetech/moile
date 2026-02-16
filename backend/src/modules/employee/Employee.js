@@ -28,6 +28,12 @@ const employeeSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    default: null
+  },
   jobTitle: {
     type: String,
     trim: true

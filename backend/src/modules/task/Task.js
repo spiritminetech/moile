@@ -33,6 +33,31 @@ const taskSchema = new mongoose.Schema({
   description: {
     type: String
   },
+  // Detailed nature of work breakdown
+  trade: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  activity: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  workType: {
+    type: String,
+    trim: true,
+    default: null
+  },
+  // Required tools and materials
+  requiredTools: {
+    type: [String],
+    default: []
+  },
+  requiredMaterials: {
+    type: [String],
+    default: []
+  },
   status: {
     type: String,
     default: 'PLANNED',

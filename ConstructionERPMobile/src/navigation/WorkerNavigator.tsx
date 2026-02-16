@@ -10,6 +10,7 @@ import AttendanceHistoryScreen from '../screens/worker/AttendanceHistoryScreen';
 import TodaysTasksScreen from '../screens/worker/TodaysTasksScreen';
 import TaskProgressScreen from '../screens/worker/TaskProgressScreen';
 import TaskLocationScreen from '../screens/worker/TaskLocationScreen';
+import TaskLocationMapScreen from '../screens/worker/TaskLocationMapScreen';
 import TaskHistoryScreen from '../screens/worker/TaskHistoryScreen';
 import DailyReportScreen from '../screens/worker/DailyReportScreen';
 import RequestsScreen from '../screens/worker/RequestsScreen';
@@ -111,6 +112,14 @@ const TasksStackNavigator = () => {
         component={TaskLocationScreen}
         options={{
           title: 'Task Location',
+        }}
+      />
+      <Stack.Screen
+        name="TaskLocationMap"
+        component={TaskLocationMapScreen}
+        options={{
+          title: 'Work Site Location',
+          headerShown: false,
         }}
       />
     </Stack.Navigator>

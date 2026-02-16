@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const BASE_URL = 'http://192.168.0.3:5002/api';
+const BASE_URL = 'http://192.168.1.6:5002/api';
 
 // Test credentials (use your actual driver credentials)
 const TEST_DRIVER = {

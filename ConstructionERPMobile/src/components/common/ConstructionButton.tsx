@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
   },
   icon: {
     fontSize: ConstructionTheme.dimensions.iconLarge, // ENHANCED: Larger icons
-    marginRight: ConstructionTheme.spacing.md,
+    marginRight: ConstructionTheme.spacing.xs, // 4px - Minimal spacing for tight visual grouping
   },
   subtitle: {
     fontSize: 12,

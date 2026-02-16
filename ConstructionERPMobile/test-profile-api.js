@@ -6,7 +6,7 @@
 const axios = require('axios');
 
 // Configuration - Update these values to match your setup
-const API_BASE_URL = 'http://192.168.0.3:5002/api';
+const API_BASE_URL = 'http://192.168.1.6:5002/api';
 const AUTH_TOKEN = 'YOUR_AUTH_TOKEN_HERE'; // Get this from AsyncStorage or login response
 
 async function testProfileAPI() {

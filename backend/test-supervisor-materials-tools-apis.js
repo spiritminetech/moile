@@ -5,7 +5,7 @@ import axios from 'axios';
  * Tests: Acknowledge Delivery, Return Materials, Tool Usage Log
  */
 
-const API_BASE_URL = 'http://192.168.0.3:5002/api';
+const API_BASE_URL = 'http://192.168.1.6:5002/api';
 
 // Test configuration
 const TEST_CONFIG = {

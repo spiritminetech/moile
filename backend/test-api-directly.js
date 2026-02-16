@@ -1,50 +1,40 @@
-// Test the actual API endpoint to see if it's using the updated code
-import fetch from 'node-fetch';
+import axios from 'axios';
 
-async function testAPI() {
+async function testApiDirectly() {
   try {
-    console.log('🔍 Testing the actual API endpoint...\n');
-    
-    // Test the worker manifests API for task 10003
-    const url = 'http://localhost:5002/api/driver/worker-manifests/10003';
-    
-    console.log(`📡 Calling: ${url}`);
-    console.log('⚠️  Note: This will fail without proper authentication, but we can see if server responds\n');
-    
-    const response = await fetch(url, {
-      method: 'GET',
+    // First, login to get a token
+    console.log('🔐 Logging in...');
+    const loginResponse = await axios.post('http://localhost:5002/api/auth/login', {
+      email: 'driver1@gmail.com',
+      password: 'Password123@'
+    });
+
+    const token = loginResponse.data.token;
+    console.log('✅ Login successful\n');
+
+    // Test dashboard summary
+    console.log('📊 Testing dashboard summary API...');
+    const dashboardResponse = await axios.get('http://localhost:5002/api/driver/dashboard/summary', {
       headers: {
-        'Content-Type': 'application/json'
+        'Authorization': `Bearer ${token}`
       }
     });
-    
-    console.log(`📊 Response status: ${response.status} ${response.statusText}`);
-    
-    if (response.status === 401 || response.status === 403) {
-      console.log('✅ Server is responding (authentication required as expected)');
-      console.log('💡 This means the backend server is running with updated code');
-    } else if (response.ok) {
-      const data = await response.json();
-      console.log('✅ API Response:');
-      console.log(JSON.stringify(data, null, 2));
-      
-      if (data.success && data.data) {
-        const checkedInCount = data.data.filter(worker => worker.status === 'checked-in').length;
-        console.log(`\n📊 API shows: ${checkedInCount} of ${data.data.length} workers checked in`);
+
+    console.log('Dashboard response:', JSON.stringify(dashboardResponse.data, null, 2));
+
+    // Test transport tasks
+    console.log('\n🚛 Testing transport tasks API...');
+    const tasksResponse = await axios.get('http://localhost:5002/api/driver/transport-tasks', {
+      headers: {
+        'Authorization': `Bearer ${token}`
       }
-    } else {
-      const errorText = await response.text();
-      console.log('❌ API Error Response:');
-      console.log(errorText);
-    }
-    
+    });
+
+    console.log('Transport tasks response:', JSON.stringify(tasksResponse.data, null, 2));
+
   } catch (error) {
-    if (error.code === 'ECONNREFUSED') {
-      console.log('❌ Connection refused - backend server is not running on port 5002');
-    } else {
-      console.log('❌ Error:', error.message);
-    }
+    console.error('❌ Error:', error.response?.data || error.message);
   }
 }
 
-testAPI();
+testApiDirectly();
