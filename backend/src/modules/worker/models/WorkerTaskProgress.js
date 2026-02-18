@@ -76,7 +76,10 @@ const WorkerTaskProgressSchema = new mongoose.Schema(
     }
 }, {
   collection: 'workerTaskProgress',
-  timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' }
+  timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
+  id: false,  // Disable Mongoose virtual id to use numeric id field
+  toJSON: { virtuals: false },
+  toObject: { virtuals: false }
 });
 
 // Add indexes for better query performance

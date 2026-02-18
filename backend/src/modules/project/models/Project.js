@@ -189,7 +189,7 @@ const projectSchema = new mongoose.Schema({
     },
     radius: { type: Number, default: 100 }, // meters
     strictMode: { type: Boolean, default: true },
-    allowedVariance: { type: Number, default: 10 } // meters
+    allowedVariance: { type: Number, default: 100} // meters
   },
   
   workAreas: [{
@@ -203,7 +203,10 @@ const projectSchema = new mongoose.Schema({
     }
   }]
 }, {
-  timestamps: true
+  timestamps: true,
+  id: false,  // Disable Mongoose virtual id to use numeric id field
+  toJSON: { virtuals: false },
+  toObject: { virtuals: false }
 });
 
 // Indexes

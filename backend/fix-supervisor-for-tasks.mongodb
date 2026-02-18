@@ -1,0 +1,45 @@
+// MongoDB script to add supervisor to worker task assignments
+// Run this in MongoDB Compass or mongosh
+
+// Switch to the erp database
+use erp
+
+// First, let's check which supervisors are available
+print("=== Available Supervisors ===");
+db.employees.find({ 
+  jobTitle: { $regex: /supervisor/i },
+  status: "ACTIVE" 
+}).forEach(function(emp) {
+  print("ID: " + emp.id + " | Name: " + emp.fullName + " | Phone: " + emp.phone);
+});
+
+print("\n=== Current Task Assignments ===");
+db.workertaskassignments.find({ 
+  projectId: 1003 
+}).forEach(function(task) {
+  print("Task: " + task.taskName + " | Assignment ID: " + task.id + " | Supervisor ID: " + task.supervisorId);
+});
+
+// Update all tasks for project 1003 to have supervisor ID 4
+print("\n=== Updating Tasks ===");
+var result = db.workertaskassignments.updateMany(
+  { projectId: 1003 },
+  { 
+    $set: { 
+      supervisorId: 4,
+      updatedAt: new Date()
+    } 
+  }
+);
+
+print("Matched: " + result.matchedCount);
+print("Modified: " + result.modifiedCount);
+
+print("\n=== Verification ===");
+db.workertaskassignments.find({ 
+  projectId: 1003 
+}).forEach(function(task) {
+  print("Task: " + task.taskName + " | Supervisor ID: " + task.supervisorId);
+});
+
+print("\n✅ Done! Restart your backend server and refresh the mobile app.");

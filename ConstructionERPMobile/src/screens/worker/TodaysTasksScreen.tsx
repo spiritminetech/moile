@@ -32,11 +32,33 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   const [error, setError] = useState<string | null>(null);
   const [isApiCallInProgress, setIsApiCallInProgress] = useState(false); // Prevent multiple calls
   const [loadingTimeout, setLoadingTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null); // Track expanded task
   const hasInitiallyLoaded = useRef(false); // Track if we've loaded once
 
   const { state: locationState, checkGPSAccuracy, requestLocationPermissions, getCurrentLocation } = useLocation();
   const { currentLocation, isLocationEnabled, hasLocationPermission } = locationState;
   const { isOffline, getCachedData, cacheData } = useOffline();
+
+  // Debug location state - PRODUCTION MODE LOGGING (always visible)
+  useEffect(() => {
+    console.log('='.repeat(80));
+    console.log('📍 PRODUCTION MODE - LOCATION STATE DEBUG');
+    console.log('='.repeat(80));
+    console.log('Current Location:', currentLocation);
+    console.log('  - Has Location:', !!currentLocation);
+    if (currentLocation) {
+      console.log('  - Latitude:', currentLocation.latitude);
+      console.log('  - Longitude:', currentLocation.longitude);
+      console.log('  - Accuracy:', currentLocation.accuracy);
+    } else {
+      console.log('  ⚠️ NO LOCATION AVAILABLE');
+    }
+    console.log('Location Permission:', hasLocationPermission);
+    console.log('Location Enabled:', isLocationEnabled);
+    console.log('Location Error:', locationState.locationError);
+    console.log('Development Mode (__DEV__):', __DEV__);
+    console.log('='.repeat(80));
+  }, [currentLocation, hasLocationPermission, isLocationEnabled, locationState]);
 
   // Handle refresh parameter from navigation
   useEffect(() => {
@@ -100,6 +122,33 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       error
     });
   }, [tasks, isLoading, error]);
+
+  // Calculate total daily targets
+  const calculateDailyTargetSummary = useCallback(() => {
+    if (!tasks || tasks.length === 0) return null;
+    
+    const tasksWithTargets = tasks.filter(t => t.dailyTarget);
+    if (tasksWithTargets.length === 0) return null;
+    
+    // Group by unit
+    const targetsByUnit: { [unit: string]: { total: number; achieved: number; count: number } } = {};
+    
+    tasksWithTargets.forEach(task => {
+      if (task.dailyTarget) {
+        const unit = task.dailyTarget.unit;
+        if (!targetsByUnit[unit]) {
+          targetsByUnit[unit] = { total: 0, achieved: 0, count: 0 };
+        }
+        targetsByUnit[unit].total += task.dailyTarget.quantity;
+        targetsByUnit[unit].achieved += task.actualOutput || 0;
+        targetsByUnit[unit].count += 1;
+      }
+    });
+    
+    return targetsByUnit;
+  }, [tasks]);
+
+  const dailyTargetSummary = calculateDailyTargetSummary();
 
   // Load tasks data with request deduplication
   const loadTasks = useCallback(async (showLoading = true) => {
@@ -300,6 +349,13 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     try {
       const response = await workerApiService.startTask(taskId, currentLocation);
       
+      // DEBUG: Log the response to see what we're getting
+      console.log('🔍 START TASK RESPONSE:', JSON.stringify(response, null, 2));
+      console.log('   success:', response.success);
+      console.log('   error:', response.error);
+      console.log('   message:', response.message);
+      console.log('   data:', response.data);
+      
       if (response.success) {
         Alert.alert(
           'Task Started',
@@ -310,19 +366,145 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         // Refresh tasks to get updated status
         loadTasks(false);
       } else {
-        Alert.alert(
-          'Cannot Start Task',
-          response.message || 'Failed to start task. Please try again.',
-          [{ text: 'OK' }]
-        );
+        // Handle specific error cases
+        if (response.error === 'ATTENDANCE_REQUIRED') {
+          Alert.alert(
+            'Attendance Required',
+            'You must check in before starting tasks. Please log your attendance first.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { 
+                text: 'Check In', 
+                onPress: () => {
+                  // Navigate to attendance screen
+                  navigation.navigate('Attendance');
+                }
+              }
+            ]
+          );
+        } else if (response.error === 'ANOTHER_TASK_ACTIVE') {
+          // Show pause and start dialog
+          Alert.alert(
+            'Another Task Active',
+            `You are working on ${response.data?.activeTaskName || 'another task'}. Pause and start this task?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { 
+                text: 'Confirm', 
+                onPress: async () => {
+                  try {
+                    // Pause the active task
+                    const pauseResponse = await workerApiService.pauseTask(response.data.activeTaskId);
+                    
+                    if (pauseResponse.success) {
+                      // Now start the new task
+                      const startResponse = await workerApiService.startTask(taskId, currentLocation);
+                      
+                      if (startResponse.success) {
+                        Alert.alert(
+                          'Task Started',
+                          'Previous task paused. New task started successfully.',
+                          [{ text: 'OK' }]
+                        );
+                        loadTasks(false);
+                      } else {
+                        Alert.alert('Error', startResponse.message || 'Failed to start task');
+                      }
+                    } else {
+                      Alert.alert('Error', pauseResponse.message || 'Failed to pause active task');
+                    }
+                  } catch (error) {
+                    console.error('Error pausing and starting task:', error);
+                    Alert.alert('Error', 'Failed to pause and start task');
+                  }
+                }
+              }
+            ]
+          );
+        } else if (response.error === 'GEOFENCE_VALIDATION_FAILED') {
+          Alert.alert(
+            'Outside Geo-Fence',
+            'You must be inside the assigned site location to start this task.',
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert(
+            'Cannot Start Task',
+            response.message || 'Failed to start task. Please try again.',
+            [{ text: 'OK' }]
+          );
+        }
       }
     } catch (err: any) {
       console.error('Error starting task:', err);
-      Alert.alert(
-        'Error',
-        err.message || 'Failed to start task. Please check your connection and try again.',
-        [{ text: 'OK' }]
-      );
+      
+      // Check if this is the ANOTHER_TASK_ACTIVE error (comes as 400 error)
+      if (err.details?.error === 'ANOTHER_TASK_ACTIVE' && err.details?.data) {
+        // Store the error data in a variable to avoid closure issues
+        const activeTaskData = err.details.data;
+        
+        // Show pause and start dialog
+        Alert.alert(
+          'Another Task Active',
+          `You are working on ${activeTaskData.activeTaskName || 'another task'}. Pause and start this task?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Confirm', 
+              onPress: async () => {
+                try {
+                  console.log('🔄 Starting pause and start flow...');
+                  console.log('   Active task ID:', activeTaskData.activeTaskId);
+                  console.log('   New task ID:', taskId);
+                  
+                  // Pause the active task
+                  console.log('⏸️ Step 1: Pausing active task...');
+                  const pauseResponse = await workerApiService.pauseTask(activeTaskData.activeTaskId);
+                  console.log('   Pause response:', pauseResponse);
+                  
+                  if (pauseResponse.success) {
+                    console.log('✅ Task paused successfully');
+                    
+                    // Now start the new task
+                    console.log('▶️ Step 2: Starting new task...');
+                    const startResponse = await workerApiService.startTask(taskId, currentLocation);
+                    console.log('   Start response:', startResponse);
+                    
+                    if (startResponse.success) {
+                      console.log('✅ New task started successfully');
+                      Alert.alert(
+                        'Task Started',
+                        'Previous task paused. New task started successfully.',
+                        [{ text: 'OK' }]
+                      );
+                      loadTasks(false);
+                    } else {
+                      console.error('❌ Failed to start new task:', startResponse.message);
+                      Alert.alert('Error', startResponse.message || 'Failed to start task');
+                    }
+                  } else {
+                    console.error('❌ Failed to pause active task:', pauseResponse.message);
+                    Alert.alert('Error', pauseResponse.message || 'Failed to pause active task');
+                  }
+                } catch (pauseError: any) {
+                  console.error('❌ Error in pause and start flow:', pauseError);
+                  console.error('   Error message:', pauseError.message);
+                  console.error('   Error details:', pauseError.details);
+                  console.error('   Error code:', pauseError.code);
+                  Alert.alert('Error', pauseError.message || 'Failed to pause and start task');
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        // Generic error handling
+        Alert.alert(
+          'Error',
+          err.message || 'Failed to start task. Please check your connection and try again.',
+          [{ text: 'OK' }]
+        );
+      }
     }
   }, [currentLocation, hasLocationPermission, isLocationEnabled, loadTasks]);
 
@@ -330,6 +512,205 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   const handleUpdateProgress = useCallback((taskId: number, progress: number) => {
     navigation.navigate('TaskProgress', { taskId, currentProgress: progress });
   }, [navigation]);
+
+  // Handle task resume
+  const handleResumeTask = useCallback(async (taskId: number) => {
+    console.log('🔄 Resuming task - Location state debug:');
+    console.log('  currentLocation:', !!currentLocation);
+    console.log('  hasLocationPermission:', hasLocationPermission);
+    console.log('  isLocationEnabled:', isLocationEnabled);
+    
+    if (!currentLocation) {
+      console.log('❌ No current location available');
+      Alert.alert(
+        'Location Required',
+        'Please enable location services to resume a task.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (!hasLocationPermission || (!isLocationEnabled && !__DEV__)) {
+      console.log('❌ Location permission or services check failed');
+      
+      // In development mode, allow if we have any location (including fallback)
+      if (__DEV__ && currentLocation) {
+        console.log('🔧 Development mode: proceeding with available location (fallback allowed)');
+        // Continue with task resume using available location
+      } else {
+        Alert.alert(
+          'Location Permission Required',
+          isLocationEnabled 
+            ? 'Location access is required to resume tasks. Please grant location permission.'
+            : 'Location services are disabled. Please enable location services in your device settings.',
+          [
+            { text: 'Cancel' },
+            { 
+              text: 'Retry', 
+              onPress: async () => {
+                console.log('🔄 Retrying location permission...');
+                try {
+                  const hasPermission = await requestLocationPermissions();
+                  if (hasPermission) {
+                    const location = await getCurrentLocation();
+                    console.log('✅ Location permission refreshed, retrying task resume');
+                    // Retry the task resume
+                    handleResumeTask(taskId);
+                  } else {
+                    Alert.alert('Permission Denied', 'Location permission is required to resume tasks.');
+                  }
+                } catch (error) {
+                  console.error('❌ Failed to refresh location:', error);
+                  Alert.alert('Error', 'Failed to get location permission. Please check your device settings.');
+                }
+              }
+            }
+          ]
+        );
+        return;
+      }
+    }
+
+    try {
+      const response = await workerApiService.resumeTask(taskId, currentLocation);
+      
+      // DEBUG: Log the response to see what we're getting
+      console.log('🔍 RESUME TASK RESPONSE:', JSON.stringify(response, null, 2));
+      console.log('   success:', response.success);
+      console.log('   error:', response.error);
+      console.log('   message:', response.message);
+      console.log('   data:', response.data);
+      
+      if (response.success) {
+        Alert.alert(
+          'Task Resumed',
+          response.message || 'Task has been resumed successfully.',
+          [{ text: 'OK' }]
+        );
+        
+        // Refresh tasks to get updated status
+        loadTasks(false);
+      } else {
+        // Handle specific error cases
+        if (response.error === 'ANOTHER_TASK_ACTIVE') {
+          // Show pause and resume dialog
+          Alert.alert(
+            'Another Task Active',
+            `You are working on ${response.data?.activeTaskName || 'another task'}. Pause and resume this task?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { 
+                text: 'Confirm', 
+                onPress: async () => {
+                  try {
+                    // Pause the active task
+                    const pauseResponse = await workerApiService.pauseTask(response.data.activeTaskId);
+                    
+                    if (pauseResponse.success) {
+                      // Now resume the new task
+                      const resumeResponse = await workerApiService.resumeTask(taskId, currentLocation);
+                      
+                      if (resumeResponse.success) {
+                        Alert.alert(
+                          'Task Resumed',
+                          'Previous task paused. Task resumed successfully.',
+                          [{ text: 'OK' }]
+                        );
+                        loadTasks(false);
+                      } else {
+                        Alert.alert('Error', resumeResponse.message || 'Failed to resume task');
+                      }
+                    } else {
+                      Alert.alert('Error', pauseResponse.message || 'Failed to pause active task');
+                    }
+                  } catch (error) {
+                    console.error('Error pausing and resuming task:', error);
+                    Alert.alert('Error', 'Failed to pause and resume task');
+                  }
+                }
+              }
+            ]
+          );
+        } else {
+          Alert.alert(
+            'Cannot Resume Task',
+            response.message || 'Failed to resume task. Please try again.',
+            [{ text: 'OK' }]
+          );
+        }
+      }
+    } catch (err: any) {
+      console.error('Error resuming task:', err);
+      
+      // Check if this is the ANOTHER_TASK_ACTIVE error (comes as 400 error)
+      if (err.details?.error === 'ANOTHER_TASK_ACTIVE' && err.details?.data) {
+        // Store the error data in a variable to avoid closure issues
+        const activeTaskData = err.details.data;
+        
+        // Show pause and resume dialog
+        Alert.alert(
+          'Another Task Active',
+          `You are working on ${activeTaskData.activeTaskName || 'another task'}. Pause and resume this task?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Confirm', 
+              onPress: async () => {
+                try {
+                  console.log('🔄 Starting pause and resume flow...');
+                  console.log('   Active task ID:', activeTaskData.activeTaskId);
+                  console.log('   New task ID:', taskId);
+                  
+                  // Pause the active task
+                  console.log('⏸️ Step 1: Pausing active task...');
+                  const pauseResponse = await workerApiService.pauseTask(activeTaskData.activeTaskId);
+                  console.log('   Pause response:', pauseResponse);
+                  
+                  if (pauseResponse.success) {
+                    console.log('✅ Task paused successfully');
+                    
+                    // Now resume the new task
+                    console.log('▶️ Step 2: Resuming new task...');
+                    const resumeResponse = await workerApiService.resumeTask(taskId, currentLocation);
+                    console.log('   Resume response:', resumeResponse);
+                    
+                    if (resumeResponse.success) {
+                      console.log('✅ New task resumed successfully');
+                      Alert.alert(
+                        'Task Resumed',
+                        'Previous task paused. Task resumed successfully.',
+                        [{ text: 'OK' }]
+                      );
+                      loadTasks(false);
+                    } else {
+                      console.error('❌ Failed to resume new task:', resumeResponse.message);
+                      Alert.alert('Error', resumeResponse.message || 'Failed to resume task');
+                    }
+                  } else {
+                    console.error('❌ Failed to pause active task:', pauseResponse.message);
+                    Alert.alert('Error', pauseResponse.message || 'Failed to pause active task');
+                  }
+                } catch (pauseError: any) {
+                  console.error('❌ Error in pause and resume flow:', pauseError);
+                  console.error('   Error message:', pauseError.message);
+                  console.error('   Error details:', pauseError.details);
+                  console.error('   Error code:', pauseError.code);
+                  Alert.alert('Error', pauseError.message || 'Failed to pause and resume task');
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        // Generic error handling
+        Alert.alert(
+          'Error',
+          err.message || 'Failed to resume task. Please check your connection and try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    }
+  }, [currentLocation, hasLocationPermission, isLocationEnabled, loadTasks, requestLocationPermissions, getCurrentLocation]);
 
   // Handle task location view
   const handleViewLocation = useCallback((task: TaskAssignment) => {
@@ -348,23 +729,124 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     return allDependenciesCompleted;
   }, [tasks]);
 
+  // Calculate distance using Haversine formula
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  };
+
+  // Check if worker is inside geofence for a task
+  const isInsideGeofence = useCallback((task: TaskAssignment): boolean => {
+    // ✅ FIX: In development mode, assume inside geofence if no location
+    if (!currentLocation) {
+      if (__DEV__) {
+        console.log('🔧 Development mode: No location available, assuming inside geofence for testing');
+        return true; // Allow in dev mode for testing
+      }
+      console.log('❌ No location available and not in dev mode');
+      return false;
+    }
+
+    // If task doesn't have geofence data, allow (backward compatibility)
+    if (!task.projectGeofence || !task.projectGeofence.latitude || !task.projectGeofence.longitude) {
+      console.log('✅ No geofence configured for task, allowing start');
+      return true;
+    }
+
+    // Calculate distance from worker to project site
+    const distance = calculateDistance(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      task.projectGeofence.latitude,
+      task.projectGeofence.longitude
+    );
+
+    // Check if within geofence radius (with some tolerance)
+    const radius = task.projectGeofence.radius || 50000; // Default 50km for testing
+    const tolerance = task.projectGeofence.allowedVariance || 5000; // Default 5km tolerance
+    
+    const isInside = distance <= (radius + tolerance);
+    console.log('📍 Geofence check:', {
+      taskName: task.taskName,
+      yourLocation: `${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}`,
+      siteLocation: `${task.projectGeofence.latitude.toFixed(6)}, ${task.projectGeofence.longitude.toFixed(6)}`,
+      distance: distance.toFixed(2) + 'm',
+      radius: radius + 'm',
+      tolerance: tolerance + 'm',
+      maxAllowed: (radius + tolerance) + 'm',
+      isInside: isInside,
+      tooFarBy: isInside ? '0m' : (distance - (radius + tolerance)).toFixed(2) + 'm'
+    });
+    
+    return isInside;
+  }, [currentLocation]);
+
+  // Handle task expand/collapse
+  const handleToggleExpand = useCallback((taskId: number) => {
+    setExpandedTaskId(prevId => prevId === taskId ? null : taskId);
+  }, []);
+
   // Render task item
   const renderTaskItem = ({ item }: { item: TaskAssignment }) => {
-    console.log('🎯 Rendering task item:', {
-      assignmentId: item.assignmentId,
-      taskName: item.taskName,
-      status: item.status,
-      canStart: canStartTask(item)
-    });
+    const insideGeofence = isInsideGeofence(item);
+    const canStartNow = canStartTask(item);
+    
+    console.log('='.repeat(80));
+    console.log('🎯 PRODUCTION MODE - RENDERING TASK ITEM');
+    console.log('='.repeat(80));
+    console.log('Task Name:', item.taskName);
+    console.log('Assignment ID:', item.assignmentId);
+    console.log('Task Status:', item.status);
+    console.log('---');
+    console.log('CAN START CHECKS:');
+    console.log('  1. canStartTask (dependencies):', canStartNow);
+    console.log('  2. isInsideGeofence:', insideGeofence);
+    console.log('  3. Has Current Location:', !!currentLocation);
+    console.log('  4. Is Development Mode:', __DEV__);
+    console.log('  5. Is Offline:', isOffline);
+    console.log('---');
+    console.log('GEOFENCE DATA:');
+    console.log('  - Has Geofence:', !!item.projectGeofence);
+    if (item.projectGeofence) {
+      console.log('  - Geofence Lat:', item.projectGeofence.latitude);
+      console.log('  - Geofence Lng:', item.projectGeofence.longitude);
+      console.log('  - Geofence Radius:', item.projectGeofence.radius);
+    }
+    console.log('---');
+    console.log('BUTTON STATE WILL BE:');
+    const willBeEnabled = canStartNow && insideGeofence && !isOffline;
+    console.log('  - Enabled:', willBeEnabled);
+    if (!willBeEnabled) {
+      console.log('  - Reason:');
+      if (isOffline) console.log('    ❌ App is offline');
+      if (!insideGeofence) console.log('    ❌ Outside geofence');
+      if (!canStartNow) console.log('    ❌ Dependencies not met');
+    }
+    console.log('='.repeat(80));
     
     return (
       <TaskCard
         task={item}
         onStartTask={handleStartTask}
         onUpdateProgress={handleUpdateProgress}
+        onResumeTask={handleResumeTask}
         onViewLocation={handleViewLocation}
-        canStart={canStartTask(item)}
+        canStart={canStartNow}
+        isInsideGeofence={insideGeofence}
         isOffline={isOffline}
+        navigation={navigation}
+        isExpanded={expandedTaskId === item.assignmentId}
+        onToggleExpand={() => handleToggleExpand(item.assignmentId)}
       />
     );
   };
@@ -437,30 +919,6 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       <StatusBar barStyle="light-content" />
       <OfflineIndicator />
       
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Today's Tasks</Text>
-          {tasks.length > 0 && tasks[0].clientName && (
-            <Text style={styles.clientName}>Client: {tasks[0].clientName}</Text>
-          )}
-        </View>
-        {tasks.length > 0 && (
-          <View style={styles.taskCount}>
-            <Text style={styles.taskCountText}>{tasks.length}</Text>
-          </View>
-        )}
-      </View>
-      
-      {/* Debug info - remove in production */}
-      {__DEV__ && (
-        <View style={styles.debugInfo}>
-          <Text style={styles.debugText}>
-            Tasks: {tasks?.length || 0} | Loading: {isLoading.toString()} | Error: {error ? 'Yes' : 'No'} | Array: {Array.isArray(tasks) ? 'Yes' : 'No'}
-          </Text>
-        </View>
-      )}
-      
       {error && !tasks.length ? (
         renderErrorState()
       ) : (
@@ -468,6 +926,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
           data={tasks || []}
           renderItem={renderTaskItem}
           keyExtractor={(item) => `task-${item.assignmentId}-${item.updatedAt}`}
+          extraData={currentLocation} // Force re-render when location changes
           contentContainerStyle={styles.listContainer}
           refreshControl={
             <RefreshControl
@@ -477,6 +936,154 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
               colors={['#2196F3']}
               tintColor="#2196F3"
             />
+          }
+          ListHeaderComponent={
+            <>
+              {/* Header */}
+              <View style={styles.header}>
+                <View style={styles.headerContent}>
+                  <Text style={styles.headerTitle} numberOfLines={1}>👷 TODAY'S TASKS</Text>
+                  <Text style={styles.headerDate} numberOfLines={1}>
+                    Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </Text>
+                  <Text style={styles.headerTaskCount} numberOfLines={1}>
+                    Total Tasks Assigned: {tasks?.length || 0}
+                  </Text>
+                </View>
+              </View>
+              
+              {/* Debug info - remove in production */}
+              {__DEV__ && (
+                <View style={styles.debugInfo}>
+                  <Text style={styles.debugText}>
+                    Tasks: {tasks?.length || 0} | Loading: {isLoading.toString()} | Error: {error ? 'Yes' : 'No'} | Array: {Array.isArray(tasks) ? 'Yes' : 'No'}
+                  </Text>
+                </View>
+              )}
+              
+              {/* LOCATION COMPARISON - Show your location vs project locations */}
+              <View style={styles.locationComparisonContainer}>
+                <Text style={styles.locationComparisonTitle}>📍 LOCATION STATUS</Text>
+                
+                {/* Your Current Location */}
+                <View style={styles.locationSection}>
+                  <Text style={styles.locationSectionTitle}>Your Current Location:</Text>
+                  {currentLocation ? (
+                    <>
+                      <Text style={styles.locationText}>
+                        📍 Lat: {currentLocation.latitude.toFixed(6)}
+                      </Text>
+                      <Text style={styles.locationText}>
+                        📍 Lng: {currentLocation.longitude.toFixed(6)}
+                      </Text>
+                      <Text style={styles.locationText}>
+                        🎯 Accuracy: {currentLocation.accuracy?.toFixed(0)}m
+                      </Text>
+                      <View style={styles.statusBadge}>
+                        <Text style={styles.statusBadgeText}>✅ Location Available</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={[styles.statusBadge, styles.statusBadgeError]}>
+                      <Text style={[styles.statusBadgeText, styles.statusBadgeTextError]}>
+                        ⚠️ NO LOCATION - Cannot Start Tasks
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Project Locations */}
+                {tasks && tasks.length > 0 && (
+                  <View style={styles.locationSection}>
+                    <Text style={styles.locationSectionTitle}>Project Locations:</Text>
+                    {tasks.map((task, index) => {
+                      if (task.projectGeofence) {
+                        const distance = currentLocation 
+                          ? calculateDistance(
+                              currentLocation.latitude,
+                              currentLocation.longitude,
+                              task.projectGeofence.latitude,
+                              task.projectGeofence.longitude
+                            )
+                          : null;
+                        
+                        const radius = task.projectGeofence.radius || 50000; // Default to 50km for testing
+                        const tolerance = task.projectGeofence.allowedVariance || 5000; // Default to 5km tolerance
+                        const isInside = distance !== null && distance <= (radius + tolerance);
+                        
+                        return (
+                          <View key={`location-${task.assignmentId}`} style={styles.projectLocationCard}>
+                            <Text style={styles.projectLocationName}>
+                              🏗️ {task.projectName || `Project ${task.projectId}`}
+                            </Text>
+                            <Text style={styles.projectLocationCoords}>
+                              📍 Lat: {task.projectGeofence.latitude.toFixed(6)}
+                            </Text>
+                            <Text style={styles.projectLocationCoords}>
+                              📍 Lng: {task.projectGeofence.longitude.toFixed(6)}
+                            </Text>
+                            <Text style={styles.projectLocationCoords}>
+                              🔵 Radius: {radius}m (±{tolerance}m tolerance)
+                            </Text>
+                            
+                            {distance !== null ? (
+                              <>
+                                <View style={styles.distanceRow}>
+                                  <Text style={[
+                                    styles.distanceText,
+                                    isInside ? styles.distanceTextInside : styles.distanceTextOutside
+                                  ]}>
+                                    📏 Distance: {distance.toFixed(0)}m
+                                  </Text>
+                                  <View style={[
+                                    styles.distanceBadge,
+                                    isInside ? styles.distanceBadgeInside : styles.distanceBadgeOutside
+                                  ]}>
+                                    <Text style={[
+                                      styles.distanceBadgeText,
+                                      isInside ? styles.distanceBadgeTextInside : styles.distanceBadgeTextOutside
+                                    ]}>
+                                      {isInside ? '✅ INSIDE' : '❌ OUTSIDE'}
+                                    </Text>
+                                  </View>
+                                </View>
+                                {!isInside && (
+                                  <Text style={styles.distanceWarning}>
+                                    ⚠️ You are {(distance - (radius + tolerance)).toFixed(0)}m too far
+                                  </Text>
+                                )}
+                              </>
+                            ) : (
+                              <Text style={styles.distanceWarning}>
+                                ⚠️ Cannot calculate distance - no location
+                              </Text>
+                            )}
+                          </View>
+                        );
+                      }
+                      return null;
+                    })}
+                  </View>
+                )}
+
+                {/* Permission Status */}
+                <View style={styles.permissionStatus}>
+                  <Text style={styles.permissionStatusTitle}>Permission Status:</Text>
+                  <View style={styles.permissionRow}>
+                    <Text style={styles.permissionLabel}>Location Permission:</Text>
+                    <Text style={hasLocationPermission ? styles.permissionYes : styles.permissionNo}>
+                      {hasLocationPermission ? '✅ Granted' : '❌ Denied'}
+                    </Text>
+                  </View>
+                  <View style={styles.permissionRow}>
+                    <Text style={styles.permissionLabel}>Location Services:</Text>
+                    <Text style={isLocationEnabled ? styles.permissionYes : styles.permissionNo}>
+                      {isLocationEnabled ? '✅ Enabled' : '❌ Disabled'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </>
           }
           ListEmptyComponent={renderEmptyState}
           showsVerticalScrollIndicator={false}
@@ -498,25 +1105,83 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    marginBottom: 0,
   },
   headerContent: {
-    flex: 1,
+    width: '100%',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 8,
+    backgroundColor: 'transparent',
+  },
+  headerDate: {
+    fontSize: 15,
+    color: '#000000',
+    marginBottom: 4,
+    fontWeight: '500',
+    backgroundColor: 'transparent',
+  },
+  headerTaskCount: {
+    fontSize: 15,
+    color: '#000000',
+    marginBottom: 4,
+    fontWeight: '500',
+    backgroundColor: 'transparent',
+  },
+  targetSummaryContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  targetSummaryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1565C0',
+    marginBottom: 8,
+  },
+  targetSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  targetSummaryText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#333333',
+    color: '#000000',
+    minWidth: 100,
+  },
+  targetProgressMini: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginHorizontal: 8,
+  },
+  targetProgressMiniFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  targetPercentText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1565C0',
+    minWidth: 40,
+    textAlign: 'right',
   },
   clientName: {
     fontSize: 14,
     color: '#666666',
-    marginTop: 2,
+    marginTop: 4,
     fontStyle: 'italic',
   },
   taskCount: {
@@ -533,7 +1198,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   listContainer: {
-    padding: 16,
     paddingBottom: 32,
   },
   emptyState: {
@@ -619,7 +1283,8 @@ const styles = StyleSheet.create({
   debugInfo: {
     backgroundColor: '#FFF3CD',
     padding: 8,
-    margin: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
     borderRadius: 4,
     borderLeftWidth: 4,
     borderLeftColor: '#FFC107',
@@ -628,6 +1293,172 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#856404',
     fontFamily: 'monospace',
+  },
+  locationComparisonContainer: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#2196F3',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  locationComparisonTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1565C0',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  locationSection: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  locationSectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#424242',
+    marginBottom: 12,
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#000000',
+    marginBottom: 6,
+    fontFamily: 'monospace',
+  },
+  statusBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  statusBadgeError: {
+    backgroundColor: '#F44336',
+  },
+  statusBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  statusBadgeTextError: {
+    color: '#FFFFFF',
+  },
+  projectLocationCard: {
+    backgroundColor: '#F5F5F5',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  projectLocationName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  projectLocationCoords: {
+    fontSize: 13,
+    color: '#424242',
+    marginBottom: 4,
+    fontFamily: 'monospace',
+  },
+  distanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  distanceText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  distanceTextInside: {
+    color: '#2E7D32',
+  },
+  distanceTextOutside: {
+    color: '#D32F2F',
+  },
+  distanceBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  distanceBadgeInside: {
+    backgroundColor: '#4CAF50',
+  },
+  distanceBadgeOutside: {
+    backgroundColor: '#F44336',
+  },
+  distanceBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  distanceBadgeTextInside: {
+    color: '#FFFFFF',
+  },
+  distanceBadgeTextOutside: {
+    color: '#FFFFFF',
+  },
+  distanceWarning: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#D32F2F',
+    marginTop: 6,
+  },
+  permissionStatus: {
+    backgroundColor: '#E3F2FD',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  permissionStatusTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1565C0',
+    marginBottom: 8,
+  },
+  permissionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  permissionLabel: {
+    fontSize: 13,
+    color: '#424242',
+    fontWeight: '500',
+  },
+  permissionYes: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2E7D32',
+  },
+  permissionNo: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#D32F2F',
+  },
+  locationDebugTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1565C0',
+    marginBottom: 8,
+  },
+  locationDebugText: {
+    fontSize: 13,
+    color: '#0D47A1',
+    fontFamily: 'monospace',
+    marginBottom: 4,
   },
 });
 

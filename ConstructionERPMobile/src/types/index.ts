@@ -345,12 +345,15 @@ export interface TaskAssignment {
   assignmentId: number;
   projectId: number;
   projectName?: string; // Added project name field
+  projectCode?: string; // Project code
   clientName?: string; // Added client name field
+  siteName?: string; // Site name
+  natureOfWork?: string; // Nature of work
   taskName: string;
   description: string;
   dependencies: number[];
   sequence: number;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
   location: GeoLocation;
   estimatedHours: number;
   actualHours?: number;
@@ -363,6 +366,12 @@ export interface TaskAssignment {
   workArea?: string;
   floor?: string;
   zone?: string;
+  // Worker trade and activity information
+  trade?: string;
+  activity?: string;
+  workType?: string;
+  requiredTools?: string[];
+  requiredMaterials?: string[];
   // Progress information
   progress?: {
     percentage: number;
@@ -382,7 +391,23 @@ export interface TaskAssignment {
     quantity: number;
     unit: string;
     targetCompletion: number;
+    // Enhanced daily target fields
+    targetType?: string; // e.g., "Quantity Based", "Time Based", "Area Based"
+    areaLevel?: string; // e.g., "Tower A – Level 5", "Main Corridor – Ground Floor"
+    startTime?: string; // e.g., "8:00 AM"
+    expectedFinish?: string; // e.g., "5:00 PM"
+    progressToday?: {
+      completed: number;
+      total: number;
+      percentage: number;
+    };
   };
+  // Actual output achieved by worker
+  actualOutput?: number;
+  // Supervisor information
+  supervisorName?: string;
+  supervisorContact?: string;
+  supervisorEmail?: string;
   // Supervisor instructions with attachments
   supervisorInstructions?: string;
   instructionAttachments?: Array<{
@@ -401,6 +426,8 @@ export interface TaskAssignment {
     latitude: number;
     longitude: number;
     radius: number;
+    strictMode?: boolean;
+    allowedVariance?: number;
   };
 }
 
@@ -1358,4 +1385,222 @@ export interface TaskCardProps {
   onStartTask: (taskId: number) => void;
   onUpdateProgress: (taskId: number, progress: number) => void;
   canStart: boolean;
+}
+
+
+// ============================================================================
+// NEW TYPES FOR TODAY'S TASK CRITICAL FEATURES
+// ============================================================================
+
+// Instruction Read Confirmation Types
+export interface InstructionReadStatus {
+  hasRead: boolean;
+  readAt: Date;
+  acknowledged: boolean;
+  acknowledgedAt: Date | null;
+}
+
+// Target Calculation Types
+export interface TargetCalculation {
+  description: string;
+  quantity: number;
+  unit: string;
+  targetCompletion: number;
+  // Target calculation transparency
+  calculationMethod: string;
+  budgetedManDays: number | null;
+  totalRequiredOutput: number | null;
+  derivedFrom: string;
+}
+
+// Performance Metrics Types
+export interface PerformanceMetrics {
+  worker: {
+    id: number;
+    name: string;
+    trade: string;
+    role: string;
+  };
+  period: {
+    startDate: Date;
+    endDate: Date;
+    days: number;
+  };
+  metrics: {
+    totalTasks: number;
+    completedTasks: number;
+    inProgressTasks: number;
+    queuedTasks: number;
+    completionRate: number;
+    averageProgress: number;
+    onTimeRate: number;
+  };
+  comparison: {
+    teamAverage: number;
+    difference: number;
+    performanceTrend: 'above_average' | 'below_average' | 'average';
+  };
+  tradeMetrics: {
+    trade: string;
+    totalTasksInTrade: number;
+    completionRate: number;
+    averageProgress: number;
+    ranking: number | null;
+  };
+  achievements: Achievement[];
+}
+
+export interface Achievement {
+  type: string;
+  title: string;
+  description: string;
+  earnedAt: Date;
+}
+
+// Enhanced Project Type (extends existing Project interface)
+export interface EnhancedProject extends Project {
+  code: string;
+  siteName: string;
+  natureOfWork: string;
+  geofence: {
+    center: GeoLocation;
+    radius: number;
+    strictMode: boolean;
+    allowedVariance: number;
+  };
+}
+
+// Enhanced Worker Type
+export interface EnhancedWorker {
+  id: number;
+  name: string;
+  role: string;
+  trade: string;
+  specializations: string[];
+  checkInStatus: string;
+  currentLocation: {
+    latitude: number;
+    longitude: number;
+    insideGeofence: boolean;
+    lastUpdated: string | null;
+  };
+}
+
+// Enhanced Task Assignment (extends existing TaskAssignment)
+export interface EnhancedTaskAssignment extends TaskAssignment {
+  dailyTarget: TargetCalculation;
+  instructionReadStatus: InstructionReadStatus | null;
+  projectCode: string;
+  projectName: string;
+  clientName: string;
+  natureOfWork: string;
+}
+
+// Map Screen Props
+export interface TaskLocationMapProps {
+  task: EnhancedTaskAssignment;
+  projectGeofence: {
+    latitude: number;
+    longitude: number;
+    radius: number;
+    strictMode: boolean;
+    allowedVariance: number;
+  };
+  workerLocation: GeoLocation | null;
+  onNavigate: () => void;
+  onClose: () => void;
+}
+
+// Target Calculation Modal Props
+export interface TargetCalculationModalProps {
+  visible: boolean;
+  target: TargetCalculation;
+  onClose: () => void;
+}
+
+// Instruction Acknowledgment Props
+export interface InstructionAcknowledgmentProps {
+  assignmentId: number;
+  instructions: string;
+  attachments: Array<{
+    type: string;
+    filename: string;
+    url: string;
+  }>;
+  readStatus: InstructionReadStatus | null;
+  onRead: () => Promise<void>;
+  onAcknowledge: (notes?: string) => Promise<void>;
+  isOffline: boolean;
+}
+
+// Performance Metrics Card Props
+export interface PerformanceMetricsCardProps {
+  metrics: PerformanceMetrics;
+  onViewDetails: () => void;
+}
+
+// Device Info Type
+export interface DeviceInfo {
+  platform: string;
+  version: string | number;
+  model?: string;
+  manufacturer?: string;
+}
+
+// API Request/Response Types for New Endpoints
+export interface MarkInstructionsReadRequest {
+  location?: GeoLocation;
+  deviceInfo?: DeviceInfo;
+}
+
+export interface MarkInstructionsReadResponse {
+  success: boolean;
+  message: string;
+  data: {
+    readAt: Date;
+    acknowledged: boolean;
+  };
+}
+
+export interface AcknowledgeInstructionsRequest {
+  notes?: string;
+  location?: GeoLocation;
+  deviceInfo?: DeviceInfo;
+}
+
+export interface AcknowledgeInstructionsResponse {
+  success: boolean;
+  message: string;
+  data: {
+    readAt: Date;
+    acknowledged: boolean;
+    acknowledgedAt: Date;
+  };
+}
+
+export interface GetPerformanceMetricsResponse {
+  success: boolean;
+  data: PerformanceMetrics;
+}
+
+// Enhanced Dashboard API Response (extends existing)
+export interface EnhancedDashboardApiResponse extends DashboardApiResponse {
+  project: {
+    id: number;
+    name: string;
+    code: string;
+    siteName: string;
+    clientName: string;
+    location: string;
+    natureOfWork: string;
+    geofence: {
+      latitude: number;
+      longitude: number;
+      radius: number;
+      strictMode: boolean;
+      allowedVariance: number;
+    };
+  };
+  worker: EnhancedWorker;
+  tasks: EnhancedTaskAssignment[];
 }

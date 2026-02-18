@@ -124,6 +124,38 @@ const WorkerDashboard: React.FC = () => {
   const navigation = useNavigation();
   const { handleError, clearError } = useErrorHandler();
 
+  // Get time-based greeting
+  const getGreeting = (): string => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'GOOD MORNING';
+    if (hour < 18) return 'GOOD AFTERNOON';
+    return 'GOOD EVENING';
+  };
+
+  // Get employee ID - format as W-XXXX
+  const getEmployeeId = (): string => {
+    // Try to get employee ID from user object or format user ID
+    const userId = state.user?.id;
+    if (!userId) return 'N/A';
+    
+    // Format as W-XXXX (e.g., W-0107 for user ID 107)
+    return `W-${userId.toString().padStart(4, '0')}`;
+  };
+
+  // Format current date with day of week
+  const getCurrentDateFormatted = (): string => {
+    const now = new Date();
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const dayName = days[now.getDay()];
+    const day = now.getDate();
+    const month = months[now.getMonth()];
+    const year = now.getFullYear();
+    
+    return `${dayName}, ${day} ${month} ${year}`;
+  };
+
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
@@ -220,19 +252,35 @@ const WorkerDashboard: React.FC = () => {
         }
       >
         <ConstructionCard
-          title="Welcome back!"
-          variant="default"
+          variant="elevated"
           style={styles.welcomeCard}
+          padding="large"
         >
-          <Text style={styles.welcomeText}>
-            Hello {state.user?.name || 'Worker'}
-          </Text>
-          <Text style={styles.companyText}>
-            Company: {state.company?.name || 'N/A'}
-          </Text>
-          <Text style={styles.roleText}>
-            Role: {state.user?.role || state.company?.role || 'Worker'}
-          </Text>
+          <View style={styles.welcomeCardContent}>
+            <View style={styles.greetingRow}>
+              <Text style={styles.emojiIcon}>👷</Text>
+              <View style={styles.greetingTextContainer}>
+                <Text style={styles.greetingText}>
+                  {getGreeting()}
+                </Text>
+                <Text style={styles.workerNameText}>
+                  {(state.user?.name || 'WORKER').toUpperCase()}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.divider} />
+            
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Employee ID:</Text>
+              <Text style={styles.infoValue}>{getEmployeeId()}</Text>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Today:</Text>
+              <Text style={styles.infoValue}>{getCurrentDateFormatted()}</Text>
+            </View>
+          </View>
         </ConstructionCard>
 
         {error && (
@@ -249,13 +297,6 @@ const WorkerDashboard: React.FC = () => {
           onViewProfile={handleViewProfile}
         />
 
-        <WorkInstructionsCard
-          instructions={mockWorkInstructions}
-          isLoading={isLoading}
-          onMarkAsRead={handleMarkInstructionAsRead}
-          onViewAll={handleViewAllInstructions}
-        />
-
         <ProjectInfoCard 
           project={data.project} 
           isLoading={isLoading} 
@@ -265,6 +306,13 @@ const WorkerDashboard: React.FC = () => {
           attendanceStatus={data.attendanceStatus}
           workingHours={data.workingHours}
           isLoading={isLoading}
+        />
+
+        <WorkInstructionsCard
+          instructions={mockWorkInstructions}
+          isLoading={isLoading}
+          onMarkAsRead={handleMarkInstructionAsRead}
+          onViewAll={handleViewAllInstructions}
         />
 
         {/* Daily Summary Card */}
@@ -311,64 +359,6 @@ const WorkerDashboard: React.FC = () => {
             )}
           </ConstructionCard>
         ) : null}
-
-        {/* Tools and Materials Card */}
-        {data.toolsAndMaterials && (
-          <ConstructionCard
-            title="Tools & Materials"
-            variant="default"
-            style={styles.resourcesCard}
-          >
-            {data.toolsAndMaterials.tools && data.toolsAndMaterials.tools.length > 0 && (
-              <View style={styles.resourceSection}>
-                <Text style={styles.resourceSectionTitle}>Tools</Text>
-                {data.toolsAndMaterials.tools.map((tool) => (
-                  <View key={tool.id} style={styles.resourceItem}>
-                    <Text style={styles.resourceName}>{tool.name}</Text>
-                    <Text style={styles.resourceDetails}>
-                      {tool.quantity} {tool.unit} - {tool.location}
-                    </Text>
-                    <View style={[styles.statusIndicator, tool.allocated ? styles.allocated : styles.notAllocated]}>
-                      <Text style={styles.statusText}>
-                        {tool.allocated ? 'Allocated' : 'Not Allocated'}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-            
-            {data.toolsAndMaterials.materials && data.toolsAndMaterials.materials.length > 0 && (
-              <View style={styles.resourceSection}>
-                <Text style={styles.resourceSectionTitle}>Materials</Text>
-                {data.toolsAndMaterials.materials.map((material) => (
-                  <View key={material.id} style={styles.resourceItem}>
-                    <Text style={styles.resourceName}>{material.name}</Text>
-                    <Text style={styles.resourceDetails}>
-                      {material.allocated}/{material.quantity} {material.unit} - {material.location}
-                    </Text>
-                    <Text style={styles.resourceUsage}>
-                      Used: {material.used} | Remaining: {material.remaining}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {(!data.toolsAndMaterials.tools || data.toolsAndMaterials.tools.length === 0) && 
-             (!data.toolsAndMaterials.materials || data.toolsAndMaterials.materials.length === 0) && (
-              <View style={styles.emptyStateContainer}>
-                <Text style={styles.emptyStateIcon}>🔧</Text>
-                <Text style={styles.emptyStateTitle}>No Tools or Materials Assigned</Text>
-                <Text style={styles.emptyStateMessage}>
-                  No tools or materials have been allocated for today's work.
-                </Text>
-              </View>
-            )}
-          </ConstructionCard>
-        )}
-
-        {/* Notifications removed - notification features not needed */}
 
         <View style={styles.actionsGrid}>
           <TouchableOpacity style={styles.actionCard} onPress={handleNavigateToTasks}>
@@ -444,21 +434,63 @@ const styles = StyleSheet.create({
   },
   welcomeCard: {
     marginBottom: ConstructionTheme.spacing.lg,
+    backgroundColor: ConstructionTheme.colors.primaryContainer,
+    borderLeftWidth: 6,
+    borderLeftColor: ConstructionTheme.colors.primary,
   },
-  welcomeText: {
-    ...ConstructionTheme.typography.bodyLarge,
-    color: ConstructionTheme.colors.onSurfaceVariant,
+  welcomeCardContent: {
+    gap: ConstructionTheme.spacing.md,
+  },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ConstructionTheme.spacing.md,
+  },
+  emojiIcon: {
+    fontSize: 48,
+    lineHeight: 56,
+  },
+  greetingTextContainer: {
+    flex: 1,
+  },
+  greetingText: {
+    ...ConstructionTheme.typography.labelLarge,
+    color: ConstructionTheme.colors.onPrimaryContainer,
+    fontWeight: '700',
+    letterSpacing: 1,
+    fontSize: 14,
     marginBottom: 4,
   },
-  companyText: {
-    ...ConstructionTheme.typography.bodyMedium,
-    color: ConstructionTheme.colors.onSurfaceVariant,
-    marginBottom: 4,
-  },
-  roleText: {
-    ...ConstructionTheme.typography.bodyMedium,
-    color: ConstructionTheme.colors.primary,
+  workerNameText: {
+    ...ConstructionTheme.typography.headlineMedium,
+    color: ConstructionTheme.colors.onPrimaryContainer,
     fontWeight: 'bold',
+    fontSize: 22,
+    letterSpacing: 0.5,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: ConstructionTheme.colors.outline,
+    opacity: 0.3,
+    marginVertical: ConstructionTheme.spacing.xs,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: ConstructionTheme.spacing.xs,
+  },
+  infoLabel: {
+    ...ConstructionTheme.typography.bodyMedium,
+    color: ConstructionTheme.colors.onPrimaryContainer,
+    opacity: 0.8,
+    fontWeight: '500',
+  },
+  infoValue: {
+    ...ConstructionTheme.typography.bodyLarge,
+    color: ConstructionTheme.colors.onPrimaryContainer,
+    fontWeight: '700',
+    fontSize: 16,
   },
   errorCard: {
     marginBottom: ConstructionTheme.spacing.md,
@@ -536,57 +568,6 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurfaceVariant,
     textAlign: 'center',
-  },
-  resourcesCard: {
-    marginBottom: ConstructionTheme.spacing.lg,
-  },
-  resourceSection: {
-    marginBottom: ConstructionTheme.spacing.md,
-  },
-  resourceSectionTitle: {
-    ...ConstructionTheme.typography.labelLarge,
-    color: ConstructionTheme.colors.onSurface,
-    marginBottom: ConstructionTheme.spacing.sm,
-    fontWeight: 'bold',
-  },
-  resourceItem: {
-    backgroundColor: ConstructionTheme.colors.surfaceVariant,
-    padding: ConstructionTheme.spacing.sm,
-    borderRadius: ConstructionTheme.borderRadius.sm,
-    marginBottom: ConstructionTheme.spacing.xs,
-  },
-  resourceName: {
-    ...ConstructionTheme.typography.bodyMedium,
-    color: ConstructionTheme.colors.onSurface,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  resourceDetails: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: ConstructionTheme.colors.onSurfaceVariant,
-    marginBottom: 2,
-  },
-  resourceUsage: {
-    ...ConstructionTheme.typography.bodySmall,
-    color: ConstructionTheme.colors.onSurfaceVariant,
-    fontStyle: 'italic',
-  },
-  statusIndicator: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  allocated: {
-    backgroundColor: '#E8F5E8',
-  },
-  notAllocated: {
-    backgroundColor: '#FFEBEE',
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: 'bold',
   },
   emptyStateContainer: {
     alignItems: 'center',

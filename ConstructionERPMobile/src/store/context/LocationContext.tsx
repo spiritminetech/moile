@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { GeoLocation, LocationState, GeofenceValidation, GPSAccuracyWarning } from '../../types';
 import { locationService } from '../../services/location/LocationService';
+import { GPS_CONFIG } from '../../utils/constants';
 
 // Location Actions
 type LocationAction =
@@ -118,16 +119,32 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
       try {
         const location = await locationService.getCurrentLocation(true); // Always allow fallback
         dispatch({ type: 'SET_LOCATION', payload: location });
-        console.log('✅ Location initialized successfully');
+        console.log('✅ Location initialized successfully:', location);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to get location';
         console.warn('⚠️ Location initialization warning:', errorMessage);
-        // Don't set error state for permission issues - fallback should have been used
-        if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
-          dispatch({ 
-            type: 'SET_LOCATION_ERROR', 
-            payload: errorMessage
-          });
+        
+        // ✅ FIX: In development mode, force fallback location if initialization fails
+        if (__DEV__) {
+          const fallbackLocation: GeoLocation = {
+            latitude: GPS_CONFIG.FALLBACK_COORDINATES.latitude,
+            longitude: GPS_CONFIG.FALLBACK_COORDINATES.longitude,
+            accuracy: GPS_CONFIG.FALLBACK_COORDINATES.accuracy,
+            timestamp: new Date(),
+            altitude: undefined,
+            heading: undefined,
+            speed: undefined,
+          };
+          dispatch({ type: 'SET_LOCATION', payload: fallbackLocation });
+          console.log('🔧 Development mode: Forced fallback location after error:', fallbackLocation);
+        } else {
+          // Don't set error state for permission issues - fallback should have been used
+          if (!errorMessage.includes('permission') && !errorMessage.includes('Not authorized')) {
+            dispatch({ 
+              type: 'SET_LOCATION_ERROR', 
+              payload: errorMessage
+            });
+          }
         }
       }
     } catch (error) {

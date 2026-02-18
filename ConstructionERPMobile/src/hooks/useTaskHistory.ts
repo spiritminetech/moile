@@ -58,6 +58,7 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
         
         console.log('📋 Raw tasks from API:', tasksArray.length);
         console.log('📋 Sample raw task:', tasksArray[0]);
+        console.log('📋 Sample raw task projectGeofence:', tasksArray[0]?.projectGeofence);
         
         // Sort tasks by completion date or last updated date (most recent first)
         const sortedTasks = tasksArray.sort((a: any, b: any) => {
@@ -67,23 +68,32 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
         });
         
         // Map API response to TaskAssignment interface
-        const mappedTasks: TaskAssignment[] = sortedTasks.map((task: any) => ({
-          assignmentId: task.assignmentId,
-          projectId: task.projectId || 1,
-          projectName: task.projectName || `Project ${task.projectId || 1}`,
-          taskName: task.taskName,
-          description: task.taskType || task.description || '',
-          dependencies: [],
-          sequence: 0,
-          status: task.status as 'pending' | 'in_progress' | 'completed' | 'cancelled',
-          location: { latitude: 0, longitude: 0, accuracy: 0, timestamp: new Date() },
-          estimatedHours: 8,
-          actualHours: task.timeSpent ? task.timeSpent / 60 : undefined, // Convert minutes to hours
-          createdAt: task.date,
-          updatedAt: task.date,
-          startedAt: task.startTime,
-          completedAt: task.completedAt,
-        }));
+        const mappedTasks: TaskAssignment[] = sortedTasks.map((task: any) => {
+          console.log(`🗺️ Mapping task ${task.assignmentId}:`, {
+            hasProjectGeofence: !!task.projectGeofence,
+            projectGeofence: task.projectGeofence
+          });
+          
+          return {
+            assignmentId: task.assignmentId,
+            projectId: task.projectId || 1,
+            projectName: task.projectName || `Project ${task.projectId || 1}`,
+            projectCode: task.projectCode || 'N/A',
+            taskName: task.taskName,
+            description: task.taskType || task.description || '',
+            dependencies: [],
+            sequence: task.sequence || 0,
+            status: task.status as 'pending' | 'in_progress' | 'completed' | 'cancelled',
+            location: { latitude: 0, longitude: 0, accuracy: 0, timestamp: new Date() },
+            estimatedHours: 8,
+            actualHours: task.timeSpent ? task.timeSpent / 60 : undefined, // Convert minutes to hours
+            createdAt: task.date,
+            updatedAt: task.date,
+            startedAt: task.startTime,
+            completedAt: task.completedAt,
+            projectGeofence: task.projectGeofence || null,
+          };
+        });
         
         console.log('✅ Mapped tasks successfully:', mappedTasks.length);
         console.log('📋 Sample mapped task:', mappedTasks[0]);

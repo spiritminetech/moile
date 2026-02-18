@@ -29,34 +29,38 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
   const { currentLocation, isLocationEnabled, hasLocationPermission } = locationState;
   
   const [distance, setDistance] = useState<number | null>(null);
+  
+  // Use projectGeofence if available, fallback to location
+  const taskLocation = task.projectGeofence || task.location;
+  
   const [mapRegion, setMapRegion] = useState({
-    latitude: task.location?.latitude || 1.3521,
-    longitude: task.location?.longitude || 103.8198,
+    latitude: taskLocation?.latitude || 1.3521,
+    longitude: taskLocation?.longitude || 103.8198,
     latitudeDelta: 0.01,
     longitudeDelta: 0.01,
   });
 
   // Calculate distance between current location and task location
   useEffect(() => {
-    if (currentLocation && task.location) {
+    if (currentLocation && taskLocation) {
       const calculatedDistance = calculateDistance(
         currentLocation.latitude,
         currentLocation.longitude,
-        task.location.latitude,
-        task.location.longitude
+        taskLocation.latitude,
+        taskLocation.longitude
       );
       setDistance(calculatedDistance);
     }
-  }, [currentLocation, task.location]);
+  }, [currentLocation, taskLocation]);
 
   // Update map region when current location changes
   useEffect(() => {
-    if (currentLocation && task.location) {
+    if (currentLocation && taskLocation) {
       // Calculate bounds to show both current location and task location
-      const minLat = Math.min(currentLocation.latitude, task.location.latitude);
-      const maxLat = Math.max(currentLocation.latitude, task.location.latitude);
-      const minLng = Math.min(currentLocation.longitude, task.location.longitude);
-      const maxLng = Math.max(currentLocation.longitude, task.location.longitude);
+      const minLat = Math.min(currentLocation.latitude, taskLocation.latitude);
+      const maxLat = Math.max(currentLocation.latitude, taskLocation.latitude);
+      const minLng = Math.min(currentLocation.longitude, taskLocation.longitude);
+      const maxLng = Math.max(currentLocation.longitude, taskLocation.longitude);
       
       const latDelta = Math.max(0.01, (maxLat - minLat) * 1.5);
       const lngDelta = Math.max(0.01, (maxLng - minLng) * 1.5);
@@ -68,7 +72,7 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
         longitudeDelta: lngDelta,
       });
     }
-  }, [currentLocation, task.location]);
+  }, [currentLocation, taskLocation]);
 
   // Calculate distance using Haversine formula
   const calculateDistance = (
@@ -94,7 +98,7 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
 
   // Handle navigation to task location
   const handleNavigateToLocation = () => {
-    if (!task.location) {
+    if (!taskLocation) {
       Alert.alert(
         'Location Not Available',
         'Task location information is not available.',
@@ -257,19 +261,19 @@ const TaskLocationScreen = ({ navigation, route }: any) => {
         <View style={styles.locationContainer}>
           <Text style={styles.sectionTitle}>Location Details</Text>
           
-          {task.location ? (
+          {taskLocation ? (
             <>
               <View style={styles.coordinatesContainer}>
                 <Text style={styles.coordinatesLabel}>Coordinates:</Text>
                 <Text style={styles.coordinatesText}>
-                  {task.location.latitude.toFixed(6)}, {task.location.longitude.toFixed(6)}
+                  {taskLocation.latitude.toFixed(6)}, {taskLocation.longitude.toFixed(6)}
                 </Text>
               </View>
 
-              {task.location.altitude && (
+              {taskLocation.altitude && (
                 <View style={styles.altitudeContainer}>
                   <Text style={styles.altitudeLabel}>Altitude:</Text>
-                  <Text style={styles.altitudeText}>{Math.round(task.location.altitude)}m</Text>
+                  <Text style={styles.altitudeText}>{Math.round(taskLocation.altitude)}m</Text>
                 </View>
               )}
 

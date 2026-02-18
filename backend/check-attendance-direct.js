@@ -1,88 +1,71 @@
-/**
- * Check attendance collection directly
- */
-
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import Attendance from './src/modules/attendance/Attendance.js';
 
 dotenv.config();
 
-async function checkAttendance() {
+async function checkAttendanceDirect() {
   try {
-    console.log('🔌 Connecting to MongoDB...');
     await mongoose.connect(process.env.MONGODB_URI);
-    console.log('✅ Connected\n');
+    console.log('✅ Connected to MongoDB\n');
 
-    console.log('Checking attendance for employeeId: 104, projectId: 201');
-    console.log('═'.repeat(60));
+    // Get the attendance collection directly
+    const db = mongoose.connection.db;
+    const attendanceCollection = db.collection('attendances');
 
-    // Direct query
-    const attendance = await Attendance.findOne({
-      employeeId: 104,
-      projectId: 201
-    }).lean();
+    // Check all attendance records for employee 2
+    const allAttendance = await attendanceCollection.find({ employeeId: 2 })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
 
-    if (attendance) {
-      console.log('✅ Attendance found!');
-      console.log(JSON.stringify(attendance, null, 2));
-      console.log('\nField types:');
-      console.log('  employeeId type:', typeof attendance.employeeId, '- value:', attendance.employeeId);
-      console.log('  projectId type:', typeof attendance.projectId, '- value:', attendance.projectId);
-      console.log('  checkIn type:', typeof attendance.checkIn, '- value:', attendance.checkIn);
-    } else {
-      console.log('❌ No attendance found');
-      
-      // Try to find any attendance for this employee
-      const anyAttendance = await Attendance.findOne({ employeeId: 104 }).lean();
-      if (anyAttendance) {
-        console.log('\n⚠️  Found attendance for employee 104 but different projectId:');
-        console.log('  projectId:', anyAttendance.projectId);
-      }
-      
-      // Try to find any attendance for this project
-      const projectAttendance = await Attendance.findOne({ projectId: 201 }).lean();
-      if (projectAttendance) {
-        console.log('\n⚠️  Found attendance for project 201 but different employeeId:');
-        console.log('  employeeId:', projectAttendance.employeeId);
-      }
+    console.log(`📊 Found ${allAttendance.length} attendance records for Employee 2:\n`);
+
+    allAttendance.forEach((record, index) => {
+      console.log(`${index + 1}. Attendance ID: ${record.id}`);
+      console.log(`   Date: ${record.date}`);
+      console.log(`   Status: ${record.status}`);
+      console.log(`   Check-in Time: ${record.checkInTime}`);
+      console.log(`   Project ID: ${record.projectId}`);
+      console.log(`   Created: ${record.createdAt}`);
+      console.log('');
+    });
+
+    // Check specifically for today's date
+    console.log('=' .repeat(70));
+    console.log('🔍 Checking for 2026-02-15:\n');
+
+    const todayAttendance = await attendanceCollection.find({
+      employeeId: 2,
+      date: { $gte: new Date('2026-02-15T00:00:00.000Z'), $lte: new Date('2026-02-15T23:59:59.999Z') }
+    }).toArray();
+
+    console.log(`Found ${todayAttendance.length} records with Date object query`);
+
+    // Try with string date
+    const todayAttendanceString = await attendanceCollection.find({
+      employeeId: 2,
+      date: '2026-02-15'
+    }).toArray();
+
+    console.log(`Found ${todayAttendanceString.length} records with string date query`);
+
+    if (todayAttendanceString.length > 0) {
+      console.log('\n✅ Today\'s attendance record:');
+      const record = todayAttendanceString[0];
+      console.log(`   ID: ${record.id}`);
+      console.log(`   Status: ${record.status}`);
+      console.log(`   Check-in: ${new Date(record.checkInTime).toLocaleString()}`);
+      console.log(`   Date field type: ${typeof record.date}`);
+      console.log(`   Date value: ${record.date}`);
     }
 
-    // Check collection name
-    console.log('\n📊 Collection Info:');
-    console.log('  Model collection name:', Attendance.collection.name);
-    
-    // Count total attendance records
-    const totalCount = await Attendance.countDocuments();
-    console.log('  Total attendance records:', totalCount);
-
-    // Try aggregation directly on attendance collection
-    console.log('\n🔍 Testing aggregation match:');
-    const aggResult = await mongoose.connection.db.collection('attendances').aggregate([
-      {
-        $match: {
-          $expr: {
-            $and: [
-              { $eq: ['$employeeId', 104] },
-              { $eq: ['$projectId', 201] },
-              { $ne: ['$checkIn', null] }
-            ]
-          }
-        }
-      }
-    ]).toArray();
-    console.log('  Aggregation match count:', aggResult.length);
-    if (aggResult.length > 0) {
-      console.log('  First match:', JSON.stringify(aggResult[0], null, 2));
-    }
+    await mongoose.disconnect();
+    console.log('\n✅ Disconnected');
 
   } catch (error) {
-    console.error('\n❌ Error:', error.message);
-    console.error(error);
-  } finally {
-    await mongoose.connection.close();
-    console.log('\n🔌 Disconnected from MongoDB');
+    console.error('❌ Error:', error);
+    await mongoose.disconnect();
   }
 }
 
-checkAttendance();
+checkAttendanceDirect();

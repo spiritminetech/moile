@@ -24,7 +24,7 @@ export const GPSAccuracyIndicator: React.FC<GPSAccuracyIndicatorProps> = ({
     const accuracy = accuracyWarning.currentAccuracy;
     if (accuracy <= 5) return 'excellent';
     if (accuracy <= 10) return 'good';
-    if (accuracy <= 20) return 'fair';
+    if (accuracy <= 30) return 'fair';
     return 'poor';
   };
 

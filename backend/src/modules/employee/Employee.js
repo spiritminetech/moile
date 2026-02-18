@@ -28,6 +28,12 @@ const employeeSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    default: null
+  },
   jobTitle: {
     type: String,
     trim: true
@@ -156,6 +162,11 @@ const employeeSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
+// Disable Mongoose virtual id to use numeric id field
+employeeSchema.set('id', false);
+employeeSchema.set('toJSON', { virtuals: false });
+employeeSchema.set('toObject', { virtuals: false });
 
 const Employee = mongoose.model('Employee', employeeSchema);
 

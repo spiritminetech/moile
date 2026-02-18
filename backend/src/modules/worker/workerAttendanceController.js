@@ -16,6 +16,12 @@ const getTodayString = () => {
   return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 };
 
+const getTodayDate = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Set to start of day
+  return today;
+};
+
 function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -107,13 +113,46 @@ export const clockIn = async (req, res) => {
     if (!project) return res.status(404).json({ success: false, message: "Project not found" });
 
     /* 3️⃣ Validate task assignment for today */
-    const today = getTodayString();
+    const todayString = getTodayString();
+    const todayDate = getTodayDate();
+    
+    console.log('🔍 Clock-in task assignment check:', {
+      employeeId: employee.id,
+      projectId: projectId,
+      date: todayString
+    });
+    
     const assignment = await WorkerTaskAssignment.findOne({
       employeeId: employee.id,
       projectId,
-      date: today
+      date: todayString
     });
-    if (!assignment) return res.status(400).json({ success: false, message: "No task assigned for this project today" });
+    
+    if (!assignment) {
+      // Check if employee has ANY tasks for today
+      const anyTasks = await WorkerTaskAssignment.find({
+        employeeId: employee.id,
+        date: todayString
+      }).select('id projectId taskName');
+      
+      console.log('❌ No task found for projectId:', projectId);
+      console.log('📋 But employee has these tasks for today:', anyTasks.map(t => ({
+        id: t.id,
+        projectId: t.projectId,
+        taskName: t.taskName
+      })));
+      
+      return res.status(400).json({ 
+        success: false, 
+        message: "No task assigned for this project today",
+        availableProjects: anyTasks.map(t => t.projectId)
+      });
+    }
+    
+    console.log('✅ Task assignment found:', {
+      assignmentId: assignment.id,
+      taskName: assignment.taskName
+    });
 
     /* 4️⃣ Geofence check */
     // Use the same coordinate logic as validateLocation
@@ -146,7 +185,7 @@ export const clockIn = async (req, res) => {
     }
 
     /* 5️⃣ Check if already checked in */
-    let attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
+    let attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: todayDate });
     
     if (attendance && attendance.checkIn && !attendance.checkOut) {
       return res.status(400).json({ 
@@ -166,7 +205,7 @@ export const clockIn = async (req, res) => {
       attendance = new Attendance({
         employeeId: employee.id,
         projectId,
-        date: today,
+        date: todayDate,
         checkIn: new Date(),
         pendingCheckout: true,
         insideGeofenceAtCheckin: true
@@ -228,8 +267,8 @@ export const clockOut = async (req, res) => {
     if (!project) return res.status(404).json({ success: false, message: "Project not found" });
 
     /* 3️⃣ Get today's attendance */
-    const today = getTodayString();
-    const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
+    const todayDate = getTodayDate();
+    const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: todayDate });
 
     if (!attendance || !attendance.checkIn) {
       return res.status(400).json({ success: false, message: "Cannot clock out before clocking in" });
@@ -345,10 +384,10 @@ export const lunchStart = async (req, res) => {
     console.log('✅ Employee found:', employee.id);
 
     /* 2️⃣ Get today's attendance */
-    const today = getTodayString();
-    console.log('📅 Today:', today);
+    const todayDate = getTodayDate();
+    console.log('📅 Today:', todayDate);
     
-    const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
+    const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: todayDate });
 
     if (!attendance || !attendance.checkIn) {
       console.log('❌ No attendance or not checked in');
@@ -415,8 +454,8 @@ export const lunchEnd = async (req, res) => {
     }
 
     /* 2️⃣ Get today's attendance */
-    const today = getTodayString();
-    const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: today });
+    const todayDate = getTodayDate();
+    const attendance = await Attendance.findOne({ employeeId: employee.id, projectId, date: todayDate });
 
     if (!attendance || !attendance.checkIn) {
       return res.status(400).json({ success: false, message: "Must be clocked in to end lunch break" });
@@ -475,7 +514,7 @@ export const getAttendanceStatus = async (req, res) => {
     }
 
     // Get today's date
-    const today = getTodayString();
+    const todayDate = getTodayDate();
 
     // Find today's attendance record
     let attendance = null;
@@ -483,13 +522,13 @@ export const getAttendanceStatus = async (req, res) => {
       attendance = await Attendance.findOne({
         employeeId: employee.id,
         projectId: parseInt(projectId),
-        date: today
+        date: todayDate
       });
     } else {
       // Get attendance for any project if no specific project requested
       attendance = await Attendance.findOne({
         employeeId: employee.id,
-        date: today
+        date: todayDate
       });
     }
 
@@ -502,7 +541,7 @@ export const getAttendanceStatus = async (req, res) => {
         lunchStartTime: null,
         lunchEndTime: null,
         overtimeStartTime: null,
-        date: today,
+        date: todayDate,
         projectId: projectId ? parseInt(projectId) : null,
         workDuration: 0,
         lunchDuration: 0,
@@ -713,7 +752,7 @@ export const getTodayAttendance = async (req, res) => {
     }
 
     // Get today's date
-    const today = getTodayString();
+    const todayDate = getTodayDate();
 
     // Find today's attendance record
     let attendance = null;
@@ -721,13 +760,13 @@ export const getTodayAttendance = async (req, res) => {
       attendance = await Attendance.findOne({
         employeeId: employee.id,
         projectId: parseInt(projectId),
-        date: today
+        date: todayDate
       });
     } else {
       // Get attendance for any project if no specific project requested
       attendance = await Attendance.findOne({
         employeeId: employee.id,
-        date: today
+        date: todayDate
       });
     }
 
@@ -739,7 +778,7 @@ export const getTodayAttendance = async (req, res) => {
         lunchStartTime: null,
         lunchEndTime: null,
         overtimeStartTime: null,
-        date: today,
+        date: todayDate,
         projectId: projectId ? parseInt(projectId) : null,
         workDuration: 0,
         lunchDuration: 0,

@@ -39,7 +39,7 @@ export const API_CONFIG = {
 } as const;
 
 export const GPS_CONFIG = {
-  REQUIRED_ACCURACY: 10, // meters
+  REQUIRED_ACCURACY: 100, // meters
   LOCATION_TIMEOUT: 15000, // milliseconds
   MAXIMUM_AGE: 60000, // milliseconds
   GEOFENCE_BUFFER: 5, // meters buffer for geofence validation

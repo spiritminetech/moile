@@ -11,6 +11,8 @@ import {
   submitWorkerTaskProgress, 
   updateWorkerTaskProgress,
   completeWorkerTask,
+  pauseWorkerTask,
+  resumeWorkerTask,
   getWorkerTaskHistory,
   uploadWorkerTaskPhotos, 
   reportWorkerTaskIssue,
@@ -18,6 +20,9 @@ import {
   changeWorkerPassword,
   uploadWorkerPhoto,
   getWorkerCertificationAlerts,
+  markInstructionsAsRead,
+  acknowledgeInstructions,
+  getWorkerPerformance,
   upload as workerUpload
 } from "./workerController.js";
 import { verifyToken } from "../../middleware/authMiddleware.js";
@@ -88,6 +93,41 @@ router.post(
   "/tasks/:taskId/complete",
   verifyToken,
   completeWorkerTask
+);
+
+// Pause a task (new endpoint)
+router.post(
+  "/tasks/:taskId/pause",
+  verifyToken,
+  pauseWorkerTask
+);
+
+// Resume a paused task (new endpoint)
+router.post(
+  "/tasks/:taskId/resume",
+  verifyToken,
+  resumeWorkerTask
+);
+
+// Mark instructions as read
+router.post(
+  "/tasks/:assignmentId/instructions/read",
+  verifyToken,
+  markInstructionsAsRead
+);
+
+// Acknowledge instructions
+router.post(
+  "/tasks/:assignmentId/instructions/acknowledge",
+  verifyToken,
+  acknowledgeInstructions
+);
+
+// Get worker performance metrics
+router.get(
+  "/performance",
+  verifyToken,
+  getWorkerPerformance
 );
 
 // Legacy endpoints - keeping for backward compatibility

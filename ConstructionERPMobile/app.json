@@ -11,9 +11,15 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "enabled": false
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "jsEngine": "hermes",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app needs access to your location to track attendance and verify you are at the work site.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to your location to track attendance and verify you are at the work site."
@@ -24,15 +30,24 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "jsEngine": "hermes",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "package": "com.anonymous.ConstructionERPMobile",
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "jsEngine": "hermes"
+    "extra": {
+      "eas": {
+        "projectId": "4db5ce0d-0bc2-4fe8-ac5c-7e5edc94efd0"
+      }
+    }
   }
 }

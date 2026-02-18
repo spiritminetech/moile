@@ -33,7 +33,7 @@ const WorkerTaskAssignmentSchema = new mongoose.Schema({
   status: {
     type: String,
     default: 'queued',
-    enum: ['queued', 'in_progress', 'completed']
+    enum: ['queued', 'in_progress', 'paused', 'completed']
   },
   companyId: {
     type: Number,
@@ -67,8 +67,27 @@ const WorkerTaskAssignmentSchema = new mongoose.Schema({
     description: String,
     quantity: Number,
     unit: String,
-    targetCompletion: { type: Number, default: 100 }
+    targetCompletion: { type: Number, default: 100 },
+    // Enhanced daily target fields
+    targetType: String, // e.g., "Quantity Based", "Time Based", "Area Based"
+    areaLevel: String, // e.g., "Tower A – Level 5", "Main Corridor – Ground Floor"
+    startTime: String, // e.g., "8:00 AM"
+    expectedFinish: String, // e.g., "5:00 PM"
+    progressToday: {
+      completed: { type: Number, default: 0 },
+      total: Number,
+      percentage: { type: Number, default: 0 }
+    }
   },
+  
+  // Detailed nature of work (can override task defaults)
+  trade: String,
+  activity: String,
+  workType: String,
+  
+  // Required tools and materials (can override task defaults)
+  requiredTools: [String],
+  requiredMaterials: [String],
   
   workArea: String,
   floor: String,
@@ -121,7 +140,10 @@ const WorkerTaskAssignmentSchema = new mongoose.Schema({
   }
 }, {
   collection: 'workerTaskAssignment',
-  timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' }
+  timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
+  id: false,  // Disable Mongoose virtual id to use numeric id field
+  toJSON: { virtuals: false },
+  toObject: { virtuals: false }
 });
 
 // Add indexes for better query performance
@@ -129,4 +151,4 @@ WorkerTaskAssignmentSchema.index({ projectId: 1, date: 1 }); // For team size qu
 WorkerTaskAssignmentSchema.index({ employeeId: 1, date: 1 }); // For worker queries
 WorkerTaskAssignmentSchema.index({ supervisorId: 1 }); // For supervisor queries
 
-export default mongoose.model('WorkerTaskAssignment', WorkerTaskAssignmentSchema);
+export default mongoose.model('WorkerTaskAssignment', WorkerTaskAssignmentSchema, 'workerTaskAssignment');

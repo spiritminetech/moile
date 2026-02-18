@@ -25,24 +25,9 @@ export class LocationService {
   async requestLocationPermissions(): Promise<boolean> {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      const granted = status === 'granted';
-      
-      // In development mode, allow fallback even if permission denied
-      if (__DEV__ && !granted) {
-        console.warn('Development mode: location permission denied, but allowing fallback location');
-        return true; // Allow fallback location in development
-      }
-      
-      return granted;
+      return status === 'granted';
     } catch (error) {
       console.error('Error requesting location permissions:', error);
-      
-      // In development mode, allow fallback on error
-      if (__DEV__) {
-        console.warn('Development mode: location permission error, but allowing fallback location');
-        return true;
-      }
-      
       return false;
     }
   }
@@ -141,6 +126,12 @@ export class LocationService {
           return this.getFallbackLocation();
         }
         throw new Error('Location permission denied. Please enable location permissions in your device settings.');
+      }
+      
+      // ✅ FIX: In development mode, ALWAYS return fallback instead of throwing
+      if (__DEV__ && allowFallback) {
+        console.warn('⚠️ Development mode: Returning fallback location after error');
+        return this.getFallbackLocation();
       }
       
       if (allowFallback) {
