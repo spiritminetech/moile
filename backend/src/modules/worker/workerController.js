@@ -589,11 +589,13 @@ export const getWorkerTasksToday = async (req, res) => {
     console.log('   date:', today);
 
     // Get all task assignments for today with error handling
+    // Filter out admin-only assignments (taskId: null) - only get actual task assignments
     let assignments;
     try {
       assignments = await WorkerTaskAssignment.find({
         employeeId: employee.id,
-        date: today
+        date: today,
+        taskId: { $ne: null } // Only get assignments with actual tasks assigned by supervisor
       }).sort({ sequence: 1 });
       
       console.log('\n✅ Query completed - Found', assignments.length, 'tasks');
@@ -1519,10 +1521,12 @@ export const getWorkerTodayTask = async (req, res) => {
 
     const today = new Date().toISOString().split("T")[0];
 
+    // Filter out admin-only assignments (taskId: null) - only get actual task assignments
     const assignments = await WorkerTaskAssignment.find({
       employeeId: employee.id,
       //companyId: req.user.companyId,
-      date: today
+      date: today,
+      taskId: { $ne: null } // Only get assignments with actual tasks assigned by supervisor
     });
 
     if (!assignments.length) {
@@ -3328,7 +3332,8 @@ export const getWorkerTaskHistory = async (req, res) => {
 
     // Build query filter
     const filter = {
-      employeeId: employee.id
+      employeeId: employee.id,
+      taskId: { $ne: null } // Only get assignments with actual tasks (exclude admin-only assignments)
     };
 
     // Add date range filter if provided
@@ -3518,7 +3523,8 @@ export const getWorkerTaskHistory = async (req, res) => {
 
     // Calculate summary statistics
     const allAssignments = await WorkerTaskAssignment.find({
-      employeeId: employee.id
+      employeeId: employee.id,
+      taskId: { $ne: null } // Only count actual task assignments
     });
 
     const totalCompleted = allAssignments.filter(a => a.status === 'completed').length;

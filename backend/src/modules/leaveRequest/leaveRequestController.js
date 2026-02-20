@@ -95,17 +95,38 @@ export const getMyLeaveRequests = async (req, res) => {
 ================================ */
 export const getPendingLeaveRequests = async (req, res) => {
     try {
-        const requests = await LeaveRequest.find({ status: 'PENDING' });
+        const userId = req.user.id;
 
-        // Get all unique employee IDs
-        const employeeIds = [...new Set(requests.map(r => r.employeeId).filter(Boolean))];
+        // Get supervisor's employee record
+        const supervisor = await Employee.findOne({ userId }).lean();
+        if (!supervisor) {
+            return res.status(404).json({ message: 'Supervisor employee record not found' });
+        }
 
-        // Fetch employee details
-        const employees = await Employee.find({ id: { $in: employeeIds } });
+        // Get projects assigned to this supervisor
+        const Project = (await import('../project/models/Project.js')).default;
+        const projects = await Project.find({ supervisorId: supervisor.id }).lean();
+        const projectIds = projects.map(p => p.id);
+
+        if (projectIds.length === 0) {
+            return res.json([]); // No projects, no requests to show
+        }
+
+        // Get employees in supervisor's projects
+        const projectEmployees = await Employee.find({
+            'currentProject.id': { $in: projectIds }
+        }).lean();
+        const employeeIds = projectEmployees.map(e => e.id);
+
+        // Get pending leave requests for those employees
+        const requests = await LeaveRequest.find({ 
+            status: 'PENDING',
+            employeeId: { $in: employeeIds }
+        });
 
         // Attach employee name to each request
         const requestsWithNames = requests.map(r => {
-            const employee = employees.find(e => e.id === r.employeeId);
+            const employee = projectEmployees.find(e => e.id === r.employeeId);
             return { ...r.toObject(), employeeName: employee ? employee.fullName : null };
         });
 

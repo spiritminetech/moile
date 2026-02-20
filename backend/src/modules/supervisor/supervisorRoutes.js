@@ -38,7 +38,8 @@ import {
   exportAttendanceReport,
   createIssueEscalation,
   getIssueEscalations,
-  updateIssueEscalation
+  updateIssueEscalation,
+  verifyTaskCompletion
 } from './supervisorController.js';
 import {getTodayWorkerSubmissions,reviewWorkerProgress} from "./submodules/supervisorReviewController.js";
 import {
@@ -154,6 +155,14 @@ router.post('/task-assignments/:assignmentId/reassign', verifyToken, reassignTas
  * Body: { priority, instructions, estimatedHours }
  */
 router.put('/task-assignments/:assignmentId/priority', verifyToken, updateTaskPriority);
+
+/**
+ * Verify and approve task completion
+ * POST /api/supervisor/verify-task-completion/:assignmentId
+ * Body: { notes?, approvedPercent? }
+ * Note: Accepts assignmentId and finds the latest progress record
+ */
+router.post('/verify-task-completion/:assignmentId', verifyToken, verifyTaskCompletion);
 
 /**
  * Get active tasks for a project

@@ -4,6 +4,7 @@ import Project from '../project/models/Project.js';
 import Employee from '../employee/Employee.js';
 import LocationLog from '../attendance/LocationLog.js';
 import WorkerTaskAssignment from '../worker/models/WorkerTaskAssignment.js';
+import WorkerTaskProgress from '../worker/models/WorkerTaskProgress.js';
 import CompanyUser from "../companyUser/CompanyUser.js";
 import Task from "../task/Task.js"
 import TaskNotificationService from '../notification/services/TaskNotificationService.js';
@@ -3362,7 +3363,7 @@ export const getTaskAssignments = async (req, res) => {
       const employee = employeeMap.get(assignment.employeeId);
 
       return {
-        assignmentId: assignment._id,
+        assignmentId: assignment.id, // Use numeric id, not MongoDB _id
         taskId: assignment.taskId,
         taskName: task?.taskName || 'Unknown Task',
         workerId: assignment.employeeId,
@@ -4308,3 +4309,163 @@ export const updateIssueEscalation = async (req, res) => {
     });
   }
 };
+
+
+/**
+ * Verify and approve task completion
+ * POST /api/supervisor/verify-task-completion/:progressId
+ * Body: { notes?, approvedPercent? }
+ */
+export const verifyTaskCompletion = async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { notes, approvedPercent } = req.body;
+
+    console.log('\n🔍 Verify Task Completion Request:');
+    console.log('   assignmentId:', assignmentId);
+    console.log('   notes:', notes);
+    console.log('   approvedPercent:', approvedPercent);
+
+    // Validate assignmentId
+    if (!assignmentId) {
+      return res.status(400).json({
+        success: false,
+        errors: ['Assignment ID is required'],
+      });
+    }
+
+    // Convert to number
+    const numericAssignmentId = parseInt(assignmentId);
+    if (isNaN(numericAssignmentId)) {
+      return res.status(400).json({
+        success: false,
+        errors: ['Invalid assignment ID format'],
+      });
+    }
+
+    console.log('   Numeric assignment ID:', numericAssignmentId);
+
+    // Find the assignment first
+    const assignment = await WorkerTaskAssignment.findOne({
+      id: numericAssignmentId
+    });
+
+    if (!assignment) {
+      console.log('❌ Assignment not found');
+      return res.status(404).json({
+        success: false,
+        errors: ['Task assignment not found'],
+      });
+    }
+
+    console.log('✅ Assignment found:', {
+      id: assignment.id,
+      taskId: assignment.taskId,
+      employeeId: assignment.employeeId,
+      status: assignment.status
+    });
+
+    // Find the latest progress record for this assignment
+    const progress = await WorkerTaskProgress.findOne({
+      workerTaskAssignmentId: numericAssignmentId,
+      status: { $in: ['SUBMITTED', 'REVIEWED'] } // Only pending approvals
+    }).sort({ submittedAt: -1 }); // Get the most recent
+
+    if (!progress) {
+      console.log('❌ No pending progress found for assignment');
+
+      // Check if there are any progress records at all
+      const anyProgress = await WorkerTaskProgress.findOne({
+        workerTaskAssignmentId: numericAssignmentId
+      }).sort({ submittedAt: -1 });
+
+      if (anyProgress) {
+        console.log('   Found progress with status:', anyProgress.status);
+        return res.status(400).json({
+          success: false,
+          errors: [`Task completion is already ${anyProgress.status.toLowerCase()}`],
+        });
+      }
+
+      return res.status(404).json({
+        success: false,
+        errors: ['No task completion submission found for this assignment'],
+      });
+    }
+
+    console.log('✅ Progress record found:', {
+      id: progress.id,
+      status: progress.status,
+      progressPercent: progress.progressPercent,
+      submittedAt: progress.submittedAt
+    });
+
+    // Validate approved percent if provided
+    const finalApprovedPercent = approvedPercent !== undefined
+      ? Math.min(Math.max(0, approvedPercent), progress.progressPercent)
+      : progress.progressPercent;
+
+    // Update progress record
+    progress.status = 'APPROVED';
+    progress.approvedPercent = finalApprovedPercent;
+    progress.remarks = notes || 'Approved by supervisor';
+    progress.reviewedBy = req.user?.employeeId || req.user?.userId || null;
+    progress.reviewedAt = new Date();
+
+    await progress.save();
+    console.log('✅ Progress record updated to APPROVED');
+
+    // Update the assignment record
+    assignment.status = 'completed';
+    assignment.completedAt = progress.submittedAt;
+    assignment.progressPercent = finalApprovedPercent;
+
+    // Add supervisor verification details
+    if (!assignment.supervisorVerification) {
+      assignment.supervisorVerification = {};
+    }
+    assignment.supervisorVerification.verified = true;
+    assignment.supervisorVerification.verifiedBy = req.user?.employeeId || req.user?.userId || null;
+    assignment.supervisorVerification.verifiedAt = new Date();
+    assignment.supervisorVerification.notes = notes || '';
+
+    await assignment.save();
+    console.log('✅ Assignment record updated');
+
+    // Get worker details for notification
+    const worker = await Employee.findOne({ id: progress.employeeId });
+    const task = await Task.findOne({ id: assignment.taskId });
+
+    console.log('✅ Task completion verified successfully');
+
+    // TODO: Send notification to worker about approval
+    // await sendNotification({
+    //   employeeId: progress.employeeId,
+    //   title: 'Task Completion Approved',
+    //   message: `Your completion of "${task?.taskName || 'task'}" has been approved by supervisor`,
+    //   type: 'TASK_APPROVED'
+    // });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        assignmentId: assignment.id,
+        progressId: progress.id,
+        status: 'APPROVED',
+        approvedPercent: finalApprovedPercent,
+        workerName: worker?.fullName || 'Unknown',
+        taskName: task?.taskName || 'Unknown',
+        verifiedAt: progress.reviewedAt,
+        verifiedBy: progress.reviewedBy,
+        message: 'Task completion verified and approved successfully',
+      },
+    });
+
+  } catch (err) {
+    console.error('❌ Error verifying task completion:', err);
+    return res.status(500).json({
+      success: false,
+      errors: ['Failed to verify task completion'],
+    });
+  }
+}

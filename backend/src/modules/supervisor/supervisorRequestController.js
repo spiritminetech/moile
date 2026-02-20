@@ -34,7 +34,7 @@ export const getPendingLeaveRequests = async (req, res) => {
 
         // Get employees assigned to supervisor's projects
         const employees = await Employee.find({ 
-            currentProjectId: { $in: projectIds } 
+            'currentProject.id': { $in: projectIds } 
         }).lean();
         const employeeIds = employees.map(e => e.id);
 
@@ -47,7 +47,7 @@ export const getPendingLeaveRequests = async (req, res) => {
         // Attach employee and project details
         const requestsWithDetails = requests.map(r => {
             const employee = employees.find(e => e.id === r.employeeId);
-            const project = projects.find(p => p.id === employee?.currentProjectId);
+            const project = projects.find(p => p.id === employee?.currentProject?.id);
             return { 
                 ...r.toObject(), 
                 employeeName: employee?.fullName || 'Unknown',
@@ -171,7 +171,7 @@ export const getPendingAdvanceRequests = async (req, res) => {
 
         // Get employees assigned to supervisor's projects
         const employees = await Employee.find({ 
-            currentProjectId: { $in: projectIds } 
+            'currentProject.id': { $in: projectIds } 
         }).lean();
         const employeeIds = employees.map(e => e.id);
 
@@ -184,7 +184,7 @@ export const getPendingAdvanceRequests = async (req, res) => {
         // Attach employee and project details
         const requestsWithDetails = requests.map(r => {
             const employee = employees.find(e => e.id === r.employeeId);
-            const project = projects.find(p => p.id === employee?.currentProjectId);
+            const project = projects.find(p => p.id === employee?.currentProject?.id);
             return { 
                 ...r.toObject(), 
                 employeeName: employee?.fullName || 'Unknown',
