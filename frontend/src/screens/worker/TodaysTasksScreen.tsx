@@ -176,6 +176,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
 
       console.log('🔄 Loading tasks...', { isOffline, showLoading });
 
+      // Don't use cached data when online - always fetch fresh data
       if (isOffline) {
         console.log('📱 App is offline, loading cached data');
         const cachedTasks = getCachedData('tasks') as TaskAssignment[];
@@ -207,7 +208,8 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         console.log('✅ Tasks loaded successfully:', tasksData.length);
         console.log('📋 Sample task data:', tasksData[0]);
         setTasks(tasksData);
-        // Cache the data for offline use
+        
+        // Cache the fresh data for offline use
         await cacheData('tasks', tasksData);
         
         // Clear any previous errors
@@ -236,20 +238,35 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       // Check for specific error types
       if (err.message?.includes('Network Error') || err.code === 'NETWORK_ERROR') {
         setError('Network connection failed. Please check your internet connection and server availability.');
+        // Only use cached data for network errors when offline
+        if (isOffline) {
+          const cachedTasks = getCachedData('tasks') as TaskAssignment[];
+          if (cachedTasks.length > 0) {
+            console.log('📦 Using cached tasks as fallback (offline):', cachedTasks.length);
+            setTasks(cachedTasks);
+          } else {
+            setTasks([]);
+          }
+        } else {
+          // Clear tasks when online but network error occurs
+          setTasks([]);
+        }
       } else if (err.message?.includes('timeout') || err.code === 'ECONNABORTED') {
         setError('Request timed out. The server may be slow or unavailable.');
+        setTasks([]);
       } else if (err.message?.includes('401') || err.code === 'UNAUTHORIZED') {
         setError('Authentication failed. Please log in again.');
+        setTasks([]);
+      } else if (err.message?.includes('not found') || err.message?.includes('NOT_FOUND') || err.message?.includes('No tasks assigned')) {
+        // Handle "not found" errors as empty state, not as errors
+        console.log('📋 Resource not found or no tasks - treating as empty state');
+        setTasks([]);
+        setError(null); // Don't show error for "not found" or "no tasks"
       } else {
-        setError(`Connection error: ${errorMessage}`);
-      }
-      
-      // Try to load cached data on error
-      const cachedTasks = getCachedData('tasks') as TaskAssignment[];
-      if (cachedTasks.length > 0) {
-        console.log('📦 Using cached tasks as fallback:', cachedTasks.length);
-        setTasks(cachedTasks);
-        setError('Using cached data - please check your connection');
+        // For other errors, show a generic message without technical details
+        console.error('❌ Unexpected error:', errorMessage);
+        setError('Unable to load tasks. Please try again.');
+        setTasks([]);
       }
     } finally {
       setIsLoading(false);
@@ -275,14 +292,18 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   );
 
   // Handle pull-to-refresh
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     if (!isOffline && !isApiCallInProgress) {
-      console.log('🔄 Manual refresh triggered');
+      console.log('🔄 Manual refresh triggered - clearing cache');
       setIsRefreshing(true);
       hasInitiallyLoaded.current = false; // Allow reload
+      
+      // Clear cached data to force fresh fetch
+      await cacheData('tasks', []);
+      
       loadTasks(false);
     }
-  }, [isOffline, loadTasks, isApiCallInProgress]);
+  }, [isOffline, loadTasks, isApiCallInProgress, cacheData]);
 
   // Handle task start
   const handleStartTask = useCallback(async (taskId: number) => {
@@ -855,11 +876,11 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Text style={styles.emptyIcon}>📋</Text>
-      <Text style={styles.emptyTitle}>No Tasks Today</Text>
+      <Text style={styles.emptyTitle}>Tasks Assigned: 0</Text>
       <Text style={styles.emptyMessage}>
         {isOffline 
-          ? 'No cached tasks available. Please connect to internet to load tasks.'
-          : 'You have no tasks assigned for today. Check back later or contact your supervisor.'
+          ? 'You are offline. Connect to internet to check for new tasks.'
+          : 'No tasks assigned for today.'
         }
       </Text>
     </View>
@@ -874,7 +895,11 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       <View style={styles.errorActions}>
         <TouchableOpacity 
           style={styles.retryButton} 
-          onPress={() => loadTasks()}
+          onPress={() => {
+            setError(null);
+            hasInitiallyLoaded.current = false;
+            loadTasks();
+          }}
           disabled={isApiCallInProgress}
         >
           {isApiCallInProgress ? (
@@ -919,30 +944,27 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       <StatusBar barStyle="light-content" />
       <OfflineIndicator />
       
-      {error && !tasks.length ? (
-        renderErrorState()
-      ) : (
-        <FlatList
-          data={tasks || []}
-          renderItem={renderTaskItem}
-          keyExtractor={(item) => `task-${item.assignmentId}-${item.updatedAt}`}
-          extraData={currentLocation} // Force re-render when location changes
-          contentContainerStyle={styles.listContainer}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              enabled={!isOffline}
-              colors={['#2196F3']}
-              tintColor="#2196F3"
-            />
-          }
-          ListHeaderComponent={
-            <>
-              {/* Header */}
-              <View style={styles.header}>
-                <View style={styles.headerContent}>
-                  <Text style={styles.headerTitle} numberOfLines={1}>👷 TODAY'S TASKS</Text>
+      <FlatList
+        data={tasks || []}
+        renderItem={renderTaskItem}
+        keyExtractor={(item) => `task-${item.assignmentId}-${item.updatedAt}`}
+        extraData={currentLocation} // Force re-render when location changes
+        contentContainerStyle={styles.listContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            enabled={!isOffline}
+            colors={['#2196F3']}
+            tintColor="#2196F3"
+          />
+        }
+        ListHeaderComponent={
+          <>
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.headerContent}>
+                <Text style={styles.headerTitle} numberOfLines={1}>👷 TODAY'S TASKS</Text>
                   <Text style={styles.headerDate} numberOfLines={1}>
                     Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </Text>
@@ -1092,7 +1114,6 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
           maxToRenderPerBatch={10}
           windowSize={10}
         />
-      )}
     </SafeAreaView>
   );
 };

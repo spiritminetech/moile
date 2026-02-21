@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { TaskAssignment } from '../../types';
 import { useTaskHistory } from '../../hooks/useTaskHistory';
 import { useOffline } from '../../store/context/OfflineContext';
+import { useLocation } from '../../store/context/LocationContext';
 import TaskCard from '../../components/cards/TaskCard';
 import { 
   LoadingOverlay, 
@@ -26,6 +27,7 @@ import {
   OfflineIndicator 
 } from '../../components/common';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
+import { calculateDistance } from '../../utils/geofenceUtils';
 
 interface TaskHistoryScreenProps {
   navigation: any;
@@ -43,6 +45,10 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
     currentFilter 
   } = useTaskHistory();
   const { isOffline } = useOffline();
+  
+  // Import location context to check geofence status
+  const { state: locationState } = useLocation();
+  const { currentLocation } = locationState;
 
   // Refresh data when screen comes into focus to ensure counts are up to date
   useFocusEffect(
@@ -77,6 +83,10 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
 
   const handleUpdateProgress = useCallback(() => {
     Alert.alert('Not Available', 'Cannot update progress for historical tasks.', [{ text: 'OK' }]);
+  }, []);
+  
+  const handleResumeTask = useCallback(() => {
+    Alert.alert('Not Available', 'Please use Today\'s Tasks screen to resume active tasks.', [{ text: 'OK' }]);
   }, []);
 
   // Get filter button style
@@ -157,18 +167,43 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
   };
 
   // Render task item with historical context
-  const renderTaskItem = ({ item }: { item: TaskAssignment }) => (
-    <TouchableOpacity onPress={() => handleViewTaskDetails(item)}>
-      <TaskCard
-        task={item}
-        onStartTask={handleStartTask}
-        onUpdateProgress={handleUpdateProgress}
-        onViewLocation={handleViewLocation}
-        canStart={false}
-        isOffline={isOffline}
-      />
-    </TouchableOpacity>
-  );
+  const renderTaskItem = ({ item }: { item: TaskAssignment }) => {
+    // Check if worker is inside geofence for this task
+    let isInsideGeofence = true; // Default to true for historical tasks
+    
+    // Only check geofence for in_progress or paused tasks
+    if ((item.status === 'in_progress' || item.status === 'paused') && currentLocation && item.projectGeofence) {
+      const distance = calculateDistance(
+        currentLocation.latitude,
+        currentLocation.longitude,
+        item.projectGeofence.latitude,
+        item.projectGeofence.longitude
+      );
+      isInsideGeofence = distance <= item.projectGeofence.radius;
+      
+      console.log('📍 Geofence check for task', item.assignmentId, ':', {
+        distance,
+        radius: item.projectGeofence.radius,
+        isInside: isInsideGeofence,
+        status: item.status
+      });
+    }
+    
+    return (
+      <TouchableOpacity onPress={() => handleViewTaskDetails(item)}>
+        <TaskCard
+          task={item}
+          onStartTask={handleStartTask}
+          onUpdateProgress={handleUpdateProgress}
+          onResumeTask={handleResumeTask}
+          onViewLocation={handleViewLocation}
+          canStart={false}
+          isInsideGeofence={isInsideGeofence}
+          isOffline={isOffline}
+        />
+      </TouchableOpacity>
+    );
+  };
 
   // Render empty state
   const renderEmptyState = () => (
