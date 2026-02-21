@@ -3,7 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-const BASE_URL = 'http://192.168.0.3:5002';
+const BASE_URL = 'http://192.168.1.6:5002';
 
 // Test 1: Check if server is running
 const testServerHealth = async () => {
@@ -124,7 +124,7 @@ const testMobileAppAccess = async () => {
       headers: {
         'User-Agent': 'React Native',
         'Accept': 'image/*',
-        'Origin': 'http://192.168.0.3:8081' // Typical React Native dev server
+        'Origin': 'http://192.168.1.6:8081' // Typical React Native dev server
       },
       responseType: 'arraybuffer',
       timeout: 10000
@@ -187,7 +187,7 @@ const runTests = async () => {
       console.log('\n🔧 Some issues were found. Check the logs above for details.');
       
       if (!serverHealthy) {
-        console.log('💡 Make sure the backend server is running on http://192.168.0.3:5002');
+        console.log('💡 Make sure the backend server is running on http://192.168.1.6:5002');
       }
       if (!staticFilesWorking) {
         console.log('💡 Check if the uploads/workers directory exists and has image files');

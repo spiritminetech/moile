@@ -207,11 +207,11 @@ async function fixTaskMetricsInProgressReports() {
     
     console.log(`\n🎯 Test URLs:\n`);
     console.log(`1️⃣  Daily Progress Reports (Date Range):`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/daily-progress/${testProjectId}?from=${testFromDate}&to=${testToDate}`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/daily-progress/${testProjectId}?from=${testFromDate}&to=${testToDate}`);
     console.log(`   Expected: Reports with taskMetrics showing actual task counts\n`);
     
     console.log(`2️⃣  Daily Progress Report (Specific Date):`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/daily-progress/${testProjectId}/2026-02-10`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/daily-progress/${testProjectId}/2026-02-10`);
     console.log(`   Expected: Single report with task metrics\n`);
 
     console.log(`\n📝 Login Credentials:`);

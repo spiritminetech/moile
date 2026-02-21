@@ -4,9 +4,15 @@
  */
 
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-// Load environment variables
-dotenv.config();
+// Get the directory name of the current module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load environment variables with explicit path
+dotenv.config({ path: join(__dirname, '../../.env') });
 
 class AppConfig {
   constructor() {

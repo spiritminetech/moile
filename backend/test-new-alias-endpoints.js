@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const BASE_URL = 'http://192.168.0.3:5002/api';
+const BASE_URL = 'http://192.168.1.6:5002/api';
 
 // Test credentials
 const SUPERVISOR_CREDENTIALS = {

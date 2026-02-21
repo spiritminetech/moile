@@ -371,39 +371,39 @@ async function createApprovalQueueData() {
     console.log(`\n🎯 Test URLs for Postman:\n`);
     
     console.log(`1️⃣  Get Pending Approvals Summary:`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-approvals`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-approvals`);
     console.log(`   Headers: Authorization: Bearer <token>`);
     console.log(`   Expected: Summary of all pending approvals\n`);
     
     console.log(`2️⃣  Get Dashboard Data (includes approvals):`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/dashboard`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/dashboard`);
     console.log(`   Headers: Authorization: Bearer <token>`);
     console.log(`   Expected: Dashboard with pendingApprovals section\n`);
     
     console.log(`3️⃣  Get Pending Leave Requests:`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-leave-requests`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-leave-requests`);
     console.log(`   Headers: Authorization: Bearer <token>`);
     console.log(`   Expected: ${createdLeaveRequests.length} leave requests\n`);
     
     console.log(`4️⃣  Get Pending Payment Requests:`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-advance-requests`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-advance-requests`);
     console.log(`   Headers: Authorization: Bearer <token>`);
     console.log(`   Expected: ${createdPaymentRequests.length} payment requests\n`);
     
     console.log(`5️⃣  Get Pending Material Requests:`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-material-requests`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-material-requests`);
     console.log(`   Headers: Authorization: Bearer <token>`);
     console.log(`   Expected: ${createdMaterialRequests.length} material requests\n`);
     
     console.log(`6️⃣  Get Pending Tool Requests:`);
-    console.log(`   GET http://192.168.0.3:5002/api/supervisor/pending-tool-requests`);
+    console.log(`   GET http://192.168.1.6:5002/api/supervisor/pending-tool-requests`);
     console.log(`   Headers: Authorization: Bearer <token>`);
     console.log(`   Expected: ${createdToolRequests.length} tool requests\n`);
 
     console.log(`\n📝 Login Credentials:`);
     console.log(`   Email: supervisor@gmail.com`);
     console.log(`   Password: password123`);
-    console.log(`   POST http://192.168.0.3:5002/api/auth/login\n`);
+    console.log(`   POST http://192.168.1.6:5002/api/auth/login\n`);
 
     console.log(`\n📱 Mobile App Testing:`);
     console.log(`   1. Login as supervisor@gmail.com`);
