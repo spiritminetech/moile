@@ -101,39 +101,39 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>🏆 Certification Alerts</Text>
-        {alerts && alerts.length > 3 && (
+        {alerts && alerts.length > 3 ? (
           <TouchableOpacity onPress={handleViewAllAlerts}>
-            <Text style={styles.viewAllText}>{`View All (${alerts.length})`}</Text>
+            <Text style={styles.viewAllText}>{`View All (${String(alerts.length)})`}</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
 
       {/* Show loading state */}
-      {isLoading && (
+      {isLoading ? (
         <View style={styles.alertItem}>
           <Text style={styles.alertTitle}>Loading alerts...</Text>
           <Text style={styles.alertMessage}>Please wait</Text>
         </View>
-      )}
+      ) : null}
 
       {/* Show error state */}
-      {!isLoading && error && (
+      {!isLoading && error ? (
         <View style={styles.alertItem}>
           <Text style={styles.alertTitle}>Error loading alerts</Text>
-          <Text style={styles.alertMessage}>{error}</Text>
+          <Text style={styles.alertMessage}>{String(error)}</Text>
         </View>
-      )}
+      ) : null}
 
       {/* Show empty state */}
-      {!isLoading && !error && (!alerts || alerts.length === 0) && (
+      {!isLoading && !error && (!alerts || alerts.length === 0) ? (
         <View style={styles.alertItem}>
           <Text style={styles.alertTitle}>No certification alerts</Text>
           <Text style={styles.alertMessage}>All certifications are up to date</Text>
         </View>
-      )}
+      ) : null}
 
       {/* Show alerts */}
-      {!isLoading && !error && alerts && alerts.length > 0 && (
+      {!isLoading && !error && alerts && alerts.length > 0 ? (
         <>
           {/* Sort alerts by severity and show top 3 */}
           {alerts
@@ -158,7 +158,7 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
                     </Text>
                     <View style={styles.alertInfo}>
                       <Text style={styles.alertTitle} numberOfLines={1}>
-                        {alert.name}
+                        {String(alert.name)}
                       </Text>
                       <Text style={[
                         styles.alertMessage,
@@ -166,7 +166,7 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
                       ]}>
                         {alert.alertLevel === 'expired' 
                           ? `Expired ${formatDate(alert.expiryDate)}`
-                          : `Expires in ${alert.daysUntilExpiry} days`
+                          : `Expires in ${String(alert.daysUntilExpiry)} days`
                         }
                       </Text>
                     </View>
@@ -176,14 +176,14 @@ const CertificationAlertsCard: React.FC<CertificationAlertsCardProps> = ({
                     { backgroundColor: getAlertLevelColor(alert.alertLevel) }
                   ]}>
                     <Text style={styles.alertBadgeText}>
-                      {alert.alertLevel.toUpperCase()}
+                      {String(alert.alertLevel).toUpperCase()}
                     </Text>
                   </View>
                 </View>
               </TouchableOpacity>
             ))}
         </>
-      )}
+      ) : null}
 
       {/* Simple View Profile text link */}
       <TouchableOpacity 

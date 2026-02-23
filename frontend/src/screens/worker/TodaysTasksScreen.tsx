@@ -150,8 +150,8 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
 
   const dailyTargetSummary = calculateDailyTargetSummary();
 
-  // Load tasks data with request deduplication
-  const loadTasks = useCallback(async (showLoading = true) => {
+  // Load tasks data with request deduplication and cache management
+  const loadTasks = useCallback(async (showLoading = true, forceClearCache = false) => {
     // Prevent multiple simultaneous API calls
     if (isApiCallInProgress) {
       console.log('🚫 API call already in progress, skipping...');
@@ -174,7 +174,14 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       
       setLoadingTimeout(timeout);
 
-      console.log('🔄 Loading tasks...', { isOffline, showLoading });
+      console.log('🔄 Loading tasks...', { isOffline, showLoading, forceClearCache });
+
+      // If force clear cache is requested, clear it immediately
+      if (forceClearCache) {
+        console.log('🗑️ Force clearing task cache...');
+        await cacheData('tasks', []);
+        setTasks([]);
+      }
 
       if (isOffline) {
         console.log('📱 App is offline, loading cached data');
@@ -205,19 +212,27 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       if (response.success) {
         const tasksData = Array.isArray(response.data) ? response.data : [];
         console.log('✅ Tasks loaded successfully:', tasksData.length);
-        console.log('📋 Sample task data:', tasksData[0]);
-        setTasks(tasksData);
-        // Cache the data for offline use
-        await cacheData('tasks', tasksData);
         
-        // Clear any previous errors
-        setError(null);
+        // CRITICAL FIX: If API returns empty tasks, clear the cache
+        if (tasksData.length === 0) {
+          console.log('🗑️ API returned 0 tasks - clearing stale cache');
+          await cacheData('tasks', []);
+          setTasks([]);
+          setError(null);
+        } else {
+          console.log('📋 Sample task data:', tasksData[0]);
+          setTasks(tasksData);
+          // Cache the data for offline use
+          await cacheData('tasks', tasksData);
+          setError(null);
+        }
       } else {
         const errorMsg = response.message || 'Failed to load tasks';
         console.log('❌ API returned error:', errorMsg);
         setError(errorMsg);
-        // Set empty array on API error
+        // Set empty array on API error and clear cache
         setTasks([]);
+        await cacheData('tasks', []);
       }
     } catch (err: any) {
       // Clear timeout on error
@@ -236,20 +251,27 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       // Check for specific error types
       if (err.message?.includes('Network Error') || err.code === 'NETWORK_ERROR') {
         setError('Network connection failed. Please check your internet connection and server availability.');
+        // Don't use cached data on network error - show error instead
+        setTasks([]);
       } else if (err.message?.includes('timeout') || err.code === 'ECONNABORTED') {
         setError('Request timed out. The server may be slow or unavailable.');
+        setTasks([]);
       } else if (err.message?.includes('401') || err.code === 'UNAUTHORIZED') {
         setError('Authentication failed. Please log in again.');
+        setTasks([]);
+        // Clear cache on auth error
+        await cacheData('tasks', []);
       } else {
         setError(`Connection error: ${errorMessage}`);
-      }
-      
-      // Try to load cached data on error
-      const cachedTasks = getCachedData('tasks') as TaskAssignment[];
-      if (cachedTasks.length > 0) {
-        console.log('📦 Using cached tasks as fallback:', cachedTasks.length);
-        setTasks(cachedTasks);
-        setError('Using cached data - please check your connection');
+        // Try to load cached data on error ONLY if we have valid cached data
+        const cachedTasks = getCachedData('tasks') as TaskAssignment[];
+        if (cachedTasks.length > 0) {
+          console.log('📦 Using cached tasks as fallback:', cachedTasks.length);
+          setTasks(cachedTasks);
+          setError('Using cached data - please check your connection');
+        } else {
+          setTasks([]);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -851,7 +873,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     );
   };
 
-  // Render empty state
+  // Render empty state with clear cache option
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Text style={styles.emptyIcon}>📋</Text>
@@ -862,6 +884,32 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
           : 'You have no tasks assigned for today. Check back later or contact your supervisor.'
         }
       </Text>
+      {!isOffline && (
+        <TouchableOpacity 
+          style={styles.clearCacheButton} 
+          onPress={async () => {
+            Alert.alert(
+              'Clear Cache',
+              'This will clear all cached task data. Are you sure?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { 
+                  text: 'Clear Cache', 
+                  style: 'destructive',
+                  onPress: async () => {
+                    console.log('🗑️ Clearing task cache...');
+                    await cacheData('tasks', []);
+                    setTasks([]);
+                    Alert.alert('Success', 'Cache cleared successfully. Pull down to refresh.');
+                  }
+                }
+              ]
+            );
+          }}
+        >
+          <Text style={styles.clearCacheButtonText}>🗑️ Clear Cache & Refresh</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -1459,6 +1507,20 @@ const styles = StyleSheet.create({
     color: '#0D47A1',
     fontFamily: 'monospace',
     marginBottom: 4,
+  },
+  clearCacheButton: {
+    backgroundColor: '#FF9800',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clearCacheButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 

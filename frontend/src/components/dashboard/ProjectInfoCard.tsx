@@ -80,9 +80,9 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
       {/* Project Information */}
       <View style={styles.projectSection}>
         <Text style={styles.projectName}>{project.name}</Text>
-        {project.description && (
-          <Text style={styles.projectDescription}>{project.description}</Text>
-        )}
+        {project.description ? (
+          <Text style={styles.projectDescription}>{String(project.description)}</Text>
+        ) : null}
       </View>
       
       {/* Site Location */}
@@ -92,16 +92,16 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
           <Text style={styles.locationIcon}>📍</Text>
           <View style={styles.locationInfo}>
             <Text style={styles.locationText}>{project.location.address}</Text>
-            {project.location.landmarks && project.location.landmarks.length > 0 && (
+            {project.location.landmarks && project.location.landmarks.length > 0 ? (
               <Text style={styles.landmarksText}>
                 Near: {project.location.landmarks.join(', ')}
               </Text>
-            )}
-            {project.location.accessInstructions && (
+            ) : null}
+            {project.location.accessInstructions ? (
               <Text style={styles.accessInstructions}>
-                Access: {project.location.accessInstructions}
+                Access: {String(project.location.accessInstructions)}
               </Text>
-            )}
+            ) : null}
           </View>
         </View>
       </View>
@@ -112,11 +112,11 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
         <View style={styles.geofenceDetails}>
           <View style={styles.geofenceRow}>
             <Text style={styles.geofenceLabel}>Work Area Radius:</Text>
-            <Text style={styles.geofenceValue}>{project.geofence.radius}m</Text>
+            <Text style={styles.geofenceValue}>{String(project.geofence.radius)}m</Text>
           </View>
           <View style={styles.geofenceRow}>
             <Text style={styles.geofenceLabel}>GPS Accuracy Required:</Text>
-            <Text style={styles.geofenceValue}>≤{project.geofence.allowedAccuracy}m</Text>
+            <Text style={styles.geofenceValue}>≤{String(project.geofence.allowedAccuracy)}m</Text>
           </View>
           <View style={styles.geofenceRow}>
             <Text style={styles.geofenceLabel}>Current Status:</Text>
@@ -127,7 +127,7 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
             </View>
           </View>
           <Text style={styles.coordinatesText}>
-            Center: {project.geofence.center.latitude.toFixed(6)}, {project.geofence.center.longitude.toFixed(6)}
+            Center: {String(project.geofence.center.latitude.toFixed(6))}, {String(project.geofence.center.longitude.toFixed(6))}
           </Text>
           <Text style={styles.geofenceNote}>
             ⚠️ Attendance can only be marked inside the geo-fenced area
@@ -136,31 +136,31 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
       </View>
 
       {/* Supervisor Contact */}
-      {project.supervisor && (
+      {project.supervisor && typeof project.supervisor === 'object' && project.supervisor.name && (
         <View style={styles.supervisorContainer}>
           <Text style={styles.sectionTitle}>👨‍💼 Supervisor Name & Contact</Text>
           <View style={styles.supervisorCard}>
             <View style={styles.supervisorInfo}>
-              <Text style={styles.supervisorName}>{project.supervisor.name}</Text>
+              <Text style={styles.supervisorName}>{String(project.supervisor.name)}</Text>
               <Text style={styles.supervisorRole}>Site Supervisor</Text>
             </View>
             <View style={styles.contactButtons}>
               <TouchableOpacity 
                 style={styles.contactButton}
-                onPress={() => handleCallSupervisor(project.supervisor.phone, project.supervisor.name)}
+                onPress={() => handleCallSupervisor(String(project.supervisor.phone), String(project.supervisor.name))}
               >
                 <Text style={styles.contactButtonIcon}>📞</Text>
-                <Text style={styles.contactButtonText}>{project.supervisor.phone}</Text>
+                <Text style={styles.contactButtonText}>{String(project.supervisor.phone)}</Text>
               </TouchableOpacity>
-              {project.supervisor.email && (
+              {project.supervisor.email ? (
                 <TouchableOpacity 
                   style={[styles.contactButton, styles.emailButton]}
-                  onPress={() => handleEmailSupervisor(project.supervisor.email, project.supervisor.name)}
+                  onPress={() => handleEmailSupervisor(String(project.supervisor.email), String(project.supervisor.name))}
                 >
                   <Text style={styles.contactButtonIcon}>✉️</Text>
                   <Text style={styles.contactButtonText}>Email</Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
           </View>
           <Text style={styles.contactNote}>

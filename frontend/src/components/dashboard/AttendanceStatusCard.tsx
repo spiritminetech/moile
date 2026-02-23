@@ -123,7 +123,7 @@ const AttendanceStatusCard: React.FC<AttendanceStatusCardProps> = ({
   const formatDuration = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    return `${hours}h ${mins}m`;
+    return `${String(hours)}h ${String(mins)}m`;
   };
 
   const formatTime = (timeString: string): string => {
@@ -177,24 +177,24 @@ const AttendanceStatusCard: React.FC<AttendanceStatusCardProps> = ({
           <Text style={styles.shiftIcon}>{shiftDisplay.icon}</Text>
           <View style={styles.shiftInfo}>
             <Text style={[styles.shiftType, { color: shiftDisplay.color }]}>
-              {shiftInfo.type}
+              {String(shiftInfo.type)}
             </Text>
             <Text style={styles.shiftStatus}>
-              {shiftInfo.status === 'active' && 'On Duty'}
-              {shiftInfo.status === 'completed' && 'Completed'}
-              {shiftInfo.status === 'pending' && 'Not Started'}
-              {shiftInfo.status === 'break' && 'On Break'}
+              {shiftInfo.status === 'active' ? 'On Duty' : 
+               shiftInfo.status === 'completed' ? 'Completed' : 
+               shiftInfo.status === 'pending' ? 'Not Started' : 
+               shiftInfo.status === 'break' ? 'On Break' : ''}
             </Text>
-            {shiftInfo.expectedLogout && (
+            {shiftInfo.expectedLogout ? (
               <Text style={styles.expectedLogout}>
-                Expected Logout: {shiftInfo.expectedLogout}
+                Expected Logout: {String(shiftInfo.expectedLogout)}
               </Text>
-            )}
-            {shiftInfo.type === 'Overtime' && (
+            ) : null}
+            {shiftInfo.type === 'Overtime' ? (
               <Text style={[styles.overtimeStatus, { color: shiftInfo.isApproved ? '#4CAF50' : '#FF9800' }]}>
                 {shiftInfo.isApproved ? '✅ OT Approved' : '⏳ OT Pending Approval'}
               </Text>
-            )}
+            ) : null}
           </View>
         </View>
       </View>
@@ -210,30 +210,30 @@ const AttendanceStatusCard: React.FC<AttendanceStatusCardProps> = ({
       </View>
 
       {/* Session Details */}
-      {attendanceStatus && (
+      {attendanceStatus ? (
         <View style={styles.sessionInfo}>
           <View style={styles.timeRow}>
             <Text style={styles.timeLabel}>Login Time:</Text>
             <Text style={styles.timeValue}>{formatTime(attendanceStatus.loginTime)}</Text>
           </View>
           
-          {attendanceStatus.logoutTime && (
+          {attendanceStatus.logoutTime ? (
             <View style={styles.timeRow}>
               <Text style={styles.timeLabel}>Logout Time:</Text>
               <Text style={styles.timeValue}>{formatTime(attendanceStatus.logoutTime)}</Text>
             </View>
-          )}
+          ) : null}
           
           <View style={styles.sessionTypeRow}>
             <Text style={styles.sessionTypeLabel}>Session Type:</Text>
             <View style={[styles.sessionTypeBadge, styles[`sessionType_${attendanceStatus.sessionType}`]]}>
               <Text style={styles.sessionTypeText}>
-                {attendanceStatus.sessionType.toUpperCase()}
+                {String(attendanceStatus.sessionType).toUpperCase()}
               </Text>
             </View>
           </View>
         </View>
-      )}
+      ) : null}
 
       {/* Working Hours Summary */}
       <View style={styles.hoursContainer}>
@@ -289,18 +289,18 @@ const AttendanceStatusCard: React.FC<AttendanceStatusCardProps> = ({
               {formatDuration(workingHours.totalHours)}
             </Text>
           </View>
-          {workingHours.overtimeHours && workingHours.overtimeHours > 0 && (
+          {workingHours.overtimeHours && workingHours.overtimeHours > 0 ? (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Overtime Hours:</Text>
               <Text style={[styles.summaryValue, styles.overtimeValue]}>
-                {Math.floor(workingHours.overtimeHours / 60)}h {workingHours.overtimeHours % 60}m
+                {String(Math.floor(workingHours.overtimeHours / 60))}h {String(workingHours.overtimeHours % 60)}m
               </Text>
             </View>
-          )}
+          ) : null}
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Current Shift:</Text>
             <Text style={[styles.summaryValue, { color: shiftDisplay.color }]}>
-              {shiftInfo.type}
+              {String(shiftInfo.type)}
             </Text>
           </View>
         </View>

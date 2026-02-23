@@ -139,16 +139,16 @@ const WorkInstructionsCard: React.FC<WorkInstructionsCardProps> = ({
       <View style={styles.header}>
         <Text style={styles.title}>📢 Daily Instructions & Messages</Text>
         <View style={styles.headerBadges}>
-          {unreadCount > 0 && (
+          {unreadCount > 0 ? (
             <View style={styles.unreadBadge}>
-              <Text style={styles.unreadBadgeText}>{unreadCount} New</Text>
+              <Text style={styles.unreadBadgeText}>{String(unreadCount)} New</Text>
             </View>
-          )}
-          {criticalCount > 0 && (
+          ) : null}
+          {criticalCount > 0 ? (
             <View style={styles.criticalBadge}>
-              <Text style={styles.criticalBadgeText}>{criticalCount} Critical</Text>
+              <Text style={styles.criticalBadgeText}>{String(criticalCount)} Critical</Text>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -196,32 +196,32 @@ const WorkInstructionsCard: React.FC<WorkInstructionsCardProps> = ({
               </View>
             </View>
 
-            {expandedId === instruction.id && (
+            {expandedId === instruction.id ? (
               <View style={styles.instructionContent}>
                 <Text style={styles.instructionMessage}>
-                  {instruction.message}
+                  {String(instruction.message)}
                 </Text>
-                {instruction.sourceName && (
+                {instruction.sourceName ? (
                   <View style={styles.sourceInfo}>
                     <Text style={styles.sourceLabel}>From:</Text>
                     <Text style={styles.sourceName}>
-                      {instruction.sourceName} ({instruction.source})
+                      {String(instruction.sourceName)} ({String(instruction.source)})
                     </Text>
                   </View>
-                )}
+                ) : null}
               </View>
-            )}
+            ) : null}
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {instructions.length > 5 && (
+      {instructions.length > 5 ? (
         <TouchableOpacity style={styles.viewAllButton} onPress={onViewAll}>
           <Text style={styles.viewAllText}>
-            View All Instructions ({instructions.length})
+            View All Instructions ({String(instructions.length)})
           </Text>
         </TouchableOpacity>
-      )}
+      ) : null}
 
       {/* Quick Reference */}
       <View style={styles.quickReference}>
@@ -258,24 +258,24 @@ const WorkInstructionsCard: React.FC<WorkInstructionsCardProps> = ({
           <Text style={styles.summaryTitle}>📊 Today's Instructions Summary</Text>
           <View style={styles.summaryStats}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{instructions.length}</Text>
+              <Text style={styles.statValue}>{String(instructions.length)}</Text>
               <Text style={styles.statLabel}>Total</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: '#F44336' }]}>
-                {instructions.filter(i => i.priority === 'critical').length}
+                {String(instructions.filter(i => i.priority === 'critical').length)}
               </Text>
               <Text style={styles.statLabel}>Critical</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: '#2196F3' }]}>
-                {instructions.filter(i => !i.isRead).length}
+                {String(instructions.filter(i => !i.isRead).length)}
               </Text>
               <Text style={styles.statLabel}>Unread</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={[styles.statValue, { color: '#4CAF50' }]}>
-                {instructions.filter(i => i.type === 'safety_message').length}
+                {String(instructions.filter(i => i.type === 'safety_message').length)}
               </Text>
               <Text style={styles.statLabel}>Safety</Text>
             </View>

@@ -239,6 +239,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       await authService.logout();
       await clearRoleSpecificData();
+      
+      // Clear ALL cached data to prevent showing old user's data on new login
+      await Promise.all([
+        AsyncStorage.removeItem(STORAGE_KEYS.CACHED_TASKS),
+        AsyncStorage.removeItem(STORAGE_KEYS.CACHED_ATTENDANCE),
+        AsyncStorage.removeItem(STORAGE_KEYS.LAST_SYNC),
+        AsyncStorage.removeItem('@construction_erp:queued_actions'),
+      ]);
+      
+      console.log('✅ All cached data cleared on logout');
     } catch (error) {
       console.warn('Logout error:', error);
     } finally {
