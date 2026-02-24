@@ -141,19 +141,23 @@ const WorkerCheckInForm: React.FC<WorkerCheckInFormProps> = ({
   });
   
   // ✅ NEW: Auto-select all picked-up workers at dropoff
-  React.useEffect(() => {
+  // ✅ FIX: Use useMemo to prevent infinite loop by stabilizing the worker IDs
+  const pickedUpWorkerIds = React.useMemo(() => {
     if (isDropoff && !isDropoffCompleted && selectedLocation?.workerManifest) {
-      // Auto-select all workers who were picked up
-      const pickedUpWorkerIds = selectedLocation.workerManifest
+      return selectedLocation.workerManifest
         .filter(w => w.checkedIn || (w as any).wasPickedUp)
         .map(w => w.workerId);
-      
-      if (pickedUpWorkerIds.length > 0) {
-        console.log('🚌 Auto-selecting picked-up workers for dropoff:', pickedUpWorkerIds);
-        setSelectedWorkers(new Set(pickedUpWorkerIds));
-      }
     }
-  }, [isDropoff, isDropoffCompleted, selectedLocation?.workerManifest]);
+    return [];
+  }, [isDropoff, isDropoffCompleted, selectedLocation?.workerManifest?.length, 
+      selectedLocation?.workerManifest?.map(w => `${w.workerId}-${w.checkedIn}-${(w as any).wasPickedUp}`).join(',')]);
+  
+  React.useEffect(() => {
+    if (pickedUpWorkerIds.length > 0 && selectedWorkers.size === 0) {
+      console.log('🚌 Auto-selecting picked-up workers for dropoff:', pickedUpWorkerIds);
+      setSelectedWorkers(new Set(pickedUpWorkerIds));
+    }
+  }, [pickedUpWorkerIds.join(',')]); // Only re-run when the actual IDs change
   
   // ✅ CRITICAL: Log display decision for EACH worker
   if (selectedLocation?.workerManifest) {

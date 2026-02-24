@@ -340,7 +340,7 @@ const TransportTasksScreen: React.FC = () => {
         console.log('✅ Using pre-cached worker data');
       }
     }
-  }, [selectedTask?.taskId, loadWorkerManifests]); // ✅ Include loadWorkerManifests to prevent stale closure
+  }, [selectedTask?.taskId]); // ✅ FIXED: Remove loadWorkerManifests from dependencies to prevent potential loops
 
   // Handle refresh
   const handleRefresh = useCallback(() => {
