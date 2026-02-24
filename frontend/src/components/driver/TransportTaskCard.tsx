@@ -236,12 +236,15 @@ const styles = StyleSheet.create({
   titleContainer: {
     flex: 1,
     marginRight: ConstructionTheme.spacing.md,
+    flexShrink: 1,
   },
   routeName: {
     ...ConstructionTheme.typography.headlineMedium, // ENHANCED: Larger text
     color: ConstructionTheme.colors.onSurface,
     fontWeight: '700',
     marginBottom: 4,
+    flexWrap: 'wrap',
+    lineHeight: 28,
   },
   statusBadge: {
     paddingHorizontal: ConstructionTheme.spacing.md,

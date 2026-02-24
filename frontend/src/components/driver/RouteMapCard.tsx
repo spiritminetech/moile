@@ -393,11 +393,15 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onSurface,
     fontWeight: '600',
     marginBottom: ConstructionTheme.spacing.sm,
+    flexWrap: 'wrap',
+    lineHeight: 24,
   },
   destinationAddress: {
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurfaceVariant,
     marginBottom: ConstructionTheme.spacing.sm,
+    flexWrap: 'wrap',
+    lineHeight: 20,
   },
   distanceText: {
     ...ConstructionTheme.typography.bodyMedium,
@@ -435,6 +439,8 @@ const styles = StyleSheet.create({
     color: ConstructionTheme.colors.onSurface,
     fontWeight: '600',
     flex: 1,
+    flexWrap: 'wrap',
+    lineHeight: 24,
   },
   completedBadge: {
     ...ConstructionTheme.typography.bodySmall,
@@ -445,6 +451,8 @@ const styles = StyleSheet.create({
     ...ConstructionTheme.typography.bodyMedium,
     color: ConstructionTheme.colors.onSurfaceVariant,
     marginBottom: ConstructionTheme.spacing.sm,
+    flexWrap: 'wrap',
+    lineHeight: 20,
   },
   locationItemDistance: {
     ...ConstructionTheme.typography.bodySmall,

@@ -526,9 +526,9 @@ const TaskAssignmentScreen: React.FC = () => {
                   All Projects
                 </Text>
               </TouchableOpacity>
-              {availableProjects.map((project) => (
+              {availableProjects.map((project, index) => (
                 <TouchableOpacity
-                  key={project.id}
+                  key={`filter-project-${project.id}-${index}`}
                   style={[styles.filterChip, selectedProject === project.id && styles.filterChipActive]}
                   onPress={() => setSelectedProject(project.id)}
                 >
@@ -544,9 +544,9 @@ const TaskAssignmentScreen: React.FC = () => {
           <View style={styles.filterGroup}>
             <Text style={styles.filterLabel}>Status:</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {['all', 'pending', 'in_progress', 'completed'].map((status) => (
+              {['all', 'pending', 'in_progress', 'completed'].map((status, index) => (
                 <TouchableOpacity
-                  key={status}
+                  key={`filter-status-${status}-${index}`}
                   style={[styles.filterChip, filterStatus === status && styles.filterChipActive]}
                   onPress={() => setFilterStatus(status as any)}
                 >
@@ -562,9 +562,9 @@ const TaskAssignmentScreen: React.FC = () => {
           <View style={styles.filterGroup}>
             <Text style={styles.filterLabel}>Priority:</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {['all', 'urgent', 'high', 'normal', 'low'].map((priority) => (
+              {['all', 'urgent', 'high', 'normal', 'low'].map((priority, index) => (
                 <TouchableOpacity
-                  key={priority}
+                  key={`filter-priority-${priority}-${index}`}
                   style={[styles.filterChip, filterPriority === priority && styles.filterChipActive]}
                   onPress={() => setFilterPriority(priority as any)}
                 >
@@ -819,9 +819,9 @@ const TaskAssignmentScreen: React.FC = () => {
             <View style={styles.formGroup}>
               <Text style={styles.formLabel}>Project *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                {availableProjects.map((project) => (
+                {availableProjects.map((project, index) => (
                   <TouchableOpacity
-                    key={project.id}
+                    key={`modal-project-${project.id}-${index}`}
                     style={[
                       styles.optionChip,
                       createTaskForm.projectId === project.id && styles.optionChipActive
@@ -879,9 +879,9 @@ const TaskAssignmentScreen: React.FC = () => {
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Assign to Worker *</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                  {availableWorkers.map((worker) => (
+                  {availableWorkers.map((worker, index) => (
                     <TouchableOpacity
-                      key={worker.id}
+                      key={`individual-worker-${worker.id}-${index}`}
                       style={[
                         styles.optionChip,
                         createTaskForm.workerId === worker.id && styles.optionChipActive
@@ -905,9 +905,9 @@ const TaskAssignmentScreen: React.FC = () => {
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>Select Workers * ({createTaskForm.workerIds.length} selected)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                  {availableWorkers.map((worker) => (
+                  {availableWorkers.map((worker, index) => (
                     <TouchableOpacity
-                      key={worker.id}
+                      key={`group-worker-${worker.id}-${index}`}
                       style={[
                         styles.optionChip,
                         createTaskForm.workerIds.includes(worker.id) && styles.optionChipActive
@@ -938,9 +938,9 @@ const TaskAssignmentScreen: React.FC = () => {
             <View style={styles.formGroup}>
               <Text style={styles.formLabel}>Trade / Nature of Work *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                {(['electrical', 'plumbing', 'carpentry', 'masonry', 'painting', 'welding', 'hvac', 'other'] as const).map((trade) => (
+                {(['electrical', 'plumbing', 'carpentry', 'masonry', 'painting', 'welding', 'hvac', 'other'] as const).map((trade, index) => (
                   <TouchableOpacity
-                    key={trade}
+                    key={`trade-${trade}-${index}`}
                     style={[
                       styles.optionChip,
                       createTaskForm.trade === trade && styles.optionChipActive
@@ -1030,9 +1030,9 @@ const TaskAssignmentScreen: React.FC = () => {
             <View style={styles.formGroup}>
               <Text style={styles.formLabel}>Priority</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                {(['low', 'normal', 'high', 'urgent'] as const).map((priority) => (
+                {(['low', 'normal', 'high', 'urgent'] as const).map((priority, index) => (
                   <TouchableOpacity
-                    key={priority}
+                    key={`priority-${priority}-${index}`}
                     style={[
                       styles.optionChip,
                       createTaskForm.priority === priority && styles.optionChipActive,
@@ -1154,9 +1154,9 @@ const TaskAssignmentScreen: React.FC = () => {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
                     {availableWorkers
                       .filter(worker => worker.id !== selectedTask.workerId)
-                      .map((worker) => (
+                      .map((worker, index) => (
                         <TouchableOpacity
-                          key={worker.id}
+                          key={`reassign-worker-${worker.id}-${index}`}
                           style={[
                             styles.optionChip,
                             reassignWorkerId === worker.id && styles.optionChipActive
@@ -1321,7 +1321,7 @@ const TaskAssignmentScreen: React.FC = () => {
                     <Text style={styles.detailSectionTitle}>Dependencies</Text>
                     <View style={styles.dependenciesList}>
                       {selectedTask.dependencies.map((depId, index) => (
-                        <View key={depId} style={styles.dependencyItem}>
+                        <View key={`dependency-${depId}-${index}`} style={styles.dependencyItem}>
                           <Text style={styles.dependencyText}>
                             🔗 Task #{depId}
                           </Text>
@@ -1487,9 +1487,9 @@ const TaskAssignmentScreen: React.FC = () => {
                   <View style={styles.formGroup}>
                     <Text style={styles.formLabel}>Reason Category *</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsScroll}>
-                      {(['weather', 'manpower', 'material', 'other'] as const).map((category) => (
+                      {(['weather', 'manpower', 'material', 'other'] as const).map((category, index) => (
                         <TouchableOpacity
-                          key={category}
+                          key={`reason-category-${category}-${index}`}
                           style={[
                             styles.optionChip,
                             targetUpdateReasonCategory === category && styles.optionChipActive
