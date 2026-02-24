@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { TaskAssignment } from '../../types';
 import { useTaskHistory } from '../../hooks/useTaskHistory';
 import { useOffline } from '../../store/context/OfflineContext';
+import { useLocation } from '../../store/context/LocationContext';
 import TaskCard from '../../components/cards/TaskCard';
 import { 
   LoadingOverlay, 
@@ -43,6 +44,8 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
     currentFilter 
   } = useTaskHistory();
   const { isOffline } = useOffline();
+  const { state: locationState } = useLocation();
+  const { currentLocation } = locationState;
 
   // Refresh data when screen comes into focus to ensure counts are up to date
   useFocusEffect(
@@ -50,6 +53,68 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
       refreshData();
     }, [refreshData])
   );
+
+  // Calculate distance using Haversine formula
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  };
+
+  // Check if worker is inside geofence for a task
+  const isInsideGeofence = useCallback((task: TaskAssignment): boolean => {
+    // In development mode, assume inside geofence if no location
+    if (!currentLocation) {
+      if (__DEV__) {
+        console.log('🔧 Development mode: No location available, assuming inside geofence for testing');
+        return true; // Allow in dev mode for testing
+      }
+      console.log('❌ No location available and not in dev mode');
+      return false;
+    }
+
+    // If task doesn't have geofence data, allow (backward compatibility)
+    if (!task.projectGeofence || !task.projectGeofence.latitude || !task.projectGeofence.longitude) {
+      console.log('✅ No geofence configured for task, allowing');
+      return true;
+    }
+
+    // Calculate distance from worker to project site
+    const distance = calculateDistance(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      task.projectGeofence.latitude,
+      task.projectGeofence.longitude
+    );
+
+    // Check if within geofence radius (with some tolerance)
+    const radius = task.projectGeofence.radius || 50000; // Default 50km for testing
+    const tolerance = task.projectGeofence.allowedVariance || 5000; // Default 5km tolerance
+    
+    const isInside = distance <= (radius + tolerance);
+    console.log('📍 Task History - Geofence check:', {
+      taskName: task.taskName,
+      yourLocation: `${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}`,
+      siteLocation: `${task.projectGeofence.latitude.toFixed(6)}, ${task.projectGeofence.longitude.toFixed(6)}`,
+      distance: distance.toFixed(2) + 'm',
+      radius: radius + 'm',
+      tolerance: tolerance + 'm',
+      maxAllowed: (radius + tolerance) + 'm',
+      isInside: isInside,
+      tooFarBy: isInside ? '0m' : (distance - (radius + tolerance)).toFixed(2) + 'm'
+    });
+    
+    return isInside;
+  }, [currentLocation]);
 
   // Handle task view details
   const handleViewTaskDetails = useCallback((task: TaskAssignment) => {
@@ -77,6 +142,10 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
 
   const handleUpdateProgress = useCallback(() => {
     Alert.alert('Not Available', 'Cannot update progress for historical tasks.', [{ text: 'OK' }]);
+  }, []);
+
+  const handleResumeTask = useCallback(() => {
+    Alert.alert('Not Available', 'Cannot resume historical tasks.', [{ text: 'OK' }]);
   }, []);
 
   // Get filter button style
@@ -157,18 +226,24 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
   };
 
   // Render task item with historical context
-  const renderTaskItem = ({ item }: { item: TaskAssignment }) => (
-    <TouchableOpacity onPress={() => handleViewTaskDetails(item)}>
-      <TaskCard
-        task={item}
-        onStartTask={handleStartTask}
-        onUpdateProgress={handleUpdateProgress}
-        onViewLocation={handleViewLocation}
-        canStart={false}
-        isOffline={isOffline}
-      />
-    </TouchableOpacity>
-  );
+  const renderTaskItem = ({ item }: { item: TaskAssignment }) => {
+    const insideGeofence = isInsideGeofence(item);
+    
+    return (
+      <TouchableOpacity onPress={() => handleViewTaskDetails(item)}>
+        <TaskCard
+          task={item}
+          onStartTask={handleStartTask}
+          onUpdateProgress={handleUpdateProgress}
+          onResumeTask={handleResumeTask}
+          onViewLocation={handleViewLocation}
+          canStart={false}
+          isInsideGeofence={insideGeofence}
+          isOffline={isOffline}
+        />
+      </TouchableOpacity>
+    );
+  };
 
   // Render empty state
   const renderEmptyState = () => (
