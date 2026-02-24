@@ -569,8 +569,8 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
 
     return (
       <ConstructionCard title="Certifications" variant="elevated" style={styles.section}>
-        {profileData.certifications.map((cert) => (
-          <View key={cert.id} style={styles.certificationCard}>
+        {profileData.certifications.map((cert, index) => (
+          <View key={`profile-cert-${cert.id}-${index}`} style={styles.certificationCard}>
             <View style={styles.certificationHeader}>
               <View style={styles.certificationInfo}>
                 <Text style={styles.certificationName}>{cert.name}</Text>
@@ -731,8 +731,8 @@ const SupervisorProfileScreen: React.FC<SupervisorProfileScreenProps> = ({ navig
 
     return (
       <ConstructionCard title="Achievements & Recognition" variant="elevated" style={styles.section}>
-        {profileData.achievements.map((achievement) => (
-          <View key={achievement.id} style={styles.achievementCard}>
+        {profileData.achievements.map((achievement, index) => (
+          <View key={`profile-achievement-${achievement.id}-${index}`} style={styles.achievementCard}>
             <View style={styles.achievementHeader}>
               <Text style={styles.achievementIcon}>{achievement.icon}</Text>
               <View style={styles.achievementInfo}>

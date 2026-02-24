@@ -473,8 +473,8 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
         {/* Project-based Team Overview */}
         {projectTeamSummary.length > 0 && (
           <ConstructionCard title="Projects Overview" variant="elevated" style={styles.summaryCard}>
-            {projectTeamSummary.map((projectData) => (
-              <View key={projectData.project.id} style={styles.projectSummaryCard}>
+            {projectTeamSummary.map((projectData, index) => (
+              <View key={`project-summary-${projectData.project.id}-${index}`} style={styles.projectSummaryCard}>
                 <View style={styles.projectHeader}>
                   <Text style={styles.projectName}>{projectData.project.name}</Text>
                   <Text style={styles.projectWorkerCount}>
@@ -565,9 +565,9 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
           </View>
         ) : (
           <View style={styles.membersContainer}>
-            {filteredAndSortedMembers.map((member) => (
+            {filteredAndSortedMembers.map((member, index) => (
               <TouchableOpacity
-                key={member.id}
+                key={`team-member-${member.id}-${index}`}
                 style={styles.memberCard}
                 onPress={() => handleMemberPress(member)}
                 activeOpacity={0.7}
@@ -699,9 +699,9 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
             <View style={styles.filterSection}>
               <Text style={styles.filterSectionTitle}>Filter by Attendance Status</Text>
               <View style={styles.filterOptions}>
-                {(['all', 'present', 'absent', 'late', 'on_break'] as AttendanceFilter[]).map((filter) => (
+                {(['all', 'present', 'absent', 'late', 'on_break'] as AttendanceFilter[]).map((filter, index) => (
                   <TouchableOpacity
-                    key={filter}
+                    key={`attendance-filter-${filter}-${index}`}
                     style={[
                       styles.filterOption,
                       attendanceFilter === filter && styles.filterOptionActive
@@ -728,9 +728,9 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                   { key: 'status', label: 'Status' },
                   { key: 'task_progress', label: 'Task Progress' },
                   { key: 'last_updated', label: 'Last Updated' }
-                ] as Array<{ key: SortOption; label: string }>).map((option) => (
+                ] as Array<{ key: SortOption; label: string }>).map((option, index) => (
                   <TouchableOpacity
-                    key={option.key}
+                    key={`sort-option-${option.key}-${index}`}
                     style={[
                       styles.filterOption,
                       sortBy === option.key && styles.filterOptionActive
@@ -979,9 +979,9 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
             <View style={styles.communicationTypeSection}>
               <Text style={styles.sectionTitle}>Message Type</Text>
               <View style={styles.communicationTypes}>
-                {(['message', 'notification', 'alert'] as Array<typeof communicationType>).map((type) => (
+                {(['message', 'notification', 'alert'] as Array<typeof communicationType>).map((type, index) => (
                   <TouchableOpacity
-                    key={type}
+                    key={`communication-type-${type}-${index}`}
                     style={[
                       styles.communicationTypeOption,
                       communicationType === type && styles.communicationTypeOptionActive
@@ -1025,7 +1025,7 @@ const TeamManagementScreen: React.FC<TeamManagementScreenProps> = ({ navigation 
                   'Please report to supervisor'
                 ].map((template, index) => (
                   <TouchableOpacity
-                    key={index}
+                    key={`message-template-${index}-${template.substring(0, 10)}`}
                     style={styles.quickMessageButton}
                     onPress={() => setCommunicationMessage(template)}
                   >

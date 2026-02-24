@@ -185,9 +185,9 @@ const AttendanceRegularizationScreen: React.FC = () => {
     }
   };
 
-  const renderRequestCard = (request: RegularizationRequest) => (
+  const renderRequestCard = (request: RegularizationRequest, index: number) => (
     <ConstructionCard
-      key={request.id}
+      key={`request-${request.id}-${index}`}
       title={`${request.workerName} - ${getRequestTypeLabel(request.requestType)}`}
       variant="outlined"
       style={styles.requestCard}
@@ -333,7 +333,7 @@ const AttendanceRegularizationScreen: React.FC = () => {
         {pendingRequests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Pending Requests ({pendingRequests.length})</Text>
-            {pendingRequests.map(renderRequestCard)}
+            {pendingRequests.map((request, index) => renderRequestCard(request, index))}
           </View>
         )}
 
@@ -341,7 +341,7 @@ const AttendanceRegularizationScreen: React.FC = () => {
         {processedRequests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Processed Requests ({processedRequests.length})</Text>
-            {processedRequests.map(renderRequestCard)}
+            {processedRequests.map((request, index) => renderRequestCard(request, index))}
           </View>
         )}
 
