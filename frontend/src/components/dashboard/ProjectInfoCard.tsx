@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert } from 'react-native';
 import { Project } from '../../types';
+import { useLocation } from '../../store/context/LocationContext';
 
 interface ProjectInfoCardProps {
   project: Project | null;
@@ -8,6 +9,69 @@ interface ProjectInfoCardProps {
 }
 
 const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading }) => {
+  const { state: locationState, validateGeofence, getCurrentLocation } = useLocation();
+  const [geofenceStatus, setGeofenceStatus] = useState<{ isInside: boolean; distance: number }>({
+    isInside: false,
+    distance: 999,
+  });
+  const [isValidating, setIsValidating] = useState(false);
+
+  // Validate geofence when project changes
+  useEffect(() => {
+    if (project && project.id && !isValidating) {
+      validateProjectGeofence();
+    }
+  }, [project?.id]);
+
+  // Re-validate when location state changes (but with debouncing to avoid loops)
+  useEffect(() => {
+    if (project && project.id && locationState.isGeofenceValid !== undefined) {
+      // Use a timeout to debounce and avoid rapid re-validations
+      const timer = setTimeout(() => {
+        if (!isValidating) {
+          validateProjectGeofence();
+        }
+      }, 1000); // Wait 1 second after location change
+
+      return () => clearTimeout(timer);
+    }
+  }, [locationState.isGeofenceValid]);
+
+  const validateProjectGeofence = async () => {
+    if (!project || !project.id || isValidating) return;
+
+    setIsValidating(true);
+    try {
+      // Use current location from state
+      if (!locationState.currentLocation) {
+        console.log('📍 ProjectInfoCard: No location available yet');
+        setIsValidating(false);
+        return;
+      }
+      
+      // Validate against project geofence
+      const validation = await validateGeofence(project.id);
+      
+      setGeofenceStatus({
+        isInside: validation.isValid,
+        distance: validation.distanceFromSite,
+      });
+      
+      console.log('📍 ProjectInfoCard: Geofence validation:', {
+        projectId: project.id,
+        isInside: validation.isValid,
+        distance: validation.distanceFromSite,
+      });
+    } catch (error) {
+      console.error('❌ ProjectInfoCard: Geofence validation failed:', error);
+      setGeofenceStatus({
+        isInside: false,
+        distance: 999,
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
   const handleCallSupervisor = (phone: string, name: string) => {
     Alert.alert(
       'Call Supervisor',
@@ -35,15 +99,6 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
     });
   };
 
-  const getGeofenceStatus = (project: Project) => {
-    // This would typically check current location against geofence
-    // For now, we'll show the geofence information
-    return {
-      isInside: true, // This would be calculated based on current location
-      distance: 0, // Distance from center in meters
-    };
-  };
-
   if (isLoading) {
     return (
       <View style={styles.container}>
@@ -65,8 +120,6 @@ const ProjectInfoCard: React.FC<ProjectInfoCardProps> = ({ project, isLoading })
       </View>
     );
   }
-
-  const geofenceStatus = getGeofenceStatus(project);
 
   return (
     <View style={styles.container}>

@@ -114,19 +114,22 @@ export const GPSAccuracyIndicator: React.FC<GPSAccuracyIndicatorProps> = ({
           </View>
 
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Can Proceed:</Text>
+            <Text style={styles.detailLabel}>GPS Signal Quality:</Text>
             <Text style={[
               styles.detailValue,
               { color: accuracyWarning.canProceed ? COLORS.SUCCESS : COLORS.ERROR }
             ]}>
-              {accuracyWarning.canProceed ? 'Yes ✓' : 'No ✗'}
+              {accuracyWarning.canProceed ? 'Sufficient ✓' : 'Insufficient ✗'}
             </Text>
           </View>
 
           {accuracyWarning.message && (
             <View style={styles.messageContainer}>
               <Text style={[styles.messageText, { color: getAccuracyColor() }]}>
-                {accuracyWarning.message}
+                ℹ️ {accuracyWarning.message}
+              </Text>
+              <Text style={[styles.noteText, { marginTop: 4 }]}>
+                Note: You must also be inside the work area geofence to clock in/out.
               </Text>
             </View>
           )}
@@ -220,6 +223,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     fontWeight: '500',
+  },
+  noteText: {
+    fontSize: 12,
+    textAlign: 'center',
+    color: COLORS.TEXT_SECONDARY,
+    fontStyle: 'italic',
   },
   tipsContainer: {
     marginTop: UI_CONSTANTS.SPACING.SM,

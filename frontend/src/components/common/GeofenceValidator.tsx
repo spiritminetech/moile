@@ -34,7 +34,7 @@ export const GeofenceValidator: React.FC<GeofenceValidatorProps> = ({
     }
   }, [state.currentLocation, projectId, autoValidate]);
 
-  const performValidation = async () => {
+  const performValidation = async (forceRefresh: boolean = false) => {
     if (!projectId) {
       return;
     }
@@ -42,10 +42,10 @@ export const GeofenceValidator: React.FC<GeofenceValidatorProps> = ({
     console.log('🔍 GeofenceValidator: Starting validation for project', projectId);
     setIsValidating(true);
     try {
-      // Get current location if not available
+      // Always get fresh location if forceRefresh is true, or if no cached location
       let currentLocation = state.currentLocation;
-      if (!currentLocation) {
-        console.log('📍 GeofenceValidator: No cached location, getting current location...');
+      if (forceRefresh || !currentLocation) {
+        console.log('📍 GeofenceValidator: Getting fresh location...');
         currentLocation = await getCurrentLocation();
       }
 
@@ -85,7 +85,7 @@ export const GeofenceValidator: React.FC<GeofenceValidatorProps> = ({
   };
 
   const handleManualValidation = () => {
-    performValidation();
+    performValidation(true); // Force refresh when manually triggered
   };
 
   const formatDistance = (distance: number): string => {
@@ -105,8 +105,13 @@ export const GeofenceValidator: React.FC<GeofenceValidatorProps> = ({
   const getValidationStatusText = (): string => {
     if (isValidating) return 'Validating location...';
     if (!validation) return 'Location not validated';
-    if (validation.isValid) return 'Location validated ✓';
-    return 'Outside work area ✗';
+    
+    // Show BOTH GPS accuracy AND geofence status clearly
+    if (validation.isValid) {
+      return 'Inside work area ✓';
+    } else {
+      return `Outside work area (${formatDistance(validation.distanceFromSite)} away) ✗`;
+    }
   };
 
   const renderLocationStatus = () => {
@@ -167,6 +172,11 @@ export const GeofenceValidator: React.FC<GeofenceValidatorProps> = ({
             ]}>
               {validation.message}
             </Text>
+            {!validation.isValid && (
+              <Text style={styles.refreshHintText}>
+                💡 Moved closer? Tap "Refresh Location" below to update.
+              </Text>
+            )}
           </View>
         )}
 
@@ -258,6 +268,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     fontWeight: '500',
+  },
+  refreshHintText: {
+    fontSize: 12,
+    textAlign: 'center',
+    color: COLORS.TEXT_SECONDARY,
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   warningContainer: {
     marginTop: UI_CONSTANTS.SPACING.SM,

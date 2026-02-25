@@ -177,28 +177,28 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
         if (photoUrl) {
           console.log('✅ Photo URL extracted:', photoUrl);
           
-          // Test if the URL is accessible before updating UI
-          try {
-            const testResponse = await fetch(photoUrl, { method: 'HEAD' });
-            console.log('🌐 Photo URL accessibility test:', {
-              url: photoUrl,
-              status: testResponse.status,
-              ok: testResponse.ok
+          // Update UI immediately without accessibility test
+          // The accessibility test can fail due to network timing issues
+          // but the photo is already uploaded successfully
+          onPhotoUpdated(photoUrl);
+          Alert.alert('Success', 'Profile photo updated successfully!');
+          
+          // Optional: Test accessibility in background (non-blocking)
+          fetch(photoUrl, { method: 'HEAD', timeout: 3000 } as any)
+            .then(testResponse => {
+              console.log('🌐 Photo URL accessibility test:', {
+                url: photoUrl,
+                status: testResponse.status,
+                ok: testResponse.ok
+              });
+            })
+            .catch(accessError => {
+              // Log error safely without circular references
+              console.error('🌐 URL accessibility test failed:', {
+                url: photoUrl,
+                error: accessError instanceof Error ? accessError.message : 'Network request failed'
+              });
             });
-            
-            if (testResponse.ok) {
-              onPhotoUpdated(photoUrl);
-              Alert.alert('Success', 'Profile photo updated successfully!');
-            } else {
-              console.error('❌ Photo URL not accessible:', testResponse.status);
-              Alert.alert('Warning', `Photo uploaded but may not be accessible (Status: ${testResponse.status}). Please try refreshing the page.`);
-              onPhotoUpdated(photoUrl); // Still update UI, maybe it will work
-            }
-          } catch (accessError) {
-            console.error('❌ Photo URL accessibility test failed:', accessError);
-            Alert.alert('Warning', 'Photo uploaded but accessibility test failed. Please try refreshing the page.');
-            onPhotoUpdated(photoUrl); // Still update UI
-          }
         } else {
           console.error('❌ No photo URL found in response:', response);
           Alert.alert('Error', 'Photo uploaded but URL not found. Please refresh the page.');
@@ -223,20 +223,20 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
     });
 
     if (currentPhotoUrl) {
-      // Test URL accessibility
-      fetch(currentPhotoUrl, { method: 'HEAD' })
+      // Test URL accessibility in background (non-blocking)
+      fetch(currentPhotoUrl, { method: 'HEAD', timeout: 3000 } as any)
         .then(response => {
           console.log('🌐 URL accessibility test:', {
             url: currentPhotoUrl,
             status: response.status,
-            ok: response.ok,
-            headers: Object.fromEntries(response.headers.entries())
+            ok: response.ok
           });
         })
         .catch(error => {
+          // Log error safely without circular references
           console.error('🌐 URL accessibility test failed:', {
             url: currentPhotoUrl,
-            error: error.message
+            error: error instanceof Error ? error.message : 'Network request failed'
           });
         });
 
@@ -253,11 +253,10 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
           style={styles.profilePhoto}
           resizeMode="cover"
           onError={(error) => {
-            console.error('❌ Image load error details:', {
-              error: error,
-              errorString: JSON.stringify(error, null, 2),
-              nativeEvent: error.nativeEvent,
-              message: error.nativeEvent?.error || 'Unknown error'
+            // Log error safely without circular references
+            console.error('❌ Image load error:', {
+              message: error.nativeEvent?.error || 'Unknown error',
+              url: cacheBustUrl
             });
             console.log('🔍 Failed URL:', cacheBustUrl);
             console.log('🔍 Original URL:', currentPhotoUrl);

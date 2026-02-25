@@ -353,7 +353,7 @@ export interface TaskAssignment {
   description: string;
   dependencies: number[];
   sequence: number;
-  status: 'pending' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
+  status: 'queued' | 'pending' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
   location: GeoLocation;
   estimatedHours: number;
   actualHours?: number;

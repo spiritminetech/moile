@@ -245,8 +245,8 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
             {
               text: 'OK',
               onPress: () => {
-                // Navigate back and trigger refresh of task list
-                navigation.navigate('TodaysTasks', { refresh: true });
+                // Navigate back to task list
+                navigation.goBack();
               },
             },
           ]
@@ -303,8 +303,8 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
                     {
                       text: 'OK',
                       onPress: () => {
-                        // Navigate back and trigger refresh of task list
-                        navigation.navigate('TodaysTasks', { refresh: true });
+                        // Navigate back to task list
+                        navigation.goBack();
                       },
                     },
                   ]

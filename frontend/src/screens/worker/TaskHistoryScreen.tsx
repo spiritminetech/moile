@@ -18,6 +18,7 @@ import { TaskAssignment } from '../../types';
 import { useTaskHistory } from '../../hooks/useTaskHistory';
 import { useOffline } from '../../store/context/OfflineContext';
 import { useLocation } from '../../store/context/LocationContext';
+import { workerApiService } from '../../services/api/WorkerApiService';
 import TaskCard from '../../components/cards/TaskCard';
 import { 
   LoadingOverlay, 
@@ -135,18 +136,59 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
     navigation.navigate('TaskLocation', { task });
   }, [navigation]);
 
-  // Dummy handlers for TaskCard (these actions aren't available for historical tasks)
-  const handleStartTask = useCallback(() => {
-    Alert.alert('Not Available', 'Cannot start historical tasks.', [{ text: 'OK' }]);
-  }, []);
+  // Allow task actions for incomplete tasks (in_progress, paused, queued)
+  const handleStartTask = useCallback(async (taskId: number) => {
+    if (!currentLocation) {
+      Alert.alert(
+        'Location Required',
+        'Please enable location services to start the task.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
 
-  const handleUpdateProgress = useCallback(() => {
-    Alert.alert('Not Available', 'Cannot update progress for historical tasks.', [{ text: 'OK' }]);
-  }, []);
+    try {
+      const response = await workerApiService.startTask(taskId, currentLocation);
+      
+      if (response.success) {
+        Alert.alert(
+          'Task Started',
+          'Task has been started successfully. You can now update progress.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Refresh the task list to show updated status
+                refreshData();
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Cannot Start Task',
+          response.message || 'Failed to start task. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error: any) {
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to start task. Please check your connection and try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  }, [currentLocation, refreshData]);
 
-  const handleResumeTask = useCallback(() => {
-    Alert.alert('Not Available', 'Cannot resume historical tasks.', [{ text: 'OK' }]);
-  }, []);
+  const handleUpdateProgress = useCallback((taskId: number) => {
+    // Navigate to progress update screen for incomplete tasks
+    navigation.navigate('TaskProgress', { taskId });
+  }, [navigation]);
+
+  const handleResumeTask = useCallback((taskId: number) => {
+    // Navigate to progress update screen to resume task
+    navigation.navigate('TaskProgress', { taskId });
+  }, [navigation]);
 
   // Get filter button style
   const getFilterButtonStyle = (filter: string) => [
@@ -167,8 +209,10 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
     
     const counts = {
       all: safeTasks.length,
-      completed: safeTasks.filter(t => t.status === 'completed').length,
+      queued: safeTasks.filter(t => t.status === 'queued').length,
       inProgress: safeTasks.filter(t => t.status === 'in_progress').length,
+      paused: safeTasks.filter(t => t.status === 'paused').length,
+      completed: safeTasks.filter(t => t.status === 'completed').length,
       cancelled: safeTasks.filter(t => t.status === 'cancelled').length,
     };
     
@@ -198,19 +242,19 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
           <Text style={getFilterTextStyle('all')}>All ({taskCounts?.all || 0})</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={getFilterButtonStyle('completed')}
-          onPress={() => filterTasks('completed')}
-        >
-          <Text style={getFilterTextStyle('completed')}>
-            Completed ({taskCounts?.completed || 0})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={getFilterButtonStyle('in_progress')}
           onPress={() => filterTasks('in_progress')}
         >
           <Text style={getFilterTextStyle('in_progress')}>
             In Progress ({taskCounts?.inProgress || 0})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={getFilterButtonStyle('completed')}
+          onPress={() => filterTasks('completed')}
+        >
+          <Text style={getFilterTextStyle('completed')}>
+            Completed ({taskCounts?.completed || 0})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -228,6 +272,8 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
   // Render task item with historical context
   const renderTaskItem = ({ item }: { item: TaskAssignment }) => {
     const insideGeofence = isInsideGeofence(item);
+    // Allow starting queued tasks, and continuing in_progress/paused tasks from history
+    const canInteract = item.status === 'queued' || item.status === 'pending' || item.status === 'in_progress' || item.status === 'paused';
     
     return (
       <TouchableOpacity onPress={() => handleViewTaskDetails(item)}>
@@ -237,7 +283,7 @@ const TaskHistoryScreen: React.FC<TaskHistoryScreenProps> = ({ navigation }) => 
           onUpdateProgress={handleUpdateProgress}
           onResumeTask={handleResumeTask}
           onViewLocation={handleViewLocation}
-          canStart={false}
+          canStart={canInteract}
           isInsideGeofence={insideGeofence}
           isOffline={isOffline}
         />

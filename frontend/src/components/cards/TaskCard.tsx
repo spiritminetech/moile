@@ -99,6 +99,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const getStatusColor = (status: string): string => {
     switch (status) {
       case 'pending':
+      case 'queued':
         return '#FF9800';
       case 'in_progress':
         return '#2196F3';
@@ -106,7 +107,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
         return '#FFA726'; // Orange for paused
       case 'completed':
         return '#4CAF50';
+      case 'cancelled':
+        return '#757575';
       default:
+        console.warn('⚠️ Unknown task status:', status);
         return '#757575';
     }
   };
@@ -276,6 +280,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const getStatusText = (status: string): string => {
     switch (status) {
       case 'pending':
+      case 'queued':
         return 'Pending';
       case 'in_progress':
         return 'In Progress';
@@ -283,7 +288,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
         return 'Paused';
       case 'completed':
         return 'Completed';
+      case 'cancelled':
+        return 'Cancelled';
       default:
+        console.warn('⚠️ Unknown task status:', status);
         return 'Unknown';
     }
   };
@@ -331,9 +339,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const renderActionButtons = () => {
     const buttons = [];
 
-    // Start button for pending tasks (ONLY if never started)
+    // Start button for pending/queued tasks (ONLY if never started)
     // FIX: Check !task.startedAt to exclude paused tasks
-    if (task.status === 'pending' && !task.startedAt) {
+    if ((task.status === 'pending' || task.status === 'queued') && !task.startedAt) {
       // Determine button state and title
       const canStartTask = canStart && isInsideGeofence && !isOffline;
       let buttonTitle = 'Start Task';
@@ -427,14 +435,27 @@ const TaskCard: React.FC<TaskCardProps> = ({
     
     // Resume button for paused tasks
     if (task.status === 'paused') {
+      // Check geofence for resume button
+      const canResumeTask = isInsideGeofence && !isOffline;
+      let buttonTitle = 'Resume Task';
+      let buttonVariant: 'success' | 'neutral' | 'danger' = 'success';
+
+      if (isOffline) {
+        buttonTitle = 'Offline';
+        buttonVariant = 'neutral';
+      } else if (!isInsideGeofence) {
+        buttonTitle = 'Outside Geo-Fence';
+        buttonVariant = 'danger';
+      }
+
       buttons.push(
         <ConstructionButton
           key="resume"
-          title="Resume Task"
+          title={buttonTitle}
           onPress={() => onResumeTask(task.assignmentId)}
-          variant="success"
+          variant={buttonVariant}
+          disabled={!canResumeTask}
           size="medium"
-          disabled={isOffline}
           icon="▶️"
           style={styles.actionButton}
         />

@@ -31,6 +31,7 @@ import { TimeWindowStatus } from '../../components/attendance/TimeWindowStatus';
 import { OvertimeApprovalComponent } from '../../components/attendance/OvertimeApprovalStatus';
 import { ForgottenCheckoutAlert } from '../../components/attendance/ForgottenCheckoutAlert';
 import { ConstructionTheme } from '../../utils/theme/constructionTheme';
+import { GPS_CONFIG } from '../../utils/constants';
 import { AttendanceRecord } from '../../types';
 import { useErrorHandler } from '../../hooks/useErrorHandler';
 import { TimeValidator, TimeValidationResult, OvertimeApprovalStatus } from '../../utils/timeValidation';
@@ -70,11 +71,48 @@ const AttendanceScreen: React.FC = () => {
   const [timeValidation, setTimeValidation] = useState<TimeValidationResult | null>(null);
   const [overtimeApproval, setOvertimeApproval] = useState<OvertimeApprovalStatus | null>(null);
 
+  // Get dynamic project ID from worker's assignment
+  const getProjectId = useCallback((): number | null => {
+    // Priority 1: User's current project
+    if (authState.user?.currentProject?.id) {
+      console.log('📍 Using project from user.currentProject:', authState.user.currentProject.id);
+      return typeof authState.user.currentProject.id === 'number' 
+        ? authState.user.currentProject.id 
+        : parseInt(authState.user.currentProject.id.toString());
+    }
+    
+    // Priority 2: From current session
+    if (attendanceStatus.currentSession?.projectId) {
+      console.log('📍 Using project from current session:', attendanceStatus.currentSession.projectId);
+      return attendanceStatus.currentSession.projectId;
+    }
+    
+    // Priority 3: From today's attendance
+    if (attendanceStatus.todaysAttendance.length > 0 && attendanceStatus.todaysAttendance[0].projectId) {
+      console.log('📍 Using project from today\'s attendance:', attendanceStatus.todaysAttendance[0].projectId);
+      return attendanceStatus.todaysAttendance[0].projectId;
+    }
+    
+    console.warn('⚠️  No project ID found! Worker may not be assigned to any project.');
+    return null;
+  }, [authState.user, attendanceStatus.currentSession, attendanceStatus.todaysAttendance]);
+
   // Load attendance status on component mount
   useEffect(() => {
     loadAttendanceStatus();
     // Force geofence validation on mount
     validateGeofenceOnMount();
+    
+    // Set up periodic location refresh every 10 seconds
+    const locationRefreshInterval = setInterval(() => {
+      console.log('🔄 AttendanceScreen: Periodic location refresh...');
+      refreshLocationAndGeofence();
+    }, 10000); // Refresh every 10 seconds
+    
+    // Cleanup interval on unmount
+    return () => {
+      clearInterval(locationRefreshInterval);
+    };
   }, []);
   
   // Validate geofence when component mounts or location changes
@@ -82,10 +120,32 @@ const AttendanceScreen: React.FC = () => {
     try {
       console.log('🔍 AttendanceScreen: Validating geofence on mount...');
       await getCurrentLocation(); // Ensure we have fresh location
-      await validateGeofence(1003); // Validate against project 1003
-      console.log('✅ AttendanceScreen: Geofence validation complete');
+      
+      const projectId = getProjectId();
+      if (projectId) {
+        await validateGeofence(projectId);
+        console.log('✅ AttendanceScreen: Geofence validation complete for project', projectId);
+      } else {
+        console.warn('⚠️  No project ID available for geofence validation');
+      }
     } catch (error) {
       console.error('❌ AttendanceScreen: Geofence validation failed:', error);
+    }
+  };
+  
+  // Refresh location and geofence validation
+  const refreshLocationAndGeofence = async () => {
+    try {
+      console.log('🔄 Refreshing location and geofence...');
+      await getCurrentLocation(); // Get fresh location
+      
+      const projectId = getProjectId();
+      if (projectId) {
+        await validateGeofence(projectId);
+        console.log('✅ Location and geofence refreshed for project', projectId);
+      }
+    } catch (error) {
+      console.error('❌ Location refresh failed:', error);
     }
   };
 
@@ -624,17 +684,20 @@ const AttendanceScreen: React.FC = () => {
     variant: 'primary' | 'secondary' | 'success' | 'warning' | 'error' = 'primary'
   ) => {
     // Check if location and geofence are valid for attendance actions
-    // For lunch break actions, allow if already checked in (skip geofence check)
     const isLunchAction = type === 'lunch_start' || type === 'lunch_end';
-    const locationValid = locationState.currentLocation && (
-      locationState.isGeofenceValid || 
-      (isLunchAction && attendanceStatus.currentSession)
-    );
     
     // GPS accuracy validation - check if accuracy is sufficient
-    // Relaxed to 30m for construction site conditions with building interference
+    // Using GPS_CONFIG.REQUIRED_ACCURACY (100m) for construction site conditions
     const gpsAccuracyValid = locationState.currentLocation ? 
-      locationState.currentLocation.accuracy <= 30 : false;
+      locationState.currentLocation.accuracy <= GPS_CONFIG.REQUIRED_ACCURACY : false;
+    
+    // CRITICAL FIX: Geofence validation must be TRUE for non-lunch actions
+    // For lunch actions, allow if already checked in (skip geofence check)
+    const geofenceValid = isLunchAction && attendanceStatus.currentSession 
+      ? true  // Skip geofence for lunch if already checked in
+      : locationState.isGeofenceValid;  // Must be inside geofence for clock in/out
+    
+    const locationValid = locationState.currentLocation && gpsAccuracyValid && geofenceValid;
     
     // Time window validation
     let timeWindowValid = true;
@@ -648,19 +711,22 @@ const AttendanceScreen: React.FC = () => {
       overtimeValid = overtimeApproval.isApproved;
     }
     
-    const finalEnabled = enabled && locationValid && gpsAccuracyValid && timeWindowValid && overtimeValid && actionLoading === null && offlineState.isOnline !== false;
+    const finalEnabled = enabled && locationValid && timeWindowValid && overtimeValid && actionLoading === null && offlineState.isOnline !== false;
     
     // Debug logging for clock-out button
     if (type === 'logout') {
       console.log('🔍 Clock-out button state:', {
         enabled,
-        locationValid,
         gpsAccuracyValid,
+        geofenceValid,
+        locationValid,
         timeWindowValid,
         overtimeValid,
         actionLoading,
         isOnline: offlineState.isOnline,
         finalEnabled,
+        locationState_isGeofenceValid: locationState.isGeofenceValid,
+        currentLocation_accuracy: locationState.currentLocation?.accuracy,
         currentSession: !!attendanceStatus.currentSession,
         canClockOut: attendanceStatus.canClockOut,
       });
@@ -737,29 +803,36 @@ const AttendanceScreen: React.FC = () => {
       >
         <GPSAccuracyIndicator 
           accuracyWarning={locationState.currentLocation ? {
-            isAccurate: locationState.currentLocation.accuracy <= 30,
+            isAccurate: locationState.currentLocation.accuracy <= GPS_CONFIG.REQUIRED_ACCURACY,
             currentAccuracy: locationState.currentLocation.accuracy,
-            requiredAccuracy: 30,
-            message: !locationState.isGeofenceValid 
-              ? 'You are outside the work area geofence' 
-              : locationState.currentLocation.accuracy > 30 
-                ? 'GPS accuracy is insufficient for attendance actions' 
-                : 'GPS accuracy is good and inside work area',
-            canProceed: locationState.currentLocation.accuracy <= 30 && locationState.isGeofenceValid
+            requiredAccuracy: GPS_CONFIG.REQUIRED_ACCURACY,
+            message: locationState.currentLocation.accuracy <= GPS_CONFIG.REQUIRED_ACCURACY
+              ? 'GPS accuracy is good'
+              : 'GPS accuracy is insufficient. Move to an open area for better signal.',
+            canProceed: locationState.currentLocation.accuracy <= GPS_CONFIG.REQUIRED_ACCURACY
           } : null}
         />
-        <GeofenceValidator 
-          projectId={1003}
-          onValidationChange={(isValid, validation) => {
-            console.log('🎯 AttendanceScreen: Geofence validation changed:', {
-              isValid,
-              distance: validation?.distanceFromSite,
+        {getProjectId() ? (
+          <GeofenceValidator 
+            projectId={getProjectId()!}
+            onValidationChange={(isValid, validation) => {
+              console.log('🎯 AttendanceScreen: Geofence validation changed:', {
+                isValid,
+                distance: validation?.distanceFromSite,
+                projectId: getProjectId(),
               accuracy: validation?.accuracy,
               message: validation?.message
             });
             console.log('📍 AttendanceScreen: Current locationState.isGeofenceValid:', locationState.isGeofenceValid);
           }}
         />
+        ) : (
+          <View style={{ padding: 16, backgroundColor: '#FFF3CD', borderRadius: 8, marginTop: 8 }}>
+            <Text style={{ color: '#856404', fontSize: 14, textAlign: 'center' }}>
+              ⚠️ No project assigned. Please contact your supervisor to assign you to a project.
+            </Text>
+          </View>
+        )}
         {!locationState.isGeofenceValid && (
           <DistanceDisplay 
             distance={locationState.distanceFromSite} 

@@ -247,18 +247,6 @@ export class LocationService {
     } catch (error) {
       console.error('Geofence validation error:', error);
       
-      // If using fallback location or in development mode, be more permissive
-      if (allowFallback || __DEV__) {
-        console.warn('Geofence validation failed, allowing in development mode');
-        return {
-          isValid: true,
-          distanceFromSite: 0,
-          canProceed: true,
-          message: 'Development mode - geofence validation bypassed due to error',
-          accuracy: location.accuracy,
-        };
-      }
-      
       // Return a default validation result on error
       return {
         isValid: false,

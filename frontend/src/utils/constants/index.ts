@@ -45,7 +45,7 @@ export const GPS_CONFIG = {
   GEOFENCE_BUFFER: 5, // meters buffer for geofence validation
   // Development mode settings
   ENABLE_FALLBACK_LOCATION: __DEV__, // Enable fallback location in development
-  BYPASS_GEOFENCE_IN_DEV: true, // Always bypass geofence validation in development
+  BYPASS_GEOFENCE_IN_DEV: false, // ✅ FIXED: Disabled bypass to show real geofence validation in attendance screen
   FALLBACK_COORDINATES: {
     latitude: 12.9716,   // Bangalore coordinates - change this to match your project location
     longitude: 77.5946,

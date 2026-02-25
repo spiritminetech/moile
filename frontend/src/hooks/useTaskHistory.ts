@@ -10,8 +10,8 @@ export interface UseTaskHistoryReturn {
   refreshData: () => Promise<void>;
   lastRefresh: Date | null;
   isRefreshing: boolean;
-  filterTasks: (filter: 'all' | 'completed' | 'in_progress' | 'cancelled') => void;
-  currentFilter: 'all' | 'completed' | 'in_progress' | 'cancelled';
+  filterTasks: (filter: 'all' | 'queued' | 'in_progress' | 'paused' | 'completed' | 'cancelled') => void;
+  currentFilter: 'all' | 'queued' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
 }
 
 export const useTaskHistory = (): UseTaskHistoryReturn => {
@@ -21,7 +21,7 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [currentFilter, setCurrentFilter] = useState<'all' | 'completed' | 'in_progress' | 'cancelled'>('all');
+  const [currentFilter, setCurrentFilter] = useState<'all' | 'queued' | 'in_progress' | 'paused' | 'completed' | 'cancelled'>('all');
 
   const refreshData = useCallback(async (isManualRefresh = false) => {
     try {
@@ -129,6 +129,11 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
     
     let filtered = taskList;
     
+    // Don't filter out queued tasks - show all tasks regardless of status or date
+    // The backend already returns relevant tasks, and workers need to see all their assignments
+    // including queued tasks from previous days that may need supervisor attention
+    
+    // Apply the user's selected filter
     switch (filter) {
       case 'completed':
         filtered = taskList.filter(task => task.status === 'completed');
@@ -149,7 +154,7 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
       filter, 
       originalCount: taskList.length, 
       filteredCount: filtered.length,
-      statuses: taskList.map(t => t.status)
+      statuses: filtered.map(t => t.status)
     });
     
     setFilteredTasks(filtered);
