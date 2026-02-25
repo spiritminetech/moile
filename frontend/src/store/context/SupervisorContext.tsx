@@ -14,6 +14,7 @@ import {
 } from '../../types';
 import { dailyProgressApiService } from '../../services/api/DailyProgressApiService';
 import { supervisorApiService } from '../../services/api/SupervisorApiService';
+import { useAuth } from './AuthContext';
 
 // Supervisor State Interface
 interface SupervisorState extends SupervisorContextData {
@@ -333,15 +334,23 @@ interface SupervisorProviderProps {
 // Provider Component
 export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(supervisorReducer, initialState);
+  const { state: authState } = useAuth();
 
   // Initialize supervisor data on mount
   useEffect(() => {
-    // Only initialize if we have supervisor role
-    // This will be called when the supervisor context is mounted
-    initializeSupervisorData();
-  }, []);
+    // Only initialize if user is authenticated and has supervisor role
+    if (authState.isAuthenticated && authState.user?.role === 'supervisor' && authState.token) {
+      initializeSupervisorData();
+    }
+  }, [authState.isAuthenticated, authState.user?.role, authState.token]);
 
   const initializeSupervisorData = async () => {
+    // Double-check authentication before making API calls
+    if (!authState.isAuthenticated || !authState.token || authState.user?.role !== 'supervisor') {
+      console.log('⚠️ Skipping supervisor data initialization - not authenticated or not a supervisor');
+      return;
+    }
+
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'CLEAR_ERROR' });
@@ -365,6 +374,12 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
 
   // Team data and worker assignment state management
   const loadTeamData = useCallback(async () => {
+    // Check authentication before making API calls
+    if (!authState.isAuthenticated || !authState.token || authState.user?.role !== 'supervisor') {
+      console.log('⚠️ Skipping team data load - not authenticated or not a supervisor');
+      return;
+    }
+
     try {
       dispatch({ type: 'SET_TEAM_LOADING', payload: true });
       
@@ -453,7 +468,7 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
     } finally {
       dispatch({ type: 'SET_TEAM_LOADING', payload: false });
     }
-  }, []);
+  }, [authState.isAuthenticated, authState.token, authState.user?.role]);
 
   const refreshTeamMembers = useCallback(async () => {
     await loadTeamData();

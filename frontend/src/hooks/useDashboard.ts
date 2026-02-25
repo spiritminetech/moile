@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../store/context/AuthContext';
 import { workerApiService } from '../services/api/WorkerApiService';
 import { 
   Project, 
@@ -172,6 +173,7 @@ const transformDashboardData = (apiData: DashboardApiResponse): DashboardData =>
 };
 
 export const useDashboard = (): UseDashboardReturn => {
+  const { state: authState } = useAuth();
   const [data, setData] = useState<DashboardData>({
     project: null,
     todaysTasks: [],
@@ -215,6 +217,14 @@ export const useDashboard = (): UseDashboardReturn => {
   const currentSessionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshData = useCallback(async (isManualRefresh = false) => {
+    // Skip if user is not authenticated
+    if (!authState.isAuthenticated || !authState.token) {
+      console.log('ℹ️ useDashboard: Skipping data fetch - user not authenticated');
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
+
     try {
       if (isManualRefresh) {
         setIsRefreshing(true);
@@ -366,7 +376,7 @@ export const useDashboard = (): UseDashboardReturn => {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [authState.isAuthenticated, authState.token]);
 
   const handleManualRefresh = useCallback(async () => {
     await refreshData(true);
@@ -394,13 +404,19 @@ export const useDashboard = (): UseDashboardReturn => {
     });
   }, []);
 
-  // Initial data load
+  // Initial data load - only if authenticated
   useEffect(() => {
-    refreshData();
-  }, [refreshData]);
+    if (authState.isAuthenticated && authState.token) {
+      refreshData();
+    }
+  }, [authState.isAuthenticated, authState.token, refreshData]);
 
-  // Set up automatic refresh interval
+  // Set up automatic refresh interval - only if authenticated
   useEffect(() => {
+    if (!authState.isAuthenticated || !authState.token) {
+      return;
+    }
+
     intervalRef.current = setInterval(() => {
       refreshData();
     }, REFRESH_INTERVAL);
@@ -410,7 +426,7 @@ export const useDashboard = (): UseDashboardReturn => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [refreshData]);
+  }, [authState.isAuthenticated, authState.token, refreshData]);
 
   // Set up current session update interval
   useEffect(() => {

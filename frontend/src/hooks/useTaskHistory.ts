@@ -71,7 +71,8 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
         const mappedTasks: TaskAssignment[] = sortedTasks.map((task: any) => {
           console.log(`🗺️ Mapping task ${task.assignmentId}:`, {
             hasProjectGeofence: !!task.projectGeofence,
-            projectGeofence: task.projectGeofence
+            projectGeofence: task.projectGeofence,
+            taskDate: task.date
           });
           
           return {
@@ -91,6 +92,7 @@ export const useTaskHistory = (): UseTaskHistoryReturn => {
             updatedAt: task.date,
             startedAt: task.startTime,
             completedAt: task.completedAt,
+            date: task.date, // Include task assignment date for date validation
             projectGeofence: task.projectGeofence || null,
           };
         });

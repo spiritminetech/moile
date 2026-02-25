@@ -361,6 +361,7 @@ export interface TaskAssignment {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  date?: string; // Task assignment date (YYYY-MM-DD format)
   // Enhanced fields
   priority?: 'low' | 'medium' | 'high' | 'critical';
   workArea?: string;

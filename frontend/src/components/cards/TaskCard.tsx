@@ -49,6 +49,24 @@ const TaskCard: React.FC<TaskCardProps> = ({
   );
   const [isAcknowledging, setIsAcknowledging] = useState(false);
 
+  // Helper function to check if task date is today
+  const isTaskDateToday = (): boolean => {
+    if (!task.date) return true; // If no date, assume it's valid (backward compatibility)
+    
+    const today = new Date();
+    const taskDateObj = new Date(task.date);
+    
+    // Compare dates (ignore time)
+    return (
+      today.getFullYear() === taskDateObj.getFullYear() &&
+      today.getMonth() === taskDateObj.getMonth() &&
+      today.getDate() === taskDateObj.getDate()
+    );
+  };
+
+  // Check if task is from today
+  const isToday = isTaskDateToday();
+
   // Get priority color and icon
   const getPriorityColor = (priority: string): string => {
     switch (priority?.toLowerCase()) {
@@ -343,7 +361,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     // FIX: Check !task.startedAt to exclude paused tasks
     if ((task.status === 'pending' || task.status === 'queued') && !task.startedAt) {
       // Determine button state and title
-      const canStartTask = canStart && isInsideGeofence && !isOffline;
+      const canStartTask = canStart && isInsideGeofence && !isOffline && isToday;
       let buttonTitle = 'Start Task';
       let buttonVariant: 'success' | 'neutral' | 'danger' = 'success';
 
@@ -354,6 +372,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
       console.log('Task:', task.taskName);
       console.log('Assignment ID:', task.assignmentId);
       console.log('Task Status:', task.status);
+      console.log('Task Date:', task.date);
+      console.log('Is Today:', isToday);
       console.log('Task startedAt:', task.startedAt);
       console.log('Props received:');
       console.log('  - canStart (from parent):', canStart);
@@ -362,10 +382,11 @@ const TaskCard: React.FC<TaskCardProps> = ({
       console.log('---');
       console.log('Button Logic:');
       console.log('  - canStartTask (final):', canStartTask);
-      console.log('  - Formula: canStart && isInsideGeofence && !isOffline');
-      console.log('  - Result:', canStart, '&&', isInsideGeofence, '&&', !isOffline, '=', canStartTask);
+      console.log('  - Formula: canStart && isInsideGeofence && !isOffline && isToday');
+      console.log('  - Result:', canStart, '&&', isInsideGeofence, '&&', !isOffline, '&&', isToday, '=', canStartTask);
       console.log('---');
 
+      // Only change button text for offline and geofence issues, not for date
       if (isOffline) {
         buttonTitle = 'Offline';
         buttonVariant = 'neutral';
@@ -374,13 +395,12 @@ const TaskCard: React.FC<TaskCardProps> = ({
         buttonTitle = 'Outside Geo-Fence';
         buttonVariant = 'danger';
         console.log('Button will show: "Outside Geo-Fence" (danger, disabled)');
-        console.log('  ⚠️ THIS IS YOUR ISSUE - isInsideGeofence is FALSE');
       } else if (!canStart) {
         buttonTitle = 'Dependencies Required';
         buttonVariant = 'neutral';
         console.log('Button will show: "Dependencies Required" (neutral, disabled)');
       } else {
-        console.log('Button will show: "Start Task" (success, enabled)');
+        console.log('Button will show: "Start Task" (success, enabled/disabled based on date)');
       }
       
       console.log('---');
@@ -388,6 +408,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
       console.log('  - Title:', buttonTitle);
       console.log('  - Variant:', buttonVariant);
       console.log('  - Disabled:', !canStartTask);
+      console.log('  - Reason for disabled:', !isToday ? 'Not today' : 'Other');
       console.log('='.repeat(80));
 
       buttons.push(
@@ -406,11 +427,12 @@ const TaskCard: React.FC<TaskCardProps> = ({
 
     // Progress button for in-progress tasks
     if (task.status === 'in_progress') {
-      // Check geofence for continue working button
-      const canContinueWorking = isInsideGeofence && !isOffline;
+      // Check geofence and date for continue working button
+      const canContinueWorking = isInsideGeofence && !isOffline && isToday;
       let buttonTitle = 'Continue Working';
       let buttonVariant: 'primary' | 'neutral' | 'danger' = 'primary';
 
+      // Only change button text for offline and geofence issues, not for date
       if (isOffline) {
         buttonTitle = 'Offline';
         buttonVariant = 'neutral';
@@ -435,11 +457,12 @@ const TaskCard: React.FC<TaskCardProps> = ({
     
     // Resume button for paused tasks
     if (task.status === 'paused') {
-      // Check geofence for resume button
-      const canResumeTask = isInsideGeofence && !isOffline;
+      // Check geofence and date for resume button
+      const canResumeTask = isInsideGeofence && !isOffline && isToday;
       let buttonTitle = 'Resume Task';
       let buttonVariant: 'success' | 'neutral' | 'danger' = 'success';
 
+      // Only change button text for offline and geofence issues, not for date
       if (isOffline) {
         buttonTitle = 'Offline';
         buttonVariant = 'neutral';
@@ -465,14 +488,24 @@ const TaskCard: React.FC<TaskCardProps> = ({
     // LEGACY: Handle old paused tasks (queued status but has been started)
     // This is for backward compatibility with old data
     if (task.status === 'pending' && task.startedAt) {
+      const canResumeTask = !isOffline && isToday;
+      let buttonTitle = 'Resume Task';
+      let buttonVariant: 'success' | 'neutral' = 'success';
+
+      // Only change button text for offline, not for date
+      if (isOffline) {
+        buttonTitle = 'Offline';
+        buttonVariant = 'neutral';
+      }
+
       buttons.push(
         <ConstructionButton
           key="resume-legacy"
-          title="Resume Task"
+          title={buttonTitle}
           onPress={() => onResumeTask(task.assignmentId)}
-          variant="success"
+          variant={buttonVariant}
           size="medium"
-          disabled={isOffline}
+          disabled={!canResumeTask}
           icon="▶️"
           style={styles.actionButton}
         />

@@ -102,17 +102,6 @@ const AttendanceScreen: React.FC = () => {
     loadAttendanceStatus();
     // Force geofence validation on mount
     validateGeofenceOnMount();
-    
-    // Set up periodic location refresh every 10 seconds
-    const locationRefreshInterval = setInterval(() => {
-      console.log('🔄 AttendanceScreen: Periodic location refresh...');
-      refreshLocationAndGeofence();
-    }, 10000); // Refresh every 10 seconds
-    
-    // Cleanup interval on unmount
-    return () => {
-      clearInterval(locationRefreshInterval);
-    };
   }, []);
   
   // Validate geofence when component mounts or location changes

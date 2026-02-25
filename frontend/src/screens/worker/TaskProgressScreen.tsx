@@ -61,6 +61,7 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
           updatedAt: new Date().toISOString(), // Default if not provided
           startedAt: response.data.startTime || undefined,
           completedAt: undefined, // API doesn't provide this field
+          date: (response.data as any).date, // Include task assignment date for validation
           dailyTarget: response.data.dailyTarget || undefined, // Include daily target data
         };
         setTask(mappedTask);
@@ -73,8 +74,8 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
           initialProgress = response.data.progress.percentage;
         }
         // Priority 2: Use dailyTarget.progressToday.percentage
-        else if (response.data.dailyTarget?.progressToday?.percentage !== undefined) {
-          initialProgress = response.data.dailyTarget.progressToday.percentage;
+        else if ((response.data.dailyTarget as any)?.progressToday?.percentage !== undefined) {
+          initialProgress = (response.data.dailyTarget as any).progressToday.percentage;
         }
         // Priority 3: Calculate from actual/estimated hours (fallback)
         else if (mappedTask.actualHours !== undefined && mappedTask.estimatedHours) {
@@ -87,8 +88,8 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
         setProgressPercent(initialProgress);
         
         // Set completed quantity if available
-        if (response.data.dailyTarget?.progressToday?.completed) {
-          setCompletedQuantity(response.data.dailyTarget.progressToday.completed);
+        if ((response.data.dailyTarget as any)?.progressToday?.completed) {
+          setCompletedQuantity((response.data.dailyTarget as any).progressToday.completed);
         }
       } else {
         setError(response.message || 'Failed to load task details');
@@ -270,12 +271,37 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
     }
   }, [taskId, progressPercent, description, notes, completedQuantity, currentLocation, navigation]);
 
+  // Helper function to check if task date is today
+  const isTaskDateToday = useCallback((taskDate: string): boolean => {
+    if (!taskDate) return false;
+    
+    const today = new Date();
+    const taskDateObj = new Date(taskDate);
+    
+    // Compare dates (ignore time)
+    return (
+      today.getFullYear() === taskDateObj.getFullYear() &&
+      today.getMonth() === taskDateObj.getMonth() &&
+      today.getDate() === taskDateObj.getDate()
+    );
+  }, []);
+
   // Handle complete task
   const handleCompleteTask = useCallback(async () => {
     if (!currentLocation) {
       Alert.alert(
         'Location Required',
         'Please enable location services to complete the task.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    // Check if task date is today
+    if (task && task.date && !isTaskDateToday(task.date)) {
+      Alert.alert(
+        'Cannot Complete Task',
+        'You can only complete tasks assigned for today. This task is from a previous date and cannot be completed now.',
         [{ text: 'OK' }]
       );
       return;
@@ -330,7 +356,7 @@ const TaskProgressScreen = ({ navigation, route }: any) => {
         },
       ]
     );
-  }, [taskId, currentLocation, navigation]);
+  }, [taskId, currentLocation, navigation, task, isTaskDateToday]);
 
   // Get progress color
   const getProgressColor = (progress: number): string => {
