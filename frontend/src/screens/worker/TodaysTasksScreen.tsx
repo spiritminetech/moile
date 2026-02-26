@@ -899,7 +899,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     );
   };
 
-  // Render empty state with clear cache option
+  // Render empty state
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Text style={styles.emptyIcon}>📋</Text>
@@ -910,32 +910,6 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
           : 'You have no tasks assigned for today. Check back later or contact your supervisor.'
         }
       </Text>
-      {!isOffline && (
-        <TouchableOpacity 
-          style={styles.clearCacheButton} 
-          onPress={async () => {
-            Alert.alert(
-              'Clear Cache',
-              'This will clear all cached task data. Are you sure?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { 
-                  text: 'Clear Cache', 
-                  style: 'destructive',
-                  onPress: async () => {
-                    console.log('🗑️ Clearing task cache...');
-                    await cacheData('tasks', []);
-                    setTasks([]);
-                    Alert.alert('Success', 'Cache cleared successfully. Pull down to refresh.');
-                  }
-                }
-              ]
-            );
-          }}
-        >
-          <Text style={styles.clearCacheButtonText}>🗑️ Clear Cache & Refresh</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 
@@ -1533,20 +1507,6 @@ const styles = StyleSheet.create({
     color: '#0D47A1',
     fontFamily: 'monospace',
     marginBottom: 4,
-  },
-  clearCacheButton: {
-    backgroundColor: '#FF9800',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearCacheButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
   },
 });
 
