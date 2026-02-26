@@ -236,7 +236,19 @@ export const useDashboard = (): UseDashboardReturn => {
 
       // Fetch both dashboard data and attendance status
       const [dashboardResponse, attendanceResponse] = await Promise.all([
-        workerApiService.getDashboardData(),
+        workerApiService.getDashboardData().catch(err => {
+          // Handle "NO_TASKS_ASSIGNED" as a valid empty state, not an error
+          if (err.response?.data?.error === 'NO_TASKS_ASSIGNED' || 
+              err.message?.includes('No tasks assigned for today')) {
+            console.log('📋 No tasks assigned - returning empty dashboard state');
+            return {
+              success: true,
+              data: null, // Will be handled below
+            };
+          }
+          // For other errors, re-throw to be caught by outer catch block
+          throw err;
+        }),
         workerApiService.getCurrentAttendanceStatus().catch(err => {
           console.warn('Failed to fetch attendance status:', err);
           return null; // Don't fail the entire dashboard if attendance fails
@@ -244,7 +256,39 @@ export const useDashboard = (): UseDashboardReturn => {
       ]);
       
       if (dashboardResponse.success) {
-        const transformedData = transformDashboardData(dashboardResponse.data);
+        let transformedData: DashboardData;
+        
+        // Handle empty state (no tasks assigned)
+        if (!dashboardResponse.data) {
+          console.log('📋 No tasks assigned - using empty dashboard state');
+          transformedData = {
+            project: null,
+            todaysTasks: [],
+            attendanceStatus: null,
+            workingHours: {
+              currentSessionDuration: 0,
+              totalHours: 0,
+            },
+            supervisor: null,
+            worker: null,
+            toolsAndMaterials: {
+              tools: [],
+              materials: [],
+            },
+            dailySummary: {
+              totalTasks: 0,
+              completedTasks: 0,
+              inProgressTasks: 0,
+              queuedTasks: 0,
+              errorTasks: 0,
+              totalHoursWorked: 0,
+              remainingHours: 8,
+              overallProgress: 0,
+            },
+          };
+        } else {
+          transformedData = transformDashboardData(dashboardResponse.data);
+        }
         
         // Add attendance data if available
         if (attendanceResponse?.success) {
@@ -330,49 +374,9 @@ export const useDashboard = (): UseDashboardReturn => {
         status: err.response?.status
       });
 
-      // Handle specific "NO_TASKS_ASSIGNED" case as valid empty state
-      if (err.response?.data?.error === 'NO_TASKS_ASSIGNED' || 
-          err.message?.includes('No tasks assigned for today')) {
-        console.log('📋 No tasks assigned - setting empty state');
-        // Set empty data state instead of error
-        setData({
-          project: null,
-          todaysTasks: [],
-          attendanceStatus: null,
-          workingHours: {
-            currentSessionDuration: 0,
-            totalHours: 0,
-          },
-          supervisor: null,
-          worker: null,
-          toolsAndMaterials: {
-            tools: [],
-            materials: [],
-          },
-          dailySummary: {
-            totalTasks: 0,
-            completedTasks: 0,
-            inProgressTasks: 0,
-            queuedTasks: 0,
-            errorTasks: 0,
-            totalHoursWorked: 0,
-            remainingHours: 8, // Default work day
-            overallProgress: 0, // 0% is correct when no tasks
-          },
-          workingHours: {
-            currentSessionDuration: 0,
-            totalHours: 0,
-            overtimeApproved: false,
-            overtimeHours: 0,
-            shiftType: 'morning',
-          },
-        });
-        setLastRefresh(new Date());
-        setError(null); // Clear any previous errors
-      } else {
-        console.error('❌ Dashboard error:', err);
-        setError(err.message || 'Network error occurred');
-      }
+      // All errors reaching here are real errors (NO_TASKS_ASSIGNED is handled above)
+      console.error('❌ Dashboard error:', err);
+      setError(err.message || 'Network error occurred');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

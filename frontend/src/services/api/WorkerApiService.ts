@@ -286,17 +286,21 @@ export class WorkerApiService {
       };
       
     } catch (error: any) {
-      console.error('❌ getTodaysTasks error:', error);
-      
       // Handle specific error cases
+      // Check multiple possible error formats since error may be transformed
       if (error.response?.data?.error === 'NO_TASKS_ASSIGNED' || 
-          error.message?.includes('NO_TASKS_ASSIGNED')) {
+          error.details?.error === 'NO_TASKS_ASSIGNED' ||
+          error.message?.includes('NO_TASKS_ASSIGNED') ||
+          error.message?.includes('No tasks assigned for today')) {
+        console.log('ℹ️ No tasks assigned for today (valid empty state)');
         return {
           success: true,
           data: [],
           message: 'No tasks assigned for today'
         };
       }
+      
+      console.error('❌ getTodaysTasks error:', error);
       
       // If it's a 401 error, provide more specific guidance
       if (error.message?.includes('401') || error.code === 'UNAUTHORIZED') {

@@ -115,25 +115,41 @@ class ApiClient {
           ? Date.now() - error.config.metadata.startTime 
           : undefined;
 
-        // 🔍 DEBUG: Log error responses
-        console.error('❌ API Error:', {
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          url: error.config?.url,
-          data: error.response?.data,
-          message: error.message,
-          duration: duration ? `${duration}ms` : 'unknown',
-        });
+        // Check if this is a "NO_TASKS_ASSIGNED" case - this is a valid empty state, not an error
+        const isNoTasksAssigned = error.response?.data?.error === 'NO_TASKS_ASSIGNED';
 
-        // Network logger
-        networkLogger.log({
-          method: error.config?.method?.toUpperCase() || 'GET',
-          url: error.config ? `${error.config.baseURL}${error.config.url}` : 'UNKNOWN',
-          responseStatus: error.response?.status,
-          responseData: error.response?.data,
-          error: error.message,
-          duration,
-        });
+        // 🔍 DEBUG: Log error responses (but use info level for NO_TASKS_ASSIGNED)
+        if (isNoTasksAssigned) {
+          console.log('ℹ️ API Info:', {
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            url: error.config?.url,
+            data: error.response?.data,
+            message: 'No tasks assigned for today (valid empty state)',
+            duration: duration ? `${duration}ms` : 'unknown',
+          });
+        } else {
+          console.error('❌ API Error:', {
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            url: error.config?.url,
+            data: error.response?.data,
+            message: error.message,
+            duration: duration ? `${duration}ms` : 'unknown',
+          });
+        }
+
+        // Network logger (don't log NO_TASKS_ASSIGNED as error)
+        if (!isNoTasksAssigned) {
+          networkLogger.log({
+            method: error.config?.method?.toUpperCase() || 'GET',
+            url: error.config ? `${error.config.baseURL}${error.config.url}` : 'UNKNOWN',
+            responseStatus: error.response?.status,
+            responseData: error.response?.data,
+            error: error.message,
+            duration,
+          });
+        }
 
         if (error.response?.status === 401) {
           // Token expired or invalid
@@ -177,7 +193,14 @@ class ApiClient {
     } else if (error.response?.status === 403) {
       userMessage = 'Access denied. Please contact your supervisor.';
     } else if (error.response?.status === 404) {
-      userMessage = 'The requested information was not found. Please contact support.';
+      // Check if this is a "NO_TASKS_ASSIGNED" case - this is a valid empty state, not an error
+      const errorCode = error.response?.data?.error;
+      if (errorCode === 'NO_TASKS_ASSIGNED') {
+        // Pass through the original error message so the hook can handle it properly
+        userMessage = error.response?.data?.message || 'No tasks assigned for today';
+      } else {
+        userMessage = 'The requested information was not found. Please contact support.';
+      }
     } else if (error.response?.status >= 500) {
       userMessage = 'Server error. Please try again later or contact support if the problem persists.';
     } else if (error.code === 'TIMEOUT' || error.message?.includes('timeout')) {

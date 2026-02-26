@@ -254,8 +254,16 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
       
       const errorMessage = err.message || 'Failed to load tasks';
       
-      // Check for specific error types
-      if (err.message?.includes('Network Error') || err.code === 'NETWORK_ERROR') {
+      // Check if this is a "NO_TASKS_ASSIGNED" case - this is a valid empty state, not an error
+      // Check multiple possible error formats since error may be transformed
+      if ((err.code === '404' || err.code === 404) && 
+          (err.details?.error === 'NO_TASKS_ASSIGNED' || 
+           err.message?.includes('No tasks assigned for today'))) {
+        console.log('📋 No tasks assigned for today (valid empty state)');
+        setTasks([]);
+        setError(null); // Clear any previous errors
+        await cacheData('tasks', []); // Cache empty state
+      } else if (err.message?.includes('Network Error') || err.code === 'NETWORK_ERROR') {
         setError('Network connection failed. Please check your internet connection and server availability.');
         // Don't use cached data on network error - show error instead
         setTasks([]);

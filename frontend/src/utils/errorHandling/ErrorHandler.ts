@@ -98,6 +98,22 @@ export class ErrorHandler {
     let code: string | number | undefined;
     let recoverable = true;
 
+    // Check if this is a "NO_TASKS_ASSIGNED" case - this is a valid empty state, not an error
+    const isNoTasksAssigned = error.response?.data?.error === 'NO_TASKS_ASSIGNED';
+    
+    if (isNoTasksAssigned) {
+      // Don't log this as an error - it's a valid empty state
+      console.log('ℹ️ No tasks assigned (valid empty state)');
+      return {
+        message: error.response?.data?.message || 'No tasks assigned for today',
+        code: 404,
+        details: error.response?.data,
+        timestamp: new Date(),
+        context,
+        recoverable: true,
+      };
+    }
+
     if (error.response) {
       // Server responded with error status
       const status = error.response.status;
