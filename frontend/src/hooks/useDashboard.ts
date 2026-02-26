@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../store/context/AuthContext';
 import { workerApiService } from '../services/api/WorkerApiService';
 import { 
@@ -379,6 +380,53 @@ export const useDashboard = (): UseDashboardReturn => {
   }, [authState.isAuthenticated, authState.token]);
 
   const handleManualRefresh = useCallback(async () => {
+    // 🗑️ CLEAR STATE AND CACHE immediately on manual refresh
+    console.log('🗑️ Dashboard: Clearing state and cache on manual refresh');
+    
+    // Clear state immediately
+    setData({
+      project: null,
+      todaysTasks: [],
+      attendanceStatus: null,
+      workingHours: {
+        currentSessionDuration: 0,
+        totalHours: 0,
+      },
+      supervisor: null,
+      worker: null,
+      toolsAndMaterials: {
+        tools: [],
+        materials: [],
+      },
+      dailySummary: {
+        totalTasks: 0,
+        completedTasks: 0,
+        inProgressTasks: 0,
+        queuedTasks: 0,
+        errorTasks: 0,
+        totalHoursWorked: 0,
+        remainingHours: 8,
+        overallProgress: 0,
+      },
+      workingHours: {
+        currentSessionDuration: 0,
+        totalHours: 0,
+        overtimeApproved: false,
+        overtimeHours: 0,
+        shiftType: 'morning',
+      },
+    });
+    
+    // Clear cache
+    try {
+      await AsyncStorage.removeItem('dashboard_data');
+      await AsyncStorage.removeItem('offline_tasks');
+      await AsyncStorage.removeItem('tasks');
+    } catch (error) {
+      console.error('⚠️ Dashboard: Error clearing cache:', error);
+    }
+    
+    // Then fetch fresh data
     await refreshData(true);
   }, [refreshData]);
 

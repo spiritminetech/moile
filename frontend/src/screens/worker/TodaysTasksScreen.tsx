@@ -303,14 +303,26 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
   );
 
   // Handle pull-to-refresh
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     if (!isOffline && !isApiCallInProgress) {
-      console.log('🔄 Manual refresh triggered');
+      console.log('🔄 Manual refresh triggered - clearing cache');
       setIsRefreshing(true);
+      
+      // 🗑️ CLEAR CACHE on manual refresh
+      try {
+        console.log('🗑️ Clearing AsyncStorage cache on manual refresh');
+        await AsyncStorage.removeItem('offline_tasks');
+        await AsyncStorage.removeItem('tasks');
+        await cacheData('tasks', []);
+        setTasks([]); // Clear state immediately
+      } catch (error) {
+        console.error('⚠️ Error clearing cache:', error);
+      }
+      
       hasInitiallyLoaded.current = false; // Allow reload
-      loadTasks(false);
+      loadTasks(false, true); // Pass forceClearCache=true
     }
-  }, [isOffline, loadTasks, isApiCallInProgress]);
+  }, [isOffline, loadTasks, isApiCallInProgress, cacheData]);
 
   // Handle task start
   const handleStartTask = useCallback(async (taskId: number) => {
@@ -1003,52 +1015,6 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
                   <Text style={styles.headerTaskCount} numberOfLines={1}>
                     Total Tasks Assigned: {tasks?.length || 0}
                   </Text>
-                  
-                  {/* 🔧 CLEAR CACHE BUTTON */}
-                  <TouchableOpacity 
-                    style={styles.clearCacheButton}
-                    onPress={async () => {
-                      try {
-                        console.log('🗑️ Manual cache clear requested');
-                        Alert.alert(
-                          'Clear Cache',
-                          'This will clear all cached task data and reload fresh data from the server.',
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Clear & Reload',
-                              style: 'destructive',
-                              onPress: async () => {
-                                try {
-                                  // Clear all cache
-                                  await AsyncStorage.removeItem('offline_tasks');
-                                  await AsyncStorage.removeItem('tasks');
-                                  await cacheData('tasks', []);
-                                  setTasks([]);
-                                  
-                                  // Force reload
-                                  hasInitiallyLoaded.current = false;
-                                  await loadTasks(true, true);
-                                  
-                                  Alert.alert('Success', 'Cache cleared and data reloaded!');
-                                } catch (error) {
-                                  console.error('Error clearing cache:', error);
-                                  Alert.alert('Error', 'Failed to clear cache');
-                                }
-                              }
-                            }
-                          ]
-                        );
-                      } catch (error) {
-                        console.error('Error in clear cache:', error);
-                      }
-                    }}
-                    disabled={isApiCallInProgress}
-                  >
-                    <Text style={styles.clearCacheButtonText}>
-                      🗑️ Clear Cache & Reload
-                    </Text>
-                  </TouchableOpacity>
                 </View>
               </View>
               
@@ -1233,20 +1199,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontWeight: '500',
     backgroundColor: 'transparent',
-  },
-  clearCacheButton: {
-    marginTop: 12,
-    backgroundColor: '#FF5722',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearCacheButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
   },
   targetSummaryContainer: {
     marginTop: 12,
