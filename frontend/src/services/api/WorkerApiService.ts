@@ -126,7 +126,9 @@ export class WorkerApiService {
       overallProgress: number;
     };
   }>> {
-    const params = date ? { date } : {};
+    // 🔧 CACHE BUSTING: Add timestamp to force fresh data
+    const cacheBuster = Date.now();
+    const params = date ? { date, _t: cacheBuster } : { _t: cacheBuster };
     return apiClient.get('/worker/tasks/today', { params });
   }
 
@@ -169,7 +171,9 @@ export class WorkerApiService {
   // Task Management APIs
   async getTodaysTasks(date?: string): Promise<ApiResponse<TaskAssignment[]>> {
     try {
-      const params = date ? { date } : {};
+      // 🔧 CACHE BUSTING: Add timestamp to force fresh data
+      const cacheBuster = Date.now();
+      const params = date ? { date, _t: cacheBuster } : { _t: cacheBuster };
       console.log('🚀 Making API call to /worker/tasks/today with params:', params);
       
       // First try to get dashboard data which includes tasks

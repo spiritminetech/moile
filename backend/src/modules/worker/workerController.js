@@ -1266,6 +1266,14 @@ export const getWorkerTasksToday = async (req, res) => {
       });
     }
 
+    // 🔧 CACHE PREVENTION: Set headers to prevent caching
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate, private, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'X-Content-Type-Options': 'nosniff'
+    });
+
     return res.json(response);
 
   } catch (err) {
@@ -1945,6 +1953,7 @@ export const getWorkerTaskDetails = async (req, res) => {
         status: assignment.status || "queued",
         priority: assignment.priority || "medium",
         sequence: assignment.sequence || 0,
+        date: assignment.date, // Include task assignment date for validation
         project: {
           id: project.id,
           name: project.projectName || "N/A",
@@ -2801,6 +2810,16 @@ export const completeWorkerTask = async (req, res) => {
         success: false, 
         message: "Task must be started before it can be completed",
         error: "TASK_NOT_STARTED"
+      });
+    }
+
+    // Validate task date - only allow completing tasks assigned for today
+    const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format
+    if (assignment.date !== today) {
+      return res.status(400).json({
+        success: false,
+        message: "You can only complete tasks assigned for today. This task is from a previous date.",
+        error: "TASK_DATE_MISMATCH"
       });
     }
 

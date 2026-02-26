@@ -25,6 +25,10 @@ class ApiClient {
       timeout: API_CONFIG.TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
+        // 🔧 CACHE PREVENTION: Force fresh data on every request
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       },
     });
 

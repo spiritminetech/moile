@@ -3766,6 +3766,30 @@ export const getAttendanceHistory = async (req, res) => {
       }
     });
 
+    // Get all dates for trip counting
+    const dates = attendanceRecords.map(record => record.date.toISOString().split('T')[0]);
+    
+    // Count trips for each date
+    const tripCounts = {};
+    for (const dateStr of dates) {
+      const dateObj = new Date(dateStr);
+      const startOfDay = new Date(dateObj);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(dateObj);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const tripsCount = await FleetTask.countDocuments({
+        driverId: driverId,
+        status: 'COMPLETED',
+        taskDate: {
+          $gte: startOfDay,
+          $lte: endOfDay
+        }
+      });
+      
+      tripCounts[dateStr] = tripsCount;
+    }
+
     // Transform attendance records to the expected format
     const records = attendanceRecords.map(record => {
       let totalHours = 0;
@@ -3774,14 +3798,16 @@ export const getAttendanceHistory = async (req, res) => {
         totalHours = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
       }
 
+      const dateStr = record.date.toISOString().split('T')[0];
+
       return {
-        date: record.date.toISOString().split('T')[0],
+        date: dateStr,
         checkInTime: record.checkIn ? record.checkIn.toISOString() : null,
         checkOutTime: record.checkOut ? record.checkOut.toISOString() : null,
         vehicleId: 0, // Not tracked in attendance record
         vehiclePlateNumber: '', // Not tracked in attendance record - empty instead of N/A
         totalHours: Math.max(totalHours, 0),
-        tripsCompleted: 0 // Would need to query FleetTask for this
+        tripsCompleted: tripCounts[dateStr] || 0
       };
     });
 

@@ -176,11 +176,17 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
 
       console.log('🔄 Loading tasks...', { isOffline, showLoading, forceClearCache });
 
-      // If force clear cache is requested, clear it immediately
+      // Only clear cache if explicitly requested via forceClearCache parameter
       if (forceClearCache) {
-        console.log('🗑️ Force clearing task cache...');
-        await cacheData('tasks', []);
-        setTasks([]);
+        console.log('🗑️ Force clearing cache (explicit request)...');
+        try {
+          await AsyncStorage.removeItem('offline_tasks');
+          await AsyncStorage.removeItem('tasks');
+          await cacheData('tasks', []);
+          setTasks([]);
+        } catch (cacheError) {
+          console.error('⚠️ Error clearing cache:', cacheError);
+        }
       }
 
       if (isOffline) {
@@ -213,19 +219,19 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         const tasksData = Array.isArray(response.data) ? response.data : [];
         console.log('✅ Tasks loaded successfully:', tasksData.length);
         
-        // CRITICAL FIX: If API returns empty tasks, clear the cache
+        // Update state with fresh data
+        setTasks(tasksData);
+        
+        // Cache the fresh data for offline use (always update cache with latest data)
         if (tasksData.length === 0) {
-          console.log('🗑️ API returned 0 tasks - clearing stale cache');
+          console.log('📋 API returned 0 tasks - caching empty state');
           await cacheData('tasks', []);
-          setTasks([]);
-          setError(null);
         } else {
-          console.log('📋 Sample task data:', tasksData[0]);
-          setTasks(tasksData);
-          // Cache the data for offline use
+          console.log('📋 Caching', tasksData.length, 'tasks for offline use');
           await cacheData('tasks', tasksData);
-          setError(null);
         }
+        
+        setError(null);
       } else {
         const errorMsg = response.message || 'Failed to load tasks';
         console.log('❌ API returned error:', errorMsg);
@@ -997,6 +1003,52 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
                   <Text style={styles.headerTaskCount} numberOfLines={1}>
                     Total Tasks Assigned: {tasks?.length || 0}
                   </Text>
+                  
+                  {/* 🔧 CLEAR CACHE BUTTON */}
+                  <TouchableOpacity 
+                    style={styles.clearCacheButton}
+                    onPress={async () => {
+                      try {
+                        console.log('🗑️ Manual cache clear requested');
+                        Alert.alert(
+                          'Clear Cache',
+                          'This will clear all cached task data and reload fresh data from the server.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Clear & Reload',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  // Clear all cache
+                                  await AsyncStorage.removeItem('offline_tasks');
+                                  await AsyncStorage.removeItem('tasks');
+                                  await cacheData('tasks', []);
+                                  setTasks([]);
+                                  
+                                  // Force reload
+                                  hasInitiallyLoaded.current = false;
+                                  await loadTasks(true, true);
+                                  
+                                  Alert.alert('Success', 'Cache cleared and data reloaded!');
+                                } catch (error) {
+                                  console.error('Error clearing cache:', error);
+                                  Alert.alert('Error', 'Failed to clear cache');
+                                }
+                              }
+                            }
+                          ]
+                        );
+                      } catch (error) {
+                        console.error('Error in clear cache:', error);
+                      }
+                    }}
+                    disabled={isApiCallInProgress}
+                  >
+                    <Text style={styles.clearCacheButtonText}>
+                      🗑️ Clear Cache & Reload
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
               
@@ -1181,6 +1233,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontWeight: '500',
     backgroundColor: 'transparent',
+  },
+  clearCacheButton: {
+    marginTop: 12,
+    backgroundColor: '#FF5722',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clearCacheButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   targetSummaryContainer: {
     marginTop: 12,
