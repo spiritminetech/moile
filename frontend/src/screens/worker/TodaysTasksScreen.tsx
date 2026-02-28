@@ -622,13 +622,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
     try {
       const response = await workerApiService.resumeTask(taskId, currentLocation);
       
-      // DEBUG: Log the response to see what we're getting
-      console.log('🔍 RESUME TASK RESPONSE:', JSON.stringify(response, null, 2));
-      console.log('   success:', response.success);
-      console.log('   error:', response.error);
-      console.log('   message:', response.message);
-      console.log('   data:', response.data);
-      
+      // If we get here, the task was resumed successfully
       if (response.success) {
         Alert.alert(
           'Task Resumed',
@@ -638,61 +632,10 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         
         // Refresh tasks to get updated status
         loadTasks(false);
-      } else {
-        // Handle specific error cases
-        if (response.error === 'ANOTHER_TASK_ACTIVE') {
-          // Show pause and resume dialog
-          Alert.alert(
-            'Another Task Active',
-            `You are working on ${response.data?.activeTaskName || 'another task'}. Pause and resume this task?`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { 
-                text: 'Confirm', 
-                onPress: async () => {
-                  try {
-                    // Pause the active task
-                    const pauseResponse = await workerApiService.pauseTask(response.data.activeTaskId);
-                    
-                    if (pauseResponse.success) {
-                      // Now resume the new task
-                      const resumeResponse = await workerApiService.resumeTask(taskId, currentLocation);
-                      
-                      if (resumeResponse.success) {
-                        Alert.alert(
-                          'Task Resumed',
-                          'Previous task paused. Task resumed successfully.',
-                          [{ text: 'OK' }]
-                        );
-                        loadTasks(false);
-                      } else {
-                        Alert.alert('Error', resumeResponse.message || 'Failed to resume task');
-                      }
-                    } else {
-                      Alert.alert('Error', pauseResponse.message || 'Failed to pause active task');
-                    }
-                  } catch (error) {
-                    console.error('Error pausing and resuming task:', error);
-                    Alert.alert('Error', 'Failed to pause and resume task');
-                  }
-                }
-              }
-            ]
-          );
-        } else {
-          Alert.alert(
-            'Cannot Resume Task',
-            response.message || 'Failed to resume task. Please try again.',
-            [{ text: 'OK' }]
-          );
-        }
       }
     } catch (err: any) {
-      console.error('Error resuming task:', err);
-      
       // Check if this is the ANOTHER_TASK_ACTIVE error (comes as 400 error)
       if (err.details?.error === 'ANOTHER_TASK_ACTIVE' && err.details?.data) {
-        // Store the error data in a variable to avoid closure issues
         const activeTaskData = err.details.data;
         
         // Show pause and resume dialog
@@ -705,25 +648,14 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
               text: 'Confirm', 
               onPress: async () => {
                 try {
-                  console.log('🔄 Starting pause and resume flow...');
-                  console.log('   Active task ID:', activeTaskData.activeTaskId);
-                  console.log('   New task ID:', taskId);
-                  
-                  // Pause the active task
-                  console.log('⏸️ Step 1: Pausing active task...');
+                  // Pause the active task first
                   const pauseResponse = await workerApiService.pauseTask(activeTaskData.activeTaskId);
-                  console.log('   Pause response:', pauseResponse);
                   
                   if (pauseResponse.success) {
-                    console.log('✅ Task paused successfully');
-                    
                     // Now resume the new task
-                    console.log('▶️ Step 2: Resuming new task...');
                     const resumeResponse = await workerApiService.resumeTask(taskId, currentLocation);
-                    console.log('   Resume response:', resumeResponse);
                     
                     if (resumeResponse.success) {
-                      console.log('✅ New task resumed successfully');
                       Alert.alert(
                         'Task Resumed',
                         'Previous task paused. Task resumed successfully.',
@@ -731,18 +663,13 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
                       );
                       loadTasks(false);
                     } else {
-                      console.error('❌ Failed to resume new task:', resumeResponse.message);
                       Alert.alert('Error', resumeResponse.message || 'Failed to resume task');
                     }
                   } else {
-                    console.error('❌ Failed to pause active task:', pauseResponse.message);
                     Alert.alert('Error', pauseResponse.message || 'Failed to pause active task');
                   }
                 } catch (pauseError: any) {
-                  console.error('❌ Error in pause and resume flow:', pauseError);
-                  console.error('   Error message:', pauseError.message);
-                  console.error('   Error details:', pauseError.details);
-                  console.error('   Error code:', pauseError.code);
+                  console.error('Error in pause and resume flow:', pauseError);
                   Alert.alert('Error', pauseError.message || 'Failed to pause and resume task');
                 }
               }
@@ -751,6 +678,7 @@ const TodaysTasksScreen = ({ navigation, route }: any) => {
         );
       } else {
         // Generic error handling
+        console.error('Error resuming task:', err);
         Alert.alert(
           'Error',
           err.message || 'Failed to resume task. Please check your connection and try again.',

@@ -141,17 +141,29 @@ const AttendanceMonitoringScreen: React.FC = () => {
 
   const [isExporting, setIsExporting] = useState(false);
 
-  // Auto-select first project when projects are loaded
+  // Auto-select first project with workers when projects are loaded
   useEffect(() => {
     if (attendanceData?.projects && attendanceData.projects.length > 0 && selectedProjectId === null) {
-      // Find project with id 1 (where test data is), or use first project
-      const targetProject = attendanceData.projects.find(p => p.id === 1) || attendanceData.projects[0];
-      if (targetProject?.id) {
-        console.log('🎯 Auto-selecting project:', targetProject.id, targetProject.name);
-        setSelectedProjectId(targetProject.id);
+      // If we have workers data, find which project they belong to
+      if (attendanceData.workers && attendanceData.workers.length > 0) {
+        // Get the project ID from the first worker
+        const firstWorkerProjectId = attendanceData.workers[0].projectId;
+        const targetProject = attendanceData.projects.find(p => p.id === firstWorkerProjectId);
+        if (targetProject?.id) {
+          console.log('🎯 Auto-selecting project with data:', targetProject.id, targetProject.name);
+          setSelectedProjectId(targetProject.id);
+          return;
+        }
+      }
+      
+      // Fallback: select first project if no workers data yet
+      const firstProject = attendanceData.projects[0];
+      if (firstProject?.id) {
+        console.log('🎯 Auto-selecting first project:', firstProject.id, firstProject.name);
+        setSelectedProjectId(firstProject.id);
       }
     }
-  }, [attendanceData?.projects, selectedProjectId]);
+  }, [attendanceData?.projects, attendanceData?.workers, selectedProjectId]);
 
   // Auto-refresh interval
   useEffect(() => {
@@ -160,12 +172,23 @@ const AttendanceMonitoringScreen: React.FC = () => {
     }, 30000); // Refresh every 30 seconds
 
     return () => clearInterval(interval);
-  }, [selectedProjectId]);
+  }, [loadAttendanceData]);
 
   // Initial data load
   useEffect(() => {
     loadAttendanceData();
     loadPendingCorrections();
+  }, []);
+
+  // Reload when project selection changes (but not on initial mount)
+  const isInitialMount = React.useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+    } else if (selectedProjectId !== null) {
+      loadAttendanceData();
+      loadPendingCorrections();
+    }
   }, [selectedProjectId]);
 
   // Load attendance monitoring data
@@ -652,7 +675,6 @@ const AttendanceMonitoringScreen: React.FC = () => {
 
     return (
       <ConstructionCard
-        key={record.employeeId}
         variant="outlined"
         style={[
           styles.recordCard,
@@ -1305,7 +1327,11 @@ const AttendanceMonitoringScreen: React.FC = () => {
           </Text>
           
           {filteredAndSortedRecords.length > 0 ? (
-            filteredAndSortedRecords.map(renderAttendanceRecord)
+            filteredAndSortedRecords.map((record) => (
+              <React.Fragment key={record.employeeId}>
+                {renderAttendanceRecord(record)}
+              </React.Fragment>
+            ))
           ) : (
             <ConstructionCard variant="outlined" style={styles.noDataCard}>
               <Text style={styles.noDataText}>

@@ -2435,10 +2435,11 @@ export const updateTaskStatus = async (req, res) => {
       if (!attendance) {
         return res.status(403).json({
           success: false,
-          message: 'Route start denied: You must clock in before starting a route',
+          message: 'Clock In Required',
           error: 'ATTENDANCE_REQUIRED',
           details: {
-            message: 'Please clock in first before starting your route. Go to Attendance screen to clock in.'
+            message: 'You must clock in before starting a route. Please go to the Attendance screen and clock in first.',
+            action: 'CLOCK_IN_REQUIRED'
           }
         });
       }

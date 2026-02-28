@@ -1278,6 +1278,7 @@ export const getAttendanceMonitoring = async (req, res) => {
 
     // Process worker data
     const workers = [];
+    const workerMap = new Map(); // Use Map to deduplicate by employeeId-projectId
     const summary = {
       totalWorkers: 0,
       checkedIn: 0,
@@ -1296,6 +1297,14 @@ export const getAttendanceMonitoring = async (req, res) => {
 
       const project = projectMap[assignment.projectId];
       if (!project) continue;
+
+      // Create unique key for deduplication
+      const workerKey = `${assignment.employeeId}-${assignment.projectId}`;
+      
+      // Skip if we've already processed this worker-project combination
+      if (workerMap.has(workerKey)) {
+        continue;
+      }
 
       const attendanceKey = `${assignment.employeeId}-${assignment.projectId}`;
       const attendance = attendanceMap[attendanceKey];
@@ -1398,6 +1407,8 @@ export const getAttendanceMonitoring = async (req, res) => {
         continue;
       }
 
+      // Mark this worker-project combination as processed
+      workerMap.set(workerKey, workerData);
       workers.push(workerData);
 
       // Update summary

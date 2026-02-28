@@ -1214,10 +1214,17 @@ const TransportTasksScreen: React.FC = () => {
     }
   }, [selectedTask, locationState.currentLocation, handleRefresh]);
 
-  // Handle task status update
+  // Handle task status update (only for route start)
   const handleTaskStatusUpdate = useCallback(async (taskId: number, status: TransportTask['status']) => {
     try {
       console.log('📊 Updating task status:', taskId, 'to', status);
+      
+      // Only handle route start (pending -> en_route_pickup)
+      if (status !== 'en_route_pickup' && status !== 'EN_ROUTE_PICKUP') {
+        console.log('⚠️ This function only handles route start');
+        showToast('⚠️ Please use the Navigate screen to complete pickup/dropoff', 'warning');
+        return;
+      }
       
       const response = await driverApiService.updateTransportTaskStatus(
         taskId,
@@ -1237,7 +1244,7 @@ const TransportTasksScreen: React.FC = () => {
           setSelectedTask({ ...selectedTask, status });
         }
         
-        // ✅ REMOVED: No toast for status update (too many messages)
+        showToast('✅ Route started successfully', 'success');
         console.log(`✅ Task status updated to ${status.replace('_', ' ')}`);
       }
     } catch (error: any) {
@@ -1408,9 +1415,16 @@ const TransportTasksScreen: React.FC = () => {
                       <ConstructionButton
                         title="📊 Update Status"
                         onPress={() => {
-                          const nextStatus = getNextStatus(task.status);
-                          if (nextStatus) {
-                            handleTaskStatusUpdate(task.taskId, nextStatus);
+                          // If task is pending, start the route
+                          if (task.status === 'pending' || task.status === 'PENDING') {
+                            handleTaskStatusUpdate(task.taskId, 'en_route_pickup');
+                          } else {
+                            // For other statuses, show popup to use Navigate screen
+                            Alert.alert(
+                              '📍 Complete Trip',
+                              'To complete pickup or dropoff, please use the Navigate button to open the trip details screen.',
+                              [{ text: 'OK' }]
+                            );
                           }
                         }}
                         variant="secondary"

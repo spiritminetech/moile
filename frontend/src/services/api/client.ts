@@ -117,8 +117,20 @@ class ApiClient {
 
         // Check if this is a "NO_TASKS_ASSIGNED" case - this is a valid empty state, not an error
         const isNoTasksAssigned = error.response?.data?.error === 'NO_TASKS_ASSIGNED';
+        
+        // Check if this is an "ANOTHER_TASK_ACTIVE" case - this is a confirmation prompt, not an error
+        const isAnotherTaskActive = error.response?.data?.error === 'ANOTHER_TASK_ACTIVE';
+        
+        // Check if this is an "ATTENDANCE_REQUIRED" case - this is a validation message, not an error
+        const isAttendanceRequired = error.response?.data?.error === 'ATTENDANCE_REQUIRED';
+        
+        // Check if this is a "ROUTE_START_LOCATION_NOT_APPROVED" case - this is a validation message
+        const isLocationValidation = error.response?.data?.error === 'ROUTE_START_LOCATION_NOT_APPROVED';
+        
+        // Check if this is an "INVALID_STATUS_TRANSITION" case - this is a validation message
+        const isStatusValidation = error.response?.data?.error === 'INVALID_STATUS_TRANSITION';
 
-        // 🔍 DEBUG: Log error responses (but use info level for NO_TASKS_ASSIGNED)
+        // 🔍 DEBUG: Log error responses (but use info level for expected business logic responses)
         if (isNoTasksAssigned) {
           console.log('ℹ️ API Info:', {
             status: error.response?.status,
@@ -126,6 +138,23 @@ class ApiClient {
             url: error.config?.url,
             data: error.response?.data,
             message: 'No tasks assigned for today (valid empty state)',
+            duration: duration ? `${duration}ms` : 'unknown',
+          });
+        } else if (isAnotherTaskActive) {
+          console.log('ℹ️ API Info:', {
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            url: error.config?.url,
+            data: error.response?.data,
+            message: 'Another task is active - requires user confirmation',
+            duration: duration ? `${duration}ms` : 'unknown',
+          });
+        } else if (isAttendanceRequired || isLocationValidation || isStatusValidation) {
+          console.log('ℹ️ API Validation:', {
+            status: error.response?.status,
+            url: error.config?.url,
+            validation: error.response?.data?.error,
+            message: error.response?.data?.message,
             duration: duration ? `${duration}ms` : 'unknown',
           });
         } else {
@@ -139,8 +168,8 @@ class ApiClient {
           });
         }
 
-        // Network logger (don't log NO_TASKS_ASSIGNED as error)
-        if (!isNoTasksAssigned) {
+        // Network logger (don't log expected business logic responses as errors)
+        if (!isNoTasksAssigned && !isAnotherTaskActive && !isAttendanceRequired && !isLocationValidation && !isStatusValidation) {
           networkLogger.log({
             method: error.config?.method?.toUpperCase() || 'GET',
             url: error.config ? `${error.config.baseURL}${error.config.url}` : 'UNKNOWN',
@@ -191,7 +220,18 @@ class ApiClient {
     } else if (error.response?.status === 401) {
       userMessage = 'Your session has expired. Please log in again.';
     } else if (error.response?.status === 403) {
-      userMessage = 'Access denied. Please contact your supervisor.';
+      // Check if there's a specific error message from the API
+      const apiMessage = error.response?.data?.message;
+      const apiDetails = error.response?.data?.details?.message;
+      
+      // Use the API's specific message if available, otherwise use generic message
+      if (apiDetails) {
+        userMessage = apiDetails;
+      } else if (apiMessage && apiMessage !== 'Forbidden') {
+        userMessage = apiMessage;
+      } else {
+        userMessage = 'Access denied. Please contact your supervisor.';
+      }
     } else if (error.response?.status === 404) {
       // Check if this is a "NO_TASKS_ASSIGNED" case - this is a valid empty state, not an error
       const errorCode = error.response?.data?.error;

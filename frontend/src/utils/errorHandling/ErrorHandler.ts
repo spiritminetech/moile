@@ -114,6 +114,41 @@ export class ErrorHandler {
       };
     }
 
+    // Check if this is an "ANOTHER_TASK_ACTIVE" case - this is a confirmation prompt, not an error
+    const isAnotherTaskActive = error.response?.data?.error === 'ANOTHER_TASK_ACTIVE';
+    
+    if (isAnotherTaskActive) {
+      // Don't log this as an error - it's a user confirmation prompt
+      console.log('ℹ️ Another task is active - requires user confirmation');
+      return {
+        message: error.response?.data?.message || 'Another task is active',
+        code: 400,
+        details: error.response?.data,
+        timestamp: new Date(),
+        context,
+        recoverable: true,
+      };
+    }
+
+    // Check if this is a validation error (ATTENDANCE_REQUIRED, ROUTE_START_LOCATION_NOT_APPROVED, etc.)
+    const isValidationError = error.response?.data?.error === 'ATTENDANCE_REQUIRED' ||
+                             error.response?.data?.error === 'ROUTE_START_LOCATION_NOT_APPROVED' ||
+                             error.response?.data?.error === 'INVALID_STATUS_TRANSITION' ||
+                             error.response?.data?.error === 'INVALID_ENDPOINT_FOR_STATUS';
+    
+    if (isValidationError) {
+      // Don't log this as an error - it's a validation message
+      console.log('ℹ️ Validation:', error.response?.data?.error, '-', error.response?.data?.message);
+      return {
+        message: error.response?.data?.message || 'Validation failed',
+        code: error.response?.status || 403,
+        details: error.response?.data,
+        timestamp: new Date(),
+        context,
+        recoverable: true,
+      };
+    }
+
     if (error.response) {
       // Server responded with error status
       const status = error.response.status;

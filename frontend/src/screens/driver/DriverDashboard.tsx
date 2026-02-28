@@ -512,38 +512,54 @@ const DriverDashboard: React.FC = () => {
         );
       }
     } catch (error: any) {
-      console.error('❌ Start route error:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-      });
+      // Log error details for debugging (use console.log for expected business logic errors)
+      const errorData = error.response?.data || error.details || error;
+      const isExpectedError = errorData.error === 'ATTENDANCE_REQUIRED' || 
+                             errorData.error === 'ROUTE_START_LOCATION_NOT_APPROVED' ||
+                             errorData.error === 'INVALID_STATUS_TRANSITION';
+      
+      if (isExpectedError) {
+        console.log('ℹ️ Start route validation:', {
+          error: errorData.error,
+          message: errorData.message,
+          details: errorData.details,
+        });
+      } else {
+        console.error('❌ Start route error:', error);
+        console.error('❌ Error details:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+        });
+      }
       
       // Handle specific error types with user-friendly messages
       let errorTitle = 'Cannot Start Route';
       let errorMessage = 'Please try again.';
       
-      if (error.response?.data) {
-        const errorData = error.response.data;
-        
-        // Handle specific error codes
-        if (errorData.error === 'ATTENDANCE_REQUIRED') {
-          errorTitle = 'Clock In Required';
-          errorMessage = 'Please clock in before starting your route.';
-        } else if (errorData.error === 'ROUTE_START_LOCATION_NOT_APPROVED') {
-          errorTitle = 'Wrong Location';
-          errorMessage = errorData.details?.message || 'You must be at the depot to start the route.';
-        } else if (errorData.error === 'INVALID_STATUS_TRANSITION') {
-          errorTitle = 'Route Already Started';
-          errorMessage = errorData.hint || 'This route has already been started.';
-        } else if (errorData.error === 'INVALID_ENDPOINT_FOR_STATUS') {
-          errorTitle = 'Action Not Allowed';
-          errorMessage = 'Please use the correct button for this action.';
-        } else {
-          errorMessage = errorData.message || error.message || 'Failed to start route';
-        }
+      // Handle specific error codes
+      if (errorData.error === 'ATTENDANCE_REQUIRED') {
+        errorTitle = '⏰ Clock In Required';
+        // Use the detailed message from the API if available
+        errorMessage = errorData.details?.message || 
+                      errorData.message || 
+                      'You must clock in before starting a route.\n\nPlease go to the Attendance screen and clock in first.';
+      } else if (errorData.error === 'ROUTE_START_LOCATION_NOT_APPROVED') {
+        errorTitle = '📍 Wrong Location';
+        errorMessage = errorData.details?.message || errorData.message || 'You must be at the depot to start the route.';
+      } else if (errorData.error === 'INVALID_STATUS_TRANSITION') {
+        errorTitle = '⚠️ Route Already Started';
+        errorMessage = errorData.hint || errorData.message || 'This route has already been started.';
+      } else if (errorData.error === 'INVALID_ENDPOINT_FOR_STATUS') {
+        errorTitle = '⚠️ Action Not Allowed';
+        errorMessage = 'Please use the correct button for this action.';
+      } else if (errorData.message && errorData.message !== 'Access denied. Please contact your supervisor.') {
+        // Use the API message if it's not the generic access denied message
+        errorMessage = errorData.message;
+      } else if (error.message && error.message !== 'Access denied. Please contact your supervisor.') {
+        errorMessage = error.message;
       } else {
-        errorMessage = error.message || 'Failed to start route';
+        errorMessage = 'Failed to start route. Please try again.';
       }
       
       Alert.alert(errorTitle, errorMessage, [{ text: 'OK' }]);

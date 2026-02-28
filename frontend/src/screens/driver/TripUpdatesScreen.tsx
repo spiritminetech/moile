@@ -232,12 +232,73 @@ const TripUpdatesScreen: React.FC = () => {
       setIsUpdatingStatus(true);
       console.log('📊 Updating trip status:', updateData);
 
-      const response = await driverApiService.updateTransportTaskStatus(
-        updateData.taskId,
-        updateData.status,
-        updateData.location,
-        updateData.notes
-      );
+      // Validate required data
+      if (!updateData.location) {
+        Alert.alert('Error', 'Location is required to update trip status');
+        setIsUpdatingStatus(false);
+        return;
+      }
+
+      // Route to correct endpoint based on status
+      let response;
+      
+      if (updateData.status === 'pickup_complete' || updateData.status === 'PICKUP_COMPLETE') {
+        // Use pickup complete endpoint
+        console.log('ℹ️ Using pickup complete endpoint');
+        
+        if (!selectedTask?.pickupLocations || selectedTask.pickupLocations.length === 0) {
+          Alert.alert('Error', 'No pickup location found for this task');
+          setIsUpdatingStatus(false);
+          return;
+        }
+        
+        const locationId = selectedTask.pickupLocations[0].id || selectedTask.pickupLocations[0].locationId;
+        if (!locationId) {
+          Alert.alert('Error', 'Pickup location ID not found');
+          setIsUpdatingStatus(false);
+          return;
+        }
+        
+        // Get worker count from task or default to 0
+        const workerCount = selectedTask.workerCount || selectedTask.totalWorkers || 0;
+        
+        response = await driverApiService.confirmPickupComplete(
+          updateData.taskId,
+          locationId,
+          updateData.location,
+          workerCount, // Pass actual worker count
+          updateData.notes || '', // Ensure notes is not null
+          undefined // photo - handled separately
+        );
+      } else if (updateData.status === 'completed' || updateData.status === 'COMPLETED') {
+        // Use dropoff complete endpoint
+        console.log('ℹ️ Using dropoff complete endpoint');
+        
+        // Get worker count from task or default to 0
+        const workerCount = selectedTask?.workerCount || selectedTask?.totalWorkers || 0;
+        
+        response = await driverApiService.confirmDropoffComplete(
+          updateData.taskId,
+          updateData.location,
+          workerCount, // Pass actual worker count
+          updateData.notes || '', // Ensure notes is not null
+          undefined, // photo - handled separately
+          undefined // workerIds - handled separately
+        );
+      } else if (updateData.status === 'en_route_pickup' || updateData.status === 'EN_ROUTE_PICKUP') {
+        // Use route start endpoint
+        console.log('ℹ️ Using route start endpoint');
+        response = await driverApiService.updateTransportTaskStatus(
+          updateData.taskId,
+          updateData.status,
+          updateData.location,
+          updateData.notes || '' // Ensure notes is not null
+        );
+      } else {
+        Alert.alert('Error', 'Invalid status update. Please use the appropriate button.');
+        setIsUpdatingStatus(false);
+        return;
+      }
 
       if (response.success) {
         Alert.alert('Success', 'Trip status updated successfully!');
