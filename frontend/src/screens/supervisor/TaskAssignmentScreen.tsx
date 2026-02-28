@@ -221,9 +221,14 @@ const TaskAssignmentScreen: React.FC = () => {
   // Task creation handler - ENHANCED with all new fields
   const handleCreateTask = useCallback(async () => {
     try {
-      // Validation
-      if (!createTaskForm.taskName.trim() || !createTaskForm.projectId) {
-        Alert.alert('Validation Error', 'Please fill in task name and select a project');
+      // Validation - Check each field separately for better UX
+      if (!createTaskForm.taskName.trim()) {
+        Alert.alert('Validation Error', 'Please enter a task name');
+        return;
+      }
+
+      if (!createTaskForm.projectId) {
+        Alert.alert('Validation Error', 'Please select a project');
         return;
       }
 
