@@ -177,28 +177,10 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
         if (photoUrl) {
           console.log('✅ Photo URL extracted:', photoUrl);
           
-          // Update UI immediately without accessibility test
-          // The accessibility test can fail due to network timing issues
-          // but the photo is already uploaded successfully
+          // Update UI immediately - no accessibility test needed
+          // The photo is already uploaded successfully to the server
           onPhotoUpdated(photoUrl);
           Alert.alert('Success', 'Profile photo updated successfully!');
-          
-          // Optional: Test accessibility in background (non-blocking)
-          fetch(photoUrl, { method: 'HEAD', timeout: 3000 } as any)
-            .then(testResponse => {
-              console.log('🌐 Photo URL accessibility test:', {
-                url: photoUrl,
-                status: testResponse.status,
-                ok: testResponse.ok
-              });
-            })
-            .catch(accessError => {
-              // Log error safely without circular references
-              console.error('🌐 URL accessibility test failed:', {
-                url: photoUrl,
-                error: accessError instanceof Error ? accessError.message : 'Network request failed'
-              });
-            });
         } else {
           console.error('❌ No photo URL found in response:', response);
           Alert.alert('Error', 'Photo uploaded but URL not found. Please refresh the page.');
@@ -223,23 +205,6 @@ const ProfilePhotoManager: React.FC<ProfilePhotoManagerProps> = ({
     });
 
     if (currentPhotoUrl) {
-      // Test URL accessibility in background (non-blocking)
-      fetch(currentPhotoUrl, { method: 'HEAD', timeout: 3000 } as any)
-        .then(response => {
-          console.log('🌐 URL accessibility test:', {
-            url: currentPhotoUrl,
-            status: response.status,
-            ok: response.ok
-          });
-        })
-        .catch(error => {
-          // Log error safely without circular references
-          console.error('🌐 URL accessibility test failed:', {
-            url: currentPhotoUrl,
-            error: error instanceof Error ? error.message : 'Network request failed'
-          });
-        });
-
       // Add cache busting parameter to prevent image caching issues
       const cacheBustUrl = currentPhotoUrl.includes('?') 
         ? `${currentPhotoUrl}&t=${Date.now()}` 
