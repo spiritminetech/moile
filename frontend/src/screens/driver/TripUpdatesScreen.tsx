@@ -259,8 +259,20 @@ const TripUpdatesScreen: React.FC = () => {
           return;
         }
         
-        // Get worker count from task or default to 0
-        const workerCount = selectedTask.workerCount || selectedTask.totalWorkers || 0;
+        // ✅ FIX: Get worker count from multiple sources, ensure it's never null/undefined
+        const workerCount = updateData.workerCount || 
+                           selectedTask.checkedInWorkers || 
+                           selectedTask.totalWorkers || 
+                           selectedTask.pickupLocations[0]?.workerManifest?.length || 
+                           0;
+        
+        console.log('📊 Pickup complete worker count:', {
+          fromUpdateData: updateData.workerCount,
+          fromCheckedIn: selectedTask.checkedInWorkers,
+          fromTotal: selectedTask.totalWorkers,
+          fromManifest: selectedTask.pickupLocations[0]?.workerManifest?.length,
+          finalCount: workerCount
+        });
         
         response = await driverApiService.confirmPickupComplete(
           updateData.taskId,
@@ -274,8 +286,20 @@ const TripUpdatesScreen: React.FC = () => {
         // Use dropoff complete endpoint
         console.log('ℹ️ Using dropoff complete endpoint');
         
-        // Get worker count from task or default to 0
-        const workerCount = selectedTask?.workerCount || selectedTask?.totalWorkers || 0;
+        // ✅ FIX: Get worker count from multiple sources, ensure it's never null/undefined
+        const workerCount = updateData.workerCount || 
+                           selectedTask?.checkedInWorkers || 
+                           selectedTask?.totalWorkers || 
+                           selectedTask?.pickupLocations?.[0]?.workerManifest?.filter(w => w.checkedIn).length || 
+                           0;
+        
+        console.log('📊 Dropoff complete worker count:', {
+          fromUpdateData: updateData.workerCount,
+          fromCheckedIn: selectedTask?.checkedInWorkers,
+          fromTotal: selectedTask?.totalWorkers,
+          fromManifest: selectedTask?.pickupLocations?.[0]?.workerManifest?.filter(w => w.checkedIn).length,
+          finalCount: workerCount
+        });
         
         response = await driverApiService.confirmDropoffComplete(
           updateData.taskId,
@@ -294,6 +318,16 @@ const TripUpdatesScreen: React.FC = () => {
           updateData.location,
           updateData.notes || '' // Ensure notes is not null
         );
+      } else if (updateData.status === 'en_route_dropoff' || updateData.status === 'EN_ROUTE_DROPOFF') {
+        // ✅ NEW: Handle en_route_dropoff status (though it should be auto-set by backend)
+        console.log('ℹ️ En route to dropoff - this should be automatically set by backend after pickup complete');
+        Alert.alert(
+          'ℹ️ Information',
+          'The "En Route to Dropoff" status is automatically set when you complete pickup.\n\nPlease use "Pickup Complete" button instead.',
+          [{ text: 'OK' }]
+        );
+        setIsUpdatingStatus(false);
+        return;
       } else {
         Alert.alert('Error', 'Invalid status update. Please use the appropriate button.');
         setIsUpdatingStatus(false);

@@ -103,12 +103,11 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
           { value: 'pickup_complete', label: '✅ Pickup Complete' },
         ];
       case 'pickup_complete':
-        return [
-          { value: 'en_route_dropoff', label: '🏗️ En Route to Site' },
-        ];
       case 'en_route_dropoff':
+        // ✅ FIX: After pickup complete, backend automatically sets en_route_dropoff
+        // Driver should only complete dropoff, not manually set en_route_dropoff
         return [
-          { value: 'completed', label: '🎯 Trip Completed' },
+          { value: 'completed', label: '🎯 Dropoff Complete' },
         ];
       default:
         return [];
@@ -229,13 +228,27 @@ const TripStatusUpdateForm: React.FC<TripStatusUpdateFormProps> = ({
   };
 
   const proceedWithStatusUpdate = (newStatus: TripStatusUpdate['status']) => {
+    // ✅ FIX: Ensure workerCount is never null/undefined
+    const workerCount = transportTask.checkedInWorkers || 
+                       transportTask.totalWorkers || 
+                       transportTask.pickupLocations?.[0]?.workerManifest?.filter(w => w.checkedIn).length || 
+                       0;
+    
+    console.log('📊 TripStatusUpdateForm worker count:', {
+      checkedInWorkers: transportTask.checkedInWorkers,
+      totalWorkers: transportTask.totalWorkers,
+      manifestLength: transportTask.pickupLocations?.[0]?.workerManifest?.length,
+      checkedInCount: transportTask.pickupLocations?.[0]?.workerManifest?.filter(w => w.checkedIn).length,
+      finalCount: workerCount
+    });
+    
     const updateData: TripStatusUpdate = {
       taskId: transportTask.taskId,
       status: newStatus,
       location: currentLocation!,
       timestamp: new Date().toISOString(),
       notes: statusNotes.trim() || undefined,
-      workerCount: transportTask.checkedInWorkers,
+      workerCount: workerCount, // ✅ Always a valid number, never null/undefined
     };
 
     Alert.alert(
