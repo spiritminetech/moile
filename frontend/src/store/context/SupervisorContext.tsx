@@ -338,19 +338,22 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
 
   // Initialize supervisor data on mount
   useEffect(() => {
-    // Only initialize if user is authenticated and has supervisor role
-    if (authState.isAuthenticated && authState.user?.role === 'supervisor' && authState.token) {
+    // Only initialize if user is authenticated and has supervisor role (case-insensitive)
+    const isSupervisor = authState.user?.role?.toLowerCase() === 'supervisor';
+    
+    if (authState.isAuthenticated && isSupervisor && authState.token) {
       initializeSupervisorData();
     }
   }, [authState.isAuthenticated, authState.user?.role, authState.token]);
 
   const initializeSupervisorData = async () => {
-    // Double-check authentication before making API calls
-    if (!authState.isAuthenticated || !authState.token || authState.user?.role !== 'supervisor') {
-      console.log('⚠️ Skipping supervisor data initialization - not authenticated or not a supervisor');
+    // Double-check authentication before making API calls (case-insensitive role check)
+    const isSupervisor = authState.user?.role?.toLowerCase() === 'supervisor';
+    
+    if (!authState.isAuthenticated || !authState.token || !isSupervisor) {
       return;
     }
-
+    
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'CLEAR_ERROR' });
@@ -374,9 +377,10 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
 
   // Team data and worker assignment state management
   const loadTeamData = useCallback(async () => {
-    // Check authentication before making API calls
-    if (!authState.isAuthenticated || !authState.token || authState.user?.role !== 'supervisor') {
-      console.log('⚠️ Skipping team data load - not authenticated or not a supervisor');
+    // Check authentication before making API calls (case-insensitive role check)
+    const isSupervisor = authState.user?.role?.toLowerCase() === 'supervisor';
+    
+    if (!authState.isAuthenticated || !authState.token || !isSupervisor) {
       return;
     }
 
@@ -418,7 +422,7 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
           },
           startDate: new Date(proj.startDate || '2024-01-01'),
           endDate: new Date(proj.endDate || '2024-12-31'),
-          status: 'active',
+          status: proj.status === 'ongoing' ? 'active' : (proj.status || 'active'), // Map 'ongoing' to 'active'
           supervisor: {
             id: proj.supervisorId || 1,
             name: proj.supervisorName || 'Supervisor',
@@ -429,33 +433,49 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
       }
 
       // Get attendance monitoring data for team members
-      const attendanceResponse = await supervisorApiService.getAttendanceMonitoring({
-        date: new Date().toISOString().split('T')[0]
-      });
-      
+      // For task assignment, we need ALL assigned workers from ALL projects
       let teamMembers: TeamMember[] = [];
       
-      if (attendanceResponse.success && attendanceResponse.data?.workers) {
-        teamMembers = attendanceResponse.data.workers.map((worker: any) => ({
-          id: worker.employeeId,
-          name: worker.workerName,
-          role: worker.role || 'Worker',
-          attendanceStatus: worker.status === 'CHECKED_IN' ? 'present' : 
-                           worker.status === 'ABSENT' ? 'absent' : 
-                           worker.isLate ? 'late' : 'present',
-          currentTask: worker.taskAssigned && worker.taskAssigned !== 'No task assigned' ? {
-            id: worker.employeeId,
-            name: worker.taskAssigned,
-            progress: Math.floor(Math.random() * 100)
-          } : null,
-          location: {
-            latitude: worker.lastKnownLocation?.latitude || 0,
-            longitude: worker.lastKnownLocation?.longitude || 0,
-            insideGeofence: worker.insideGeofence || false,
-            lastUpdated: worker.lastLocationUpdate || new Date().toISOString()
-          },
-          certifications: []
-        }));
+      if (projects.length > 0) {
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Load workers from ALL projects, not just the first one
+        for (const project of projects) {
+          try {
+            const workersResponse = await supervisorApiService.getWorkersAssigned({
+              projectId: project.id.toString(),
+              date: today
+            });
+            
+            if (workersResponse.success && workersResponse.data?.workers && workersResponse.data.workers.length > 0) {
+              const projectWorkers = workersResponse.data.workers.map((worker: any) => ({
+                id: worker.employeeId,
+                name: worker.workerName,
+                role: worker.role || 'Worker',
+                attendanceStatus: worker.status === '✅ Present' ? 'present' : 
+                                 worker.status === '⏳ Pending' ? 'present' : 
+                                 worker.status === '❌ Absent' ? 'absent' : 'present',
+                currentTask: null,
+                location: {
+                  latitude: 0,
+                  longitude: 0,
+                  insideGeofence: false,
+                  lastUpdated: new Date().toISOString()
+                },
+                certifications: []
+              }));
+              
+              // Add workers from this project (avoid duplicates by checking ID)
+              projectWorkers.forEach(worker => {
+                if (!teamMembers.find(m => m.id === worker.id)) {
+                  teamMembers.push(worker);
+                }
+              });
+            }
+          } catch (error) {
+            console.error(`Error loading workers for project ${project.id}:`, error);
+          }
+        }
       }
 
       dispatch({ type: 'SET_ASSIGNED_PROJECTS', payload: projects });
@@ -491,7 +511,6 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
   const assignTaskToWorker = useCallback(async (request: TaskAssignment) => {
     try {
       // TODO: Replace with actual API call
-      console.log('Assigning task to worker:', request);
       // Mock implementation - in real app, this would call the API
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to assign task to worker';
@@ -502,7 +521,6 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
   const reassignTask = useCallback(async (taskId: number, fromWorkerId: number, toWorkerId: number) => {
     try {
       // TODO: Replace with actual API call
-      console.log('Reassigning task:', { taskId, fromWorkerId, toWorkerId });
       // Mock implementation - in real app, this would call the API
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to reassign task';
@@ -567,7 +585,6 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
   const escalateRequest = useCallback(async (approvalId: number, reason: string) => {
     try {
       // TODO: Replace with actual API call
-      console.log('Escalating request:', { approvalId, reason });
       // Mock implementation - in real app, this would call the API
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to escalate request';
@@ -592,8 +609,6 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
       });
 
       if (response.success && response.data) {
-        console.log('📊 Raw API response data count:', response.data.data?.length);
-        
         // Get project name from response or use fallback
         const projectName = response.data.projectName || `Project ${projectId}`;
         
@@ -640,9 +655,6 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
           photos: []
         }));
         
-        console.log('✅ Mapped reports count:', reports.length);
-        console.log('📋 Report IDs:', reports.map(r => r.reportId).join(', '));
-        
         dispatch({ type: 'SET_DAILY_REPORTS', payload: reports });
       }
     } catch (error) {
@@ -658,7 +670,6 @@ export const SupervisorProvider: React.FC<SupervisorProviderProps> = ({ children
     try {
       // TODO: Photo upload needs React Native specific implementation
       // Skip for now - File constructor doesn't exist in React Native
-      console.log('📸 Skipping photo upload - needs React Native implementation');
 
       // Submit with manual progress
       if (report.progressMetrics?.overallProgress !== undefined) {

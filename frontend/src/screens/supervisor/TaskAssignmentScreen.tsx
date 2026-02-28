@@ -206,14 +206,16 @@ const TaskAssignmentScreen: React.FC = () => {
 
   // Available workers for assignment
   const availableWorkers = useMemo(() => {
-    return supervisorState.teamMembers.filter(member => 
-      member.attendanceStatus === 'present' || member.attendanceStatus === 'on_break'
-    );
+    // For task assignment, show ALL workers, not just present ones
+    return supervisorState.teamMembers;
   }, [supervisorState.teamMembers]);
 
   // Available projects
   const availableProjects = useMemo(() => {
-    return supervisorState.assignedProjects.filter(project => project.status === 'active');
+    // Show all projects (active or ongoing status)
+    return supervisorState.assignedProjects.filter(project => 
+      project.status === 'active' || project.status === 'ongoing'
+    );
   }, [supervisorState.assignedProjects]);
 
   // Task creation handler - ENHANCED with all new fields
@@ -503,6 +505,7 @@ const TaskAssignmentScreen: React.FC = () => {
         <TouchableOpacity 
           style={styles.createButton} 
           onPress={() => {
+            refreshAllData();
             resetCreateTaskForm();
             setShowCreateTaskModal(true);
           }}

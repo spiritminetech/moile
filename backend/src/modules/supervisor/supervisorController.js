@@ -3330,8 +3330,10 @@ export const getTaskAssignments = async (req, res) => {
   try {
     const { projectId, status, priority, workerId, limit = 50, offset = 0 } = req.query;
 
-    // Build query
-    const query = {};
+    // Build query - ONLY show assignments with valid taskId (not null)
+    const query = {
+      taskId: { $ne: null, $exists: true }
+    };
     if (projectId) query.projectId = parseInt(projectId);
     if (workerId) query.employeeId = parseInt(workerId);
     if (status) query.status = status;
@@ -3365,7 +3367,7 @@ export const getTaskAssignments = async (req, res) => {
       return {
         assignmentId: assignment.id, // Use numeric id, not MongoDB _id
         taskId: assignment.taskId,
-        taskName: task?.taskName || 'Unknown Task',
+        taskName: task?.taskName || `Task ${assignment.taskId}`, // Show task ID if name not found
         workerId: assignment.employeeId,
         workerName: employee?.fullName || 'Unknown Worker',
         status: assignment.status || 'queued',

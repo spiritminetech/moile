@@ -282,7 +282,7 @@ export const getDailyProgressRange = async (req, res) => {
         const progressList = await ProjectDailyProgress.find({
             projectId: Number(projectId),
             date: { $gte: fromDate, $lte: toDate }
-        }).sort({ date: 1 });
+        }).sort({ date: -1 }); // Sort by date descending (newest first)
 
         // Get project name
         const project = await Project.findOne({ id: Number(projectId) });
