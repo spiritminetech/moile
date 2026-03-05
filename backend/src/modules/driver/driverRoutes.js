@@ -1,32 +1,44 @@
 import express from 'express';
-const router = express.Router();
-
 import {
-  getTodaysTasks, 
-  getTripHistory,
-  getTaskDetails, 
-  confirmPickup,
-  confirmDrop,
-  getTripSummary,
+  getAllDrivers,
+  getDriverById,
+  createDriver,
+  updateDriver,
+  deleteDriver,
+  getDriversByCompany,
   getDriverProfile,
   changeDriverPassword,
-  uploadDriverPhoto,
-  upload
+    uploadDriverPhoto,
+  getDriversByVehicle,
+    upload
 } from './driverController.js';
 
-import { verifyToken } from '../../middleware/authMiddleware.js';
+const router = express.Router();
 
-// 🔹 Driver Profile Routes
-router.get("/profile", verifyToken,  getDriverProfile);
-router.put("/profile/password", verifyToken,  changeDriverPassword);
-router.post("/profile/photo", verifyToken,  upload.single('photo'), uploadDriverPhoto);
+// GET /api/drivers - Get all drivers
+router.get('/', getAllDrivers);
 
-// 🔹 Driver Task Routes
-router.get("/tasks/today", verifyToken,  getTodaysTasks);
-router.get("/trips/history", verifyToken,  getTripHistory);
-router.get("/tasks/:taskId", verifyToken,  getTaskDetails);
-router.post("/tasks/:taskId/pickup", verifyToken, confirmPickup);
-router.post("/tasks/:taskId/drop", verifyToken,  confirmDrop);
-router.get("/tasks/:taskId/summary", verifyToken, getTripSummary);
+// GET /api/drivers/:id - Get driver by ID
+router.get('/:id', getDriverById);
+
+
+router.get("/profile",  getDriverProfile);
+router.put("/profile/password",  changeDriverPassword);
+router.post("/profile/photo",  upload.single('photo'), uploadDriverPhoto);
+
+// POST /api/drivers - Create new driver
+router.post('/', createDriver);
+
+// PUT /api/drivers/:id - Update driver
+router.put('/:id', updateDriver);
+
+// DELETE /api/drivers/:id - Delete driver
+router.delete('/:id', deleteDriver);
+
+// GET /api/drivers/company/:companyId - Get drivers by company
+router.get('/company/:companyId', getDriversByCompany);
+
+// GET /api/drivers/vehicle/:vehicleId - Get drivers by assigned vehicle
+router.get('/vehicle/:vehicleId', getDriversByVehicle);
 
 export default router;

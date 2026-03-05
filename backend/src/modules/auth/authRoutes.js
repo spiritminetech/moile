@@ -1,26 +1,23 @@
-// backend/routes/authRoutes.js
-import express from 'express';
-import { login, refreshToken, logout, selectCompany, getProfile, verifyToken } from './authController.js';
-import { verifyToken as authVerifyToken } from '../../middleware/authMiddleware.js';
+import { Router } from 'express';
+import { login, 
+    //getUserCompanies,
+    selectCompany, 
+    //switchCompany 
+} from './authController.js';
+//import {login} from '../service/authService.js'
 
-const router = express.Router();
+const router = Router();
 
-// POST /api/auth/login
+// Login
 router.post('/login', login);
 
-// POST /api/auth/refresh
-router.post('/refresh', refreshToken);
+// Get user companies
+//router.get('/companies', getUserCompanies);
 
-// POST /api/auth/logout
-router.post('/logout', logout);
-
-// POST /api/auth/select-company
+// Select company
 router.post('/select-company', selectCompany);
 
-// GET /api/auth/profile (protected)
-// router.get('/profile', authVerifyToken, getProfile);
-
-// GET /api/auth/verify (protected)
-router.get('/verify', authVerifyToken, verifyToken);
+// Switch company
+//router.post('/switch-company', switchCompany);
 
 export default router;

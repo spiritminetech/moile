@@ -1,813 +1,900 @@
-// src/controllers/fleetTaskController.js
-import FleetTask from "./models/FleetTask.js";
-import Company from "../company/Company.js";
-import FleetVehicle from "./submodules/fleetvehicle/FleetVehicle.js";
-import User from "../user/User.js";
-import FleetTaskPhoto from "./models/FleetTaskPhoto.js";
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
+import FleetTask from './models/FleetTaskModel.js';
+import Company from '../company/CompanyModel.js';
+import FleetVehicle from '../fleetVehicle/FleetVehicleModel.js';
+import Employee from '../employees/EmployeeModel.js';
+import Project from '../project/models/ProjectModel.js';
+import User from '../user/UserModel.js';
+import { sendEmailNotification } from '../../../utils/emailService.js';
 
-// Ensure uploads directory exists
-const uploadsDir = 'uploads/tasks';
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+/**
+ * Validates fleet task input data with comprehensive business rules
+ */
+const validateFleetTaskInput = (data) => {
+  const { 
+    id, companyId, vehicleId, taskDate, plannedPickupTime, plannedDropTime, 
+    expectedPassengers, actualStartTime, actualEndTime, status 
+  } = data;
+  const errors = [];
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const extension = path.extname(file.originalname);
-    const filename = `task_${req.params.id}_${uniqueSuffix}${extension}`;
-    cb(null, filename);
-  }
-});
+  // Required fields validation
+  if (!companyId) errors.push('Company ID is required');
+  if (!vehicleId) errors.push('Vehicle ID is required');
+  if (!taskDate) errors.push('Task date is required');
 
-const upload = multer({ 
-  storage: storage,
-  fileFilter: function (req, file, cb) {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed!'), false);
-    }
-  },
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  }
-});
+  // Data type validation
+  if (companyId && isNaN(companyId)) errors.push('Company ID must be a number');
+  if (vehicleId && isNaN(vehicleId)) errors.push('Vehicle ID must be a number');
+  if (expectedPassengers && isNaN(expectedPassengers)) errors.push('Expected passengers must be a number');
 
-// -------------------------------------------------------------
-// @desc    Create a new fleet task
-// @route   POST /api/fleet-tasks
-// @access  Public
-// -------------------------------------------------------------
-export const createFleetTask = async (req, res) => {
-  try {
-    const {
-      id,
-      companyId,
-      projectId,
-      driverId,
-      vehicleId,
-      taskDate,
-      plannedPickupTime,
-      plannedDropTime,
-      pickupLocation,
-      pickupAddress,
-      dropLocation,
-      dropAddress,
-      expectedPassengers,
-      actualStartTime,
-      actualEndTime,
-      routeLog,
-      status,
-      notes,
-      createdBy,
-      createdAt,
-    } = req.body;
+  // Date validation
+  const dateFields = [
+    { field: 'taskDate', value: taskDate, name: 'Task date' },
+    { field: 'plannedPickupTime', value: plannedPickupTime, name: 'Planned pickup time' },
+    { field: 'plannedDropTime', value: plannedDropTime, name: 'Planned drop time' },
+    { field: 'actualStartTime', value: actualStartTime, name: 'Actual start time' },
+    { field: 'actualEndTime', value: actualEndTime, name: 'Actual end time' }
+  ];
 
-    if (!id || !companyId || !vehicleId || !taskDate) {
-      return res.status(400).json({
-        success: false,
-        message: "ID, companyId, vehicleId, and taskDate are required fields",
-      });
-    }
-
-    if (isNaN(id) || isNaN(companyId) || isNaN(vehicleId)) {
-      return res.status(400).json({
-        success: false,
-        message: "ID, companyId, and vehicleId must be numbers",
-      });
-    }
-
-    const companyExists = await Company.findOne({ id: companyId });
-    if (!companyExists) {
-      return res.status(400).json({
-        success: false,
-        message: `Company with ID ${companyId} does not exist`,
-      });
-    }
-
-    const vehicleExists = await FleetVehicle.findOne({ id: vehicleId });
-    if (!vehicleExists) {
-      return res.status(400).json({
-        success: false,
-        message: `Fleet vehicle with ID ${vehicleId} does not exist`,
-      });
-    }
-
-    if (createdBy) {
-      const userExists = await User.findOne({ id: createdBy });
-      if (!userExists) {
-        return res.status(400).json({
-          success: false,
-          message: `User with ID ${createdBy} does not exist`,
-        });
+  dateFields.forEach(({ field, value, name }) => {
+    if (value) {
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        errors.push(`${name} must be a valid date`);
       }
     }
+  });
 
-    const existingTaskById = await FleetTask.findOne({ id: id });
-    if (existingTaskById) {
-      return res.status(400).json({
-        success: false,
-        message: `Fleet task with ID ${id} already exists`,
-      });
+  // Business logic validation
+  if (plannedPickupTime && plannedDropTime) {
+    const pickupTime = new Date(plannedPickupTime);
+    const dropTime = new Date(plannedDropTime);
+    if (dropTime <= pickupTime) {
+      errors.push('Planned drop time must be after planned pickup time');
     }
+  }
 
-    const pickupLocationString =
-      pickupLocation && typeof pickupLocation === "object"
-        ? `Location (${pickupLocation.lat}, ${pickupLocation.lng})`
-        : pickupLocation
-        ? String(pickupLocation).trim()
-        : null;
+  if (actualStartTime && actualEndTime) {
+    const startTime = new Date(actualStartTime);
+    const endTime = new Date(actualEndTime);
+    if (endTime <= startTime) {
+      errors.push('Actual end time must be after actual start time');
+    }
+  }
 
-    const dropLocationString =
-      dropLocation && typeof dropLocation === "object"
-        ? `Location (${dropLocation.lat}, ${dropLocation.lng})`
-        : dropLocation
-        ? String(dropLocation).trim()
-        : null;
+  // Status validation
+  const validStatuses = ['PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'];
+  if (status && !validStatuses.includes(status)) {
+    errors.push(`Status must be one of: ${validStatuses.join(', ')}`);
+  }
 
-    const fleetTask = new FleetTask({
-      id: parseInt(id),
-      companyId: parseInt(companyId),
-      projectId: projectId ? parseInt(projectId) : null,
-      driverId: driverId ? parseInt(driverId) : null,
-      vehicleId: parseInt(vehicleId),
-      taskDate: new Date(taskDate),
-      plannedPickupTime: plannedPickupTime ? new Date(plannedPickupTime) : null,
-      plannedDropTime: plannedDropTime ? new Date(plannedDropTime) : null,
-      pickupLocation: pickupLocationString,
-      pickupAddress: pickupAddress ? pickupAddress.trim() : null,
-      dropLocation: dropLocationString,
-      dropAddress: dropAddress ? dropAddress.trim() : null,
-      expectedPassengers: expectedPassengers ? parseInt(expectedPassengers) : 0,
-      actualStartTime: actualStartTime ? new Date(actualStartTime) : null,
-      actualEndTime: actualEndTime ? new Date(actualEndTime) : null,
-      routeLog: routeLog || [],
-      status: status || "PLANNED",
-      notes: notes ? notes.trim() : null,
-      createdBy: createdBy ? parseInt(createdBy) : null,
-      createdAt: createdAt ? new Date(createdAt) : new Date(),
-    });
+  // Expected passengers validation
+  if (expectedPassengers && (expectedPassengers < 0 || expectedPassengers > 100)) {
+    errors.push('Expected passengers must be between 0 and 100');
+  }
 
-    const savedTask = await fleetTask.save();
+  return errors;
+};
 
-    res.status(201).json({
-      success: true,
-      message: "Fleet task created successfully",
-      data: savedTask,
-    });
+/**
+ * ✅ FIXED: Format time for display (12-hour format with seconds) - preserves 12:00 AM exactly
+ */
+const formatTimeForDisplay = (dateString) => {
+  if (!dateString) return 'N/A';
+  
+  try {
+    // If it's already a string (like "12:00 AM"), return as is
+    if (typeof dateString === 'string' && dateString.includes(':')) {
+      return dateString;
+    }
+    
+    // If it's a Date object, format to 12-hour time string
+    const date = new Date(dateString);
+    
+    // Get hours, minutes, seconds
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
+    let seconds = date.getSeconds();
+    
+    // ✅ FIXED: Convert to 12-hour format correctly
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours === 0 ? 12 : hours; // 0 becomes 12 for AM
+    
+    // Format with leading zeros
+    minutes = minutes < 10 ? '0' + minutes : minutes;
+    seconds = seconds < 10 ? '0' + seconds : seconds;
+    
+    return `${hours}:${minutes}:${seconds} ${ampm}`;
   } catch (error) {
-    if (error.name === "ValidationError") {
-      const errors = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: "Validation error",
-        errors,
-      });
-    }
-
-    if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      return res.status(400).json({
-        success: false,
-        message: `Fleet task with this ${field} already exists`,
-      });
-    }
-
-    if (error.name === "TypeError" && error.message.includes("Invalid time value")) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid date format. Use ISO format (e.g., 2024-01-15T10:30:00.000Z)",
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Server error: " + error.message,
-    });
+    console.error('Time formatting error:', error);
+    return 'N/A';
   }
 };
 
-// -------------------------------------------------------------
-// @desc    Get all fleet tasks
-// -------------------------------------------------------------
-export const getFleetTasks = async (req, res) => {
+/**
+ * Normalizes fleet task data for consistent storage - FIXED TIMEZONE ISSUE
+ */
+const normalizeFleetTaskData = (data) => {
+  const normalized = { ...data };
+
+  // Type conversion
+  if (normalized.companyId) normalized.companyId = parseInt(normalized.companyId, 10);
+  if (normalized.projectId) normalized.projectId = parseInt(normalized.projectId, 10);
+  if (normalized.driverId) normalized.driverId = parseInt(normalized.driverId, 10);
+  if (normalized.vehicleId) normalized.vehicleId = parseInt(normalized.vehicleId, 10);
+  if (normalized.createdBy) normalized.createdBy = parseInt(normalized.createdBy, 10);
+  if (normalized.expectedPassengers) normalized.expectedPassengers = parseInt(normalized.expectedPassengers, 10);
+
+  // String sanitization
+  if (normalized.pickupAddress) normalized.pickupAddress = normalized.pickupAddress.trim();
+  if (normalized.dropAddress) normalized.dropAddress = normalized.dropAddress.trim();
+  if (normalized.notes) normalized.notes = normalized.notes.trim();
+  if (normalized.pickupLocation) normalized.pickupLocation = normalized.pickupLocation.trim();
+  if (normalized.dropLocation) normalized.dropLocation = normalized.dropLocation.trim();
+
+  // FIXED: Simple date handling without timezone manipulation
+  const parseDateSimple = (dateString) => {
+    if (!dateString) return null;
+    
+    // If it's already a Date object, return as is
+    if (dateString instanceof Date) return dateString;
+    
+    // For string dates, create date object directly
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      console.warn(`Invalid date string: ${dateString}`);
+      return null;
+    }
+    return date;
+  };
+
+  // Apply simple date parsing without timezone shifts
+  if (normalized.taskDate) {
+    const date = new Date(normalized.taskDate);
+    normalized.taskDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  }
+  
+  // Use simple parsing without timezone manipulation
+  if (normalized.plannedPickupTime) normalized.plannedPickupTime = parseDateSimple(normalized.plannedPickupTime);
+  if (normalized.plannedDropTime) normalized.plannedDropTime = parseDateSimple(normalized.plannedDropTime);
+  if (normalized.actualStartTime) normalized.actualStartTime = parseDateSimple(normalized.actualStartTime);
+  if (normalized.actualEndTime) normalized.actualEndTime = parseDateSimple(normalized.actualEndTime);
+
+  // Default values
+  if (!normalized.status) normalized.status = 'PLANNED';
+  if (!normalized.expectedPassengers) normalized.expectedPassengers = 0;
+  if (!normalized.createdAt) normalized.createdAt = new Date();
+
+  return normalized;
+};
+
+/**
+ * Validates referential integrity for related entities
+ */
+const validateReferentialIntegrity = async (companyId, vehicleId, driverId = null, projectId = null) => {
+  const validationPromises = [
+    Company.findOne({ id: companyId }).select('_id name').lean().exec(),
+    FleetVehicle.findOne({ id: vehicleId }).select('_id vehicleCode registrationNo').lean().exec(),
+    driverId ? Employee.findOne({ id: driverId }).select('_id fullName').lean().exec() : Promise.resolve(true),
+    projectId ? Project.findOne({ id: projectId }).select('_id name').lean().exec() : Promise.resolve(true)
+  ];
+
+  const [company, vehicle, driver, project] = await Promise.all(validationPromises);
+
+  const errors = [];
+  if (!company) errors.push(`Company with ID ${companyId} does not exist`);
+  if (!vehicle) errors.push(`Fleet vehicle with ID ${vehicleId} does not exist`);
+  if (driverId && !driver) errors.push(`Driver with ID ${driverId} does not exist`);
+  if (projectId && !project) errors.push(`Project with ID ${projectId} does not exist`);
+
+  return { 
+    isValid: errors.length === 0, 
+    errors,
+    company,
+    vehicle,
+    driver,
+    project
+  };
+};
+
+/**
+ * Generates task metadata based on task parameters
+ */
+const generateTaskMetadata = (taskData) => {
+  const metadata = {
+    priority: 'MEDIUM',
+    estimatedDuration: null,
+    requiresSpecialAttention: false,
+    passengerCount: taskData.expectedPassengers || 0
+  };
+
+  // Calculate estimated duration if both pickup and drop times are provided
+  if (taskData.plannedPickupTime && taskData.plannedDropTime) {
+    const pickupTime = new Date(taskData.plannedPickupTime);
+    const dropTime = new Date(taskData.plannedDropTime);
+    const durationMs = dropTime - pickupTime;
+    metadata.estimatedDuration = Math.round(durationMs / (1000 * 60)); // Convert to minutes
+  }
+
+  // Set priority based on passenger count and other factors
+  if (metadata.passengerCount > 10) {
+    metadata.priority = 'HIGH';
+    metadata.requiresSpecialAttention = true;
+  } else if (metadata.passengerCount > 5) {
+    metadata.priority = 'MEDIUM';
+  } else {
+    metadata.priority = 'LOW';
+  }
+
+  return metadata;
+};
+
+/**
+ * GET /api/fleet-tasks - Get all fleet tasks with pagination and filtering
+ */
+const getAllFleetTasks = async (req, res) => {
   try {
-    const fleetTasks = await FleetTask.find()
-      .populate("companyId", "name tenantCode")
-      .populate("vehicleId", "vehicleCode registrationNo vehicleType")
-      .populate("createdBy", "name email")
-      .sort({ taskDate: -1, createdAt: -1 });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 1000;
+    const skip = (page - 1) * limit;
+
+    // Build query based on filters
+    const query = {};
+    if (req.query.companyId) query.companyId = parseInt(req.query.companyId);
+    if (req.query.status) query.status = req.query.status.toUpperCase();
+    if (req.query.vehicleId) query.vehicleId = parseInt(req.query.vehicleId);
+    if (req.query.driverId) query.driverId = parseInt(req.query.driverId);
+    if (req.query.projectId) query.projectId = parseInt(req.query.projectId);
+
+    // Date range filtering
+    if (req.query.startDate && req.query.endDate) {
+      query.taskDate = {
+        $gte: new Date(req.query.startDate),
+        $lte: new Date(req.query.endDate)
+      };
+    }
+
+    const fleetTasks = await FleetTask.find(query)
+      .sort({ taskDate: -1, id: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Populate related data with formatted times
+    const tasksWithDetails = await Promise.all(
+      fleetTasks.map(async (task) => {
+        const [company, driver, employee, project, vehicle] = await Promise.all([
+          Company.findOne({ id: task.companyId }),
+          Employee.findOne({ id: task.driverId }),
+          Employee.findOne({ id: task.employeeId }),
+          Project.findOne({ id: task.projectId }),
+          FleetVehicle.findOne({ id: task.vehicleId }),
+        ]);
+
+        const taskObj = task.toObject();
+
+        return {
+          ...taskObj,
+          // Format times for display (same format as email)
+          plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+          plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+          actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+          actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+          companyName: company ? company.name : 'Unknown Company',
+          tenantCode: company ? company.tenantCode : 'N/A',
+          driverName: driver ? driver.fullName : 'Unknown Driver',
+          employeeFullName: employee ? employee.fullName : 'Unknown Employee',
+          projectName: project ? project.name : 'Unknown Project',
+          vehicleCode: vehicle
+            ? `${vehicle.vehicleCode || vehicle.registrationNo || 'Unknown'}`
+            : 'Unknown Vehicle',
+        };
+      })
+    );
+
+    const total = await FleetTask.countDocuments(query);
 
     res.json({
       success: true,
-      count: fleetTasks.length,
-      data: fleetTasks,
+      data: tasksWithDetails,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
+    console.error('Error fetching fleet tasks:', error);
     res.status(500).json({
       success: false,
-      message: "Error fetching fleet tasks: " + error.message,
+      message: `Error fetching fleet tasks: ${error.message}`,
     });
   }
 };
 
-// -------------------------------------------------------------
-// @desc    Get fleet task by ID
-// -------------------------------------------------------------
-export const getFleetTaskById = async (req, res) => {
+/**
+ * GET /api/fleet-tasks/:id - Get single fleet task by ID
+ */
+const getFleetTaskById = async (req, res) => {
   try {
-    const taskId = parseInt(req.params.id);
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID. Must be a number.",
-      });
+    let fleetTask;
+    if (req.params.id.match(/^[0-9]+$/)) {
+      fleetTask = await FleetTask.findOne({ id: parseInt(req.params.id) });
+    } else {
+      fleetTask = await FleetTask.findById(req.params.id);
     }
-
-    const fleetTask = await FleetTask.findOne({ id: taskId })
-      .populate("companyId", "name tenantCode")
-      .populate("vehicleId", "vehicleCode registrationNo vehicleType")
-      .populate("createdBy", "name email");
 
     if (!fleetTask) {
       return res.status(404).json({
         success: false,
-        message: `Fleet task with ID ${taskId} not found`,
+        message: 'Fleet task not found'
       });
     }
 
+    // Populate related data
+    const [company, driver, vehicle, project] = await Promise.all([
+      Company.findOne({ id: fleetTask.companyId }),
+      Employee.findOne({ id: fleetTask.driverId }),
+      FleetVehicle.findOne({ id: fleetTask.vehicleId }),
+      Project.findOne({ id: fleetTask.projectId })
+    ]);
+
+    const taskObj = fleetTask.toObject();
+
+    const taskWithDetails = {
+      ...taskObj,
+      // Format times for display (same format as email)
+      plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+      plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+      actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+      actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+      companyName: company ? company.name : 'Unknown Company',
+      tenantCode: company ? company.tenantCode : 'N/A',
+      driverName: driver ? driver.fullName : 'Unknown Driver',
+      vehicleDetails: vehicle ? {
+        vehicleCode: vehicle.vehicleCode,
+        registrationNo: vehicle.registrationNo,
+        vehicleType: vehicle.vehicleType
+      } : null,
+      projectName: project ? project.name : 'Unknown Project'
+    };
+
     res.json({
       success: true,
-      data: fleetTask,
+      data: taskWithDetails
     });
   } catch (error) {
+    console.error('Error fetching fleet task:', error);
     res.status(500).json({
       success: false,
-      message: "Error fetching fleet task: " + error.message,
+      message: `Error fetching fleet task: ${error.message}`
     });
   }
 };
 
-// -------------------------------------------------------------
-// @desc    Get fleet tasks by company
-// -------------------------------------------------------------
-export const getFleetTasksByCompany = async (req, res) => {
+/**
+ * POST /api/fleet-tasks - Create new fleet task
+ */
+const createFleetTask = async (req, res) => {
   try {
-    const companyId = parseInt(req.params.companyId);
-    if (isNaN(companyId)) {
+    console.log('🚗 Executing fleet task creation process...');
+    console.log('📅 Original input times:', {
+      plannedPickupTime: req.body.plannedPickupTime,
+      plannedDropTime: req.body.plannedDropTime
+    });
+
+    // Input validation
+    const validationErrors = validateFleetTaskInput(req.body);
+    if (validationErrors.length > 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid company ID. Must be a number.",
+        message: validationErrors.join(', ')
       });
     }
 
-    const companyExists = await Company.findOne({ id: companyId });
-    if (!companyExists) {
-      return res.status(404).json({
-        success: false,
-        message: `Company with ID ${companyId} not found`,
-      });
-    }
-
-    const fleetTasks = await FleetTask.find({ companyId })
-      .populate("vehicleId", "vehicleCode registrationNo vehicleType")
-      .populate("createdBy", "name email")
-      .sort({ taskDate: -1, createdAt: -1 });
-
-    res.json({
-      success: true,
-      count: fleetTasks.length,
-      company: {
-        id: companyExists.id,
-        name: companyExists.name,
-        tenantCode: companyExists.tenantCode,
-      },
-      data: fleetTasks,
+    // Normalize input data
+    const normalizedData = normalizeFleetTaskData(req.body);
+    
+    console.log('🕒 After normalization:', {
+      plannedPickupTime: normalizedData.plannedPickupTime,
+      plannedDropTime: normalizedData.plannedDropTime
     });
+
+    // Generate new ID if not provided
+    if (!normalizedData.id) {
+      const lastTask = await FleetTask.findOne().sort({ id: -1 });
+      normalizedData.id = lastTask ? lastTask.id + 1 : 1;
+    }
+
+    // Referential integrity validation
+    const referentialCheck = await validateReferentialIntegrity(
+      normalizedData.companyId, 
+      normalizedData.vehicleId, 
+      normalizedData.driverId,
+      normalizedData.projectId
+    );
+
+    if (!referentialCheck.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: referentialCheck.errors.join(', ')
+      });
+    }
+
+    // Generate task metadata
+    const taskMetadata = generateTaskMetadata(normalizedData);
+
+    // Create fleet task
+    const fleetTaskData = {
+      ...normalizedData,
+      metadata: taskMetadata,
+      updatedAt: new Date()
+    };
+
+    const fleetTask = new FleetTask(fleetTaskData);
+    const savedTask = await fleetTask.save();
+
+    // Send email notification to driver if assigned
+    if (normalizedData.driverId) {
+      const [driver, project, vehicle, user] = await Promise.all([
+        Employee.findOne({ id: normalizedData.driverId }),
+        Project.findOne({ id: normalizedData.projectId }),
+        FleetVehicle.findOne({ id: normalizedData.vehicleId }),
+        User.findOne({ id: normalizedData.driverId }),
+      ]);
+
+      if (user && user.email && driver) {
+        const emailSubject = `🚐 New Trip Assigned — ${project ? project.name : 'New Task'}`;
+        const emailBody = `
+          <h2>New Trip Assigned 🚐</h2>
+          <p>Hello ${driver.fullName},</p>
+          <p>You have been assigned a new transport trip.</p>
+          <ul>
+            <li><strong>Project:</strong> ${project ? project.name : 'N/A'}</li>
+            <li><strong>Vehicle:</strong> ${vehicle ? vehicle.registrationNo : 'N/A'}</li>
+            <li><strong>Start Time:</strong> ${formatTimeForDisplay(normalizedData.plannedPickupTime)}</li>
+            <li><strong>End Time:</strong> ${formatTimeForDisplay(normalizedData.plannedDropTime)}</li>
+          </ul>
+          <p>Click below to view your assigned trips:</p>
+          <a href="${process.env.DRIVER_APP_URL || '#'}/tasks"
+             style="background-color: #007bff;
+                    color: #fff;
+                    padding: 10px 20px;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: bold;">
+             🔗 View My Tasks
+          </a>
+          <p style="margin-top:20px;">Regards,<br/>Fleet Management System</p>
+        `;
+
+        await sendEmailNotification(user.email, emailSubject, emailBody);
+      }
+    }
+
+    // Populate response data
+    const [company, driver, vehicle, project] = await Promise.all([
+      Company.findOne({ id: savedTask.companyId }),
+      Employee.findOne({ id: savedTask.driverId }),
+      FleetVehicle.findOne({ id: savedTask.vehicleId }),
+      Project.findOne({ id: savedTask.projectId })
+    ]);
+
+    const taskObj = savedTask.toObject();
+
+    const responseData = {
+      ...taskObj,
+      // Format times for response (same format as email)
+      plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+      plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+      actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+      actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+      companyName: company ? company.name : 'Unknown Company',
+      tenantCode: company ? company.tenantCode : 'N/A',
+      driverName: driver ? driver.fullName : 'Unknown Driver',
+      vehicleCode: vehicle ? vehicle.registrationNo : 'Unknown Vehicle',
+      projectName: project ? project.name : 'Unknown Project'
+    };
+
+    console.log(`✅ Fleet task creation successful: Task ${savedTask.id}`);
+    console.log('📋 Final display times:', {
+      plannedPickupTime: responseData.plannedPickupTimeDisplay,
+      plannedDropTime: responseData.plannedDropTimeDisplay
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Fleet task created successfully',
+      data: responseData,
+      metadata: {
+        priority: taskMetadata.priority,
+        estimatedDuration: taskMetadata.estimatedDuration,
+        requiresAttention: taskMetadata.requiresSpecialAttention
+      }
+    });
+
   } catch (error) {
+    console.error('❌ Fleet task creation process failed:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Data validation error',
+        errors: errors
+      });
+    }
+    
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Fleet task with this ID already exists'
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: "Error fetching fleet tasks: " + error.message,
+      message: `Error creating fleet task: ${error.message}`
     });
   }
 };
 
-// -------------------------------------------------------------
-// @desc    Get fleet tasks by status
-// -------------------------------------------------------------
-export const getFleetTasksByStatus = async (req, res) => {
+/**
+ * PUT /api/fleet-tasks/:id - Update fleet task
+ */
+const updateFleetTask = async (req, res) => {
+  try {
+    const updateData = normalizeFleetTaskData(req.body);
+    updateData.updatedAt = new Date();
+
+    console.log('🔄 Updating fleet task with time data:', {
+      plannedPickupTime: updateData.plannedPickupTime,
+      plannedDropTime: updateData.plannedDropTime
+    });
+
+    let updatedTask;
+    if (req.params.id.match(/^[0-9]+$/)) {
+      updatedTask = await FleetTask.findOneAndUpdate(
+        { id: parseInt(req.params.id) },
+        updateData,
+        { new: true, runValidators: true }
+      );
+    } else {
+      updatedTask = await FleetTask.findByIdAndUpdate(
+        req.params.id,
+        updateData,
+        { new: true, runValidators: true }
+      );
+    }
+
+    if (!updatedTask) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fleet task not found'
+      });
+    }
+
+    // Populate response
+    const company = await Company.findOne({ id: updatedTask.companyId });
+    const taskObj = updatedTask.toObject();
+    
+    const taskWithCompany = {
+      ...taskObj,
+      // Format times for response (same format as email)
+      plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+      plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+      actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+      actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+      companyName: company ? company.name : 'Unknown Company',
+      tenantCode: company ? company.tenantCode : 'N/A'
+    };
+
+    res.json({
+      success: true,
+      message: 'Fleet task updated successfully',
+      data: taskWithCompany
+    });
+  } catch (error) {
+    console.error('Error updating fleet task:', error);
+    res.status(500).json({
+      success: false,
+      message: `Error updating fleet task: ${error.message}`
+    });
+  }
+};
+
+/**
+ * DELETE /api/fleet-tasks/:id - Delete fleet task
+ */
+const deleteFleetTask = async (req, res) => {
+  try {
+    let deletedTask;
+    if (req.params.id.match(/^[0-9]+$/)) {
+      deletedTask = await FleetTask.findOneAndDelete({ id: parseInt(req.params.id) });
+    } else {
+      deletedTask = await FleetTask.findByIdAndDelete(req.params.id);
+    }
+
+    if (!deletedTask) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fleet task not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Fleet task deleted successfully',
+      data: deletedTask
+    });
+  } catch (error) {
+    console.error('Error deleting fleet task:', error);
+    res.status(500).json({
+      success: false,
+      message: `Error deleting fleet task: ${error.message}`
+    });
+  }
+};
+
+/**
+ * GET /api/fleet-tasks/company/:companyId - Get fleet tasks by company
+ */
+const getFleetTasksByCompany = async (req, res) => {
+  try {
+    const companyId = parseInt(req.params.companyId);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 1000;
+    const skip = (page - 1) * limit;
+
+    const company = await Company.findOne({ id: companyId });
+    if (!company) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company not found'
+      });
+    }
+
+    const query = { companyId };
+    
+    // Additional filters
+    if (req.query.status) query.status = req.query.status.toUpperCase();
+    if (req.query.startDate && req.query.endDate) {
+      query.taskDate = {
+        $gte: new Date(req.query.startDate),
+        $lte: new Date(req.query.endDate)
+      };
+    }
+
+    const fleetTasks = await FleetTask.find(query)
+      .sort({ taskDate: -1, id: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const tasksWithDetails = await Promise.all(
+      fleetTasks.map(async (task) => {
+        const [driver, vehicle, project] = await Promise.all([
+          Employee.findOne({ id: task.driverId }),
+          FleetVehicle.findOne({ id: task.vehicleId }),
+          Project.findOne({ id: task.projectId }),
+        ]);
+
+        const taskObj = task.toObject();
+
+        return {
+          ...taskObj,
+          // Format times for display (same format as email)
+          plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+          plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+          actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+          actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+          companyName: company.name,
+          tenantCode: company.tenantCode,
+          driverName: driver ? driver.fullName : 'Unknown Driver',
+          vehicleCode: vehicle ? vehicle.registrationNo : 'Unknown Vehicle',
+          projectName: project ? project.name : 'Unknown Project'
+        };
+      })
+    );
+
+    const total = await FleetTask.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: tasksWithDetails,
+      company: {
+        id: company.id,
+        name: company.name,
+        tenantCode: company.tenantCode
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching company fleet tasks:', error);
+    res.status(500).json({
+      success: false,
+      message: `Error fetching company fleet tasks: ${error.message}`,
+    });
+  }
+};
+
+/**
+ * GET /api/fleet-tasks/status/:status - Get fleet tasks by status
+ */
+const getFleetTasksByStatus = async (req, res) => {
   try {
     const { status } = req.params;
-    const validStatuses = ["PLANNED", "ONGOING", "COMPLETED", "CANCELLED"];
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 1000;
+    const skip = (page - 1) * limit;
+
+    const validStatuses = ['PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'];
     if (!validStatuses.includes(status.toUpperCase())) {
       return res.status(400).json({
         success: false,
-        message: `Status must be one of: ${validStatuses.join(", ")}`,
+        message: `Status must be one of: ${validStatuses.join(', ')}`
       });
     }
 
-    const fleetTasks = await FleetTask.find({ status: status.toUpperCase() })
-      .populate("companyId", "name tenantCode")
-      .populate("vehicleId", "vehicleCode registrationNo vehicleType")
-      .populate("createdBy", "name email")
-      .sort({ taskDate: -1, createdAt: -1 });
+    const query = { status: status.toUpperCase() };
+    
+    if (req.query.companyId) query.companyId = parseInt(req.query.companyId);
+    if (req.query.startDate && req.query.endDate) {
+      query.taskDate = {
+        $gte: new Date(req.query.startDate),
+        $lte: new Date(req.query.endDate)
+      };
+    }
+
+    const fleetTasks = await FleetTask.find(query)
+      .sort({ taskDate: -1, id: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const tasksWithDetails = await Promise.all(
+      fleetTasks.map(async (task) => {
+        const [company, driver, vehicle] = await Promise.all([
+          Company.findOne({ id: task.companyId }),
+          Employee.findOne({ id: task.driverId }),
+          FleetVehicle.findOne({ id: task.vehicleId }),
+        ]);
+
+        const taskObj = task.toObject();
+
+        return {
+          ...taskObj,
+          // Format times for display (same format as email)
+          plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+          plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+          actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+          actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+          companyName: company ? company.name : 'Unknown Company',
+          tenantCode: company ? company.tenantCode : 'N/A',
+          driverName: driver ? driver.fullName : 'Unknown Driver',
+          vehicleCode: vehicle ? vehicle.registrationNo : 'Unknown Vehicle'
+        };
+      })
+    );
+
+    const total = await FleetTask.countDocuments(query);
 
     res.json({
       success: true,
-      count: fleetTasks.length,
-      data: fleetTasks,
+      data: tasksWithDetails,
+      status: status.toUpperCase(),
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
+    console.error('Error fetching fleet tasks by status:', error);
     res.status(500).json({
       success: false,
-      message: "Error fetching fleet tasks: " + error.message,
+      message: `Error fetching fleet tasks by status: ${error.message}`,
     });
   }
 };
 
-// -------------------------------------------------------------
-// @desc    Get fleet tasks by vehicle
-// -------------------------------------------------------------
-export const getFleetTasksByVehicle = async (req, res) => {
+/**
+ * GET /api/fleet-tasks/vehicle/:vehicleId - Get fleet tasks by vehicle
+ */
+const getFleetTasksByVehicle = async (req, res) => {
   try {
     const vehicleId = parseInt(req.params.vehicleId);
-    if (isNaN(vehicleId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid vehicle ID. Must be a number.",
-      });
-    }
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 1000;
+    const skip = (page - 1) * limit;
 
-    const vehicleExists = await FleetVehicle.findOne({ id: vehicleId });
-    if (!vehicleExists) {
+    const vehicle = await FleetVehicle.findOne({ id: vehicleId });
+    if (!vehicle) {
       return res.status(404).json({
         success: false,
-        message: `Fleet vehicle with ID ${vehicleId} not found`,
+        message: 'Vehicle not found'
       });
     }
 
-    const fleetTasks = await FleetTask.find({ vehicleId })
-      .populate("companyId", "name tenantCode")
-      .populate("createdBy", "name email")
-      .sort({ taskDate: -1, createdAt: -1 });
+    const query = { vehicleId };
+    
+    if (req.query.status) query.status = req.query.status.toUpperCase();
+    if (req.query.startDate && req.query.endDate) {
+      query.taskDate = {
+        $gte: new Date(req.query.startDate),
+        $lte: new Date(req.query.endDate)
+      };
+    }
+
+    const fleetTasks = await FleetTask.find(query)
+      .sort({ taskDate: -1, id: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const tasksWithDetails = await Promise.all(
+      fleetTasks.map(async (task) => {
+        const [company, driver, project] = await Promise.all([
+          Company.findOne({ id: task.companyId }),
+          Employee.findOne({ id: task.driverId }),
+          Project.findOne({ id: task.projectId }),
+        ]);
+
+        const taskObj = task.toObject();
+
+        return {
+          ...taskObj,
+          // Format times for display (same format as email)
+          plannedPickupTimeDisplay: formatTimeForDisplay(taskObj.plannedPickupTime),
+          plannedDropTimeDisplay: formatTimeForDisplay(taskObj.plannedDropTime),
+          actualStartTimeDisplay: formatTimeForDisplay(taskObj.actualStartTime),
+          actualEndTimeDisplay: formatTimeForDisplay(taskObj.actualEndTime),
+          companyName: company ? company.name : 'Unknown Company',
+          tenantCode: company ? company.tenantCode : 'N/A',
+          driverName: driver ? driver.fullName : 'Unknown Driver',
+          projectName: project ? project.name : 'Unknown Project',
+          vehicleCode: vehicle.registrationNo
+        };
+      })
+    );
+
+    const total = await FleetTask.countDocuments(query);
 
     res.json({
       success: true,
-      count: fleetTasks.length,
+      data: tasksWithDetails,
       vehicle: {
-        id: vehicleExists.id,
-        vehicleCode: vehicleExists.vehicleCode,
-        registrationNo: vehicleExists.registrationNo,
-        vehicleType: vehicleExists.vehicleType,
+        id: vehicle.id,
+        vehicleCode: vehicle.vehicleCode,
+        registrationNo: vehicle.registrationNo,
+        vehicleType: vehicle.vehicleType
       },
-      data: fleetTasks,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching fleet tasks: " + error.message,
-    });
-  }
-};
-
-// -------------------------------------------------------------
-// @desc    Update fleet task
-// -------------------------------------------------------------
-export const updateFleetTask = async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID. Must be a number.",
-      });
-    }
-
-    const existingTask = await FleetTask.findOne({ id: taskId });
-    if (!existingTask) {
-      return res.status(404).json({
-        success: false,
-        message: `Fleet task with ID ${taskId} not found`,
-      });
-    }
-
-    const updateData = { ...req.body };
-
-    if (updateData.pickupLocation) {
-      if (typeof updateData.pickupLocation === "object" && updateData.pickupLocation.lng && updateData.pickupLocation.lat) {
-        updateData.pickupLocation = `Location (${updateData.pickupLocation.lat}, ${updateData.pickupLocation.lng})`;
-      } else {
-        updateData.pickupLocation = String(updateData.pickupLocation).trim();
-      }
-    }
-
-    if (updateData.dropLocation) {
-      if (typeof updateData.dropLocation === "object" && updateData.dropLocation.lng && updateData.dropLocation.lat) {
-        updateData.dropLocation = `Location (${updateData.dropLocation.lat}, ${updateData.dropLocation.lng})`;
-      } else {
-        updateData.dropLocation = String(updateData.dropLocation).trim();
-      }
-    }
-
-    const dateFields = ["taskDate", "plannedPickupTime", "plannedDropTime", "actualStartTime", "actualEndTime"];
-    dateFields.forEach((field) => {
-      if (updateData[field]) updateData[field] = new Date(updateData[field]);
-    });
-
-    if (updateData.expectedPassengers) {
-      updateData.expectedPassengers = parseInt(updateData.expectedPassengers);
-    }
-
-    const validStatuses = ["PLANNED", "ONGOING", "COMPLETED", "CANCELLED"];
-    if (updateData.status && !validStatuses.includes(updateData.status.toUpperCase())) {
-      return res.status(400).json({
-        success: false,
-        message: `Status must be one of: ${validStatuses.join(", ")}`,
-      });
-    }
-
-    const fleetTask = await FleetTask.findOneAndUpdate(
-      { id: taskId },
-      updateData,
-      { new: true, runValidators: true, context: "query" }
-    )
-      .populate("companyId", "name tenantCode")
-      .populate("vehicleId", "vehicleCode registrationNo vehicleType")
-      .populate("createdBy", "name email");
-
-    res.json({
-      success: true,
-      message: "Fleet task updated successfully",
-      data: fleetTask,
-    });
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: "Error updating fleet task: " + error.message,
-    });
-  }
-};
-
-// -------------------------------------------------------------
-// @desc    Delete fleet task
-// -------------------------------------------------------------
-export const deleteFleetTask = async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID. Must be a number.",
-      });
-    }
-
-    const fleetTask = await FleetTask.findOneAndDelete({ id: taskId });
-    if (!fleetTask) {
-      return res.status(404).json({
-        success: false,
-        message: `Fleet task with ID ${taskId} not found`,
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Fleet task deleted successfully",
-      deletedTask: {
-        id: fleetTask.id,
-        taskDate: fleetTask.taskDate,
-        vehicleId: fleetTask.vehicleId,
-        status: fleetTask.status,
-        createdAt: fleetTask.createdAt,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
+    console.error('Error fetching vehicle fleet tasks:', error);
     res.status(500).json({
       success: false,
-      message: "Error deleting fleet task: " + error.message,
+      message: `Error fetching vehicle fleet tasks: ${error.message}`,
     });
   }
 };
 
-// -------------------------------------------------------------
-// @desc    Upload task photo with camera capture
-// @route   POST /api/fleet-tasks/:id/photos
-// @access  Public
-// -------------------------------------------------------------
-export const uploadTaskPhoto = async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    const { photoType, driverId, companyId, remarks } = req.body;
-
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID",
-      });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "Photo file is required",
-      });
-    }
-
-    const task = await FleetTask.findOne({ id: taskId });
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: `Fleet task with ID ${taskId} not found`,
-      });
-    }
-
-    // ✅ FIXED: Use proper URL path without duplicate "uploads"
-    const photoUrl = `uploads/tasks/${req.file.filename}`;
-
-    // ✅ FIXED: Convert all IDs to numbers properly
-    const parsedDriverId = driverId ? parseInt(driverId) : 0;
-    const parsedCompanyId = companyId ? parseInt(companyId) : task.companyId;
-
-    // Validate that IDs are numbers
-    if (isNaN(parsedDriverId) || isNaN(parsedCompanyId)) {
-      return res.status(400).json({
-        success: false,
-        message: "driverId and companyId must be valid numbers",
-      });
-    }
-
-    // Create photo record in FleetTaskPhoto collection
-    const photo = new FleetTaskPhoto({
-      fleetTaskId: taskId, // ✅ Already a number from parseInt above
-      driverId: parsedDriverId, // ✅ Converted to number
-      companyId: parsedCompanyId, // ✅ Converted to number
-      photoType: photoType || 'pickup',
-      photoUrl: photoUrl,
-      remarks: remarks || '',
-      createdAt: new Date()
-    });
-
-    const savedPhoto = await photo.save();
-
-    res.status(201).json({
-      success: true,
-      message: "Photo captured and saved successfully",
-      data: {
-        _id: savedPhoto._id,
-        photoUrl: savedPhoto.photoUrl,
-        photoType: savedPhoto.photoType,
-        remarks: savedPhoto.remarks,
-        createdAt: savedPhoto.createdAt,
-        filename: req.file.filename
-      },
-    });
-  } catch (error) {
-    console.error('Error uploading photo:', error);
-    res.status(500).json({
-      success: false,
-      message: "Error capturing photo: " + error.message,
-    });
-  }
+export {
+  getAllFleetTasks,
+  getFleetTaskById,
+  createFleetTask,
+  updateFleetTask,
+  deleteFleetTask,
+  getFleetTasksByCompany,
+  getFleetTasksByStatus,
+  getFleetTasksByVehicle
 };
-
-// -------------------------------------------------------------
-// @desc    Confirm pickup with photos and remarks
-// @route   POST /api/fleet-tasks/:id/pickup
-// @access  Public
-// -------------------------------------------------------------
-export const confirmPickup = async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    const { confirmed, missed, remarks, photoIds } = req.body;
-
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID",
-      });
-    }
-
-    const fleetTask = await FleetTask.findOne({ id: taskId });
-    if (!fleetTask) {
-      return res.status(404).json({
-        success: false,
-        message: `Fleet task with ID ${taskId} not found`,
-      });
-    }
-
-    // Get pickup photos
-    let pickupPhotos = [];
-    if (photoIds && photoIds.length > 0) {
-      pickupPhotos = await FleetTaskPhoto.find({ 
-        _id: { $in: photoIds },
-        photoType: 'pickup'
-      });
-    }
-
-    // Update passenger pickup statuses
-    if (fleetTask.passengers && fleetTask.passengers.length > 0) {
-      fleetTask.passengers = fleetTask.passengers.map(passenger => {
-        if (confirmed && confirmed.includes(passenger.id)) {
-          return { ...passenger, pickupStatus: 'present' };
-        } else if (missed && missed.includes(passenger.id)) {
-          return { ...passenger, pickupStatus: 'absent' };
-        }
-        return passenger;
-      });
-    }
-
-    // Update task status
-    fleetTask.pickupConfirmed = true;
-    fleetTask.pickupConfirmedAt = new Date();
-    fleetTask.pickupRemarks = remarks || '';
-    fleetTask.currentStatus = 'PICKUP_COMPLETED';
-    fleetTask.status = 'ONGOING';
-
-    const updatedTask = await fleetTask.save();
-
-    res.json({
-      success: true,
-      message: "Pickup confirmed successfully with photo proof",
-      data: {
-        task: updatedTask,
-        photos: pickupPhotos,
-        summary: {
-          present: confirmed?.length || 0,
-          absent: missed?.length || 0,
-          totalPassengers: fleetTask.passengers?.length || 0,
-          photoCount: pickupPhotos.length
-        }
-      },
-    });
-  } catch (error) {
-    console.error('Error confirming pickup:', error);
-    res.status(500).json({
-      success: false,
-      message: "Error confirming pickup: " + error.message,
-    });
-  }
-};
-
-// -------------------------------------------------------------
-// @desc    Confirm drop with photos and remarks
-// @route   POST /api/fleet-tasks/:id/drop
-// @access  Public
-// -------------------------------------------------------------
-export const confirmDrop = async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    const { confirmed, missed, remarks, photoIds } = req.body;
-
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID",
-      });
-    }
-
-    const fleetTask = await FleetTask.findOne({ id: taskId });
-    if (!fleetTask) {
-      return res.status(404).json({
-        success: false,
-        message: `Fleet task with ID ${taskId} not found`,
-      });
-    }
-
-    // Get dropoff photos
-    let dropoffPhotos = [];
-    if (photoIds && photoIds.length > 0) {
-      dropoffPhotos = await FleetTaskPhoto.find({ 
-        _id: { $in: photoIds },
-        photoType: 'dropoff'
-      });
-    }
-
-    // Update passenger drop statuses
-    if (fleetTask.passengers && fleetTask.passengers.length > 0) {
-      fleetTask.passengers = fleetTask.passengers.map(passenger => {
-        if (confirmed && confirmed.includes(passenger.id)) {
-          return { ...passenger, dropStatus: 'confirmed' };
-        } else if (missed && missed.includes(passenger.id)) {
-          return { ...passenger, dropStatus: 'missed' };
-        }
-        return passenger;
-      });
-    }
-
-    // Update task status
-    fleetTask.dropConfirmed = true;
-    fleetTask.dropConfirmedAt = new Date();
-    fleetTask.dropRemarks = remarks || '';
-    fleetTask.currentStatus = 'COMPLETED';
-    fleetTask.status = 'COMPLETED';
-    fleetTask.actualEndTime = new Date();
-
-    const updatedTask = await fleetTask.save();
-
-    res.json({
-      success: true,
-      message: "Drop-off confirmed successfully with photo proof",
-      data: {
-        task: updatedTask,
-        photos: dropoffPhotos,
-        summary: {
-          confirmed: confirmed?.length || 0,
-          missed: missed?.length || 0,
-          totalPassengers: fleetTask.passengers?.length || 0,
-          photoCount: dropoffPhotos.length
-        }
-      },
-    });
-  } catch (error) {
-    console.error('Error confirming drop:', error);
-    res.status(500).json({
-      success: false,
-      message: "Error confirming drop: " + error.message,
-    });
-  }
-};
-
-// -------------------------------------------------------------
-// @desc    Get task photos
-// @route   GET /api/fleet-tasks/:id/photos
-// @access  Public
-// -------------------------------------------------------------
-export const getTaskPhotos = async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    const { photoType } = req.query;
-
-    if (isNaN(taskId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid fleet task ID",
-      });
-    }
-
-    const query = { fleetTaskId: taskId }; // ✅ Now searching by number
-    if (photoType) {
-      query.photoType = photoType;
-    }
-
-    const photos = await FleetTaskPhoto.find(query).sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      count: photos.length,
-      data: photos,
-    });
-  } catch (error) {
-    console.error('Error fetching photos:', error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching photos: " + error.message,
-    });
-  }
-};
-
-// -------------------------------------------------------------
-// @desc    Delete task photo
-// @route   DELETE /api/fleet-tasks/photos/:photoId
-// @access  Public
-// -------------------------------------------------------------
-export const deleteTaskPhoto = async (req, res) => {
-  try {
-    const { photoId } = req.params;
-
-    const photo = await FleetTaskPhoto.findByIdAndDelete(photoId);
-    if (!photo) {
-      return res.status(404).json({
-        success: false,
-        message: "Photo not found",
-      });
-    }
-
-    // Delete physical file
-    const filePath = path.join('uploads/tasks', path.basename(photo.photoUrl));
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    res.json({
-      success: true,
-      message: "Photo deleted successfully",
-      data: photo,
-    });
-  } catch (error) {
-    console.error('Error deleting photo:', error);
-    res.status(500).json({
-      success: false,
-      message: "Error deleting photo: " + error.message,
-    });
-  }
-};
-
-// Multer middleware
-export const uploadMiddleware = upload.single('photo');

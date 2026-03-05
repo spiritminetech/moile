@@ -1,452 +1,789 @@
-import Project from './models/Project.js';
-import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
-// import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
-// ✅ Get all projects (with pagination + filters)
-export const getAllProjects = async (req, res) => {
-  try {
-    const { page = 1, limit = 10, status, companyId } = req.query;
+import Project from "./models/ProjectModel.js";
+import ProjectTeamMember from "./models/ProjectTeamMemberModel.js";
+import ProjectManpowerRequirement from "./models/ProjectManpowerRequirementModel.js";
+import ProjectMaterialRequirement from "./models/ProjectMaterialRequirementModel.js";
+import ProjectToolRequirement from "./models/ProjectToolRequirementModel.js";
+import ProjectDocument from "./models/ProjectDocumentModel.js";
+import Tools from "../tool/ToolModel.js";
+import Quotation from "../quotation/models/QuotationModel.js";
 
-    const filter = {};
-    if (status) filter.status = status;
-    if (companyId) filter.companyId = parseInt(companyId);
+// 1. CORE PROJECT
 
-    const projects = await Project.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
-
-    const total = await Project.countDocuments(filter);
-
-    res.json({
-      success: true,
-      data: projects,
-      pagination: {
-        currentPage: Number(page),
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: Number(limit),
-      },
-    });
-  } catch (error) {
-    console.error('❌ Error fetching projects:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching projects',
-      error: error.message,
-    });
-  }
-};
-
-// ✅ Get projects by company ID
-export const getProjectsByCompany = async (req, res) => {
-  try {
-    const companyId = parseInt(req.params.companyId);
-    if (isNaN(companyId)) {
-      return res.status(400).json({ success: false, message: 'Invalid company ID format' });
-    }
-
-    const { page = 1, limit = 10, status } = req.query;
-
-    const filter = { companyId };
-    if (status) filter.status = status;
-
-    const projects = await Project.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
-
-    const total = await Project.countDocuments(filter);
-
-    res.json({
-      success: true,
-      data: projects,
-      pagination: {
-        currentPage: Number(page),
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: Number(limit),
-      },
-    });
-  } catch (error) {
-    console.error('❌ Error fetching projects by company:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching company projects',
-      error: error.message,
-    });
-  }
-};
-
-// ✅ Get single project by numeric ID
-export const getProjectById = async (req, res) => {
-  try {
-    const projectId = parseInt(req.params.id);
-    if (isNaN(projectId)) {
-      return res.status(400).json({ success: false, message: 'Invalid project ID format' });
-    }
-
-    const project = await Project.findOne({ id: projectId });
-    if (!project) {
-      return res.status(404).json({ success: false, message: 'Project not found' });
-    }
-
-    res.json({ success: true, data: project });
-  } catch (error) {
-    console.error('❌ Error fetching project:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching project',
-      error: error.message,
-    });
-  }
-};
-
-// ✅ Create new project
 export const createProject = async (req, res) => {
   try {
-    const lastProject = await Project.findOne().sort({ id: -1 });
-    const newId = lastProject ? lastProject.id + 1 : 1;
+    const data = req.body;
 
-    const projectData = {
-      id: newId,
-      ...req.body,
-    };
-
-    if (!projectData.name || !projectData.companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project name and company ID are required',
+    // Enforce business rule: Projects must come from approved quotations
+    if (!data.quotationId) {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Projects must be created from approved quotations. Use the 'Convert to Project' feature in quotations." 
       });
     }
 
-    const project = new Project(projectData);
-    await project.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Project created successfully',
-      data: project,
-    });
-  } catch (error) {
-    console.error('❌ Error creating project:', error);
-
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project code already exists',
+    // Verify quotation exists and is approved
+    const quotation = await Quotation.findById(data.quotationId);
+    if (!quotation) {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Referenced quotation not found" 
       });
     }
 
-    res.status(500).json({
-      success: false,
-      message: 'Server error while creating project',
-      error: error.message,
+    if (quotation.status !== 'Approved') {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Can only create projects from approved quotations" 
+      });
+    }
+
+    // Check if quotation already converted
+    const existingProject = await Project.findOne({ quotationId: data.quotationId });
+    if (existingProject) {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "This quotation has already been converted to a project",
+        existingProjectId: existingProject._id
+      });
+    }
+
+    
+
+    const last = await Project.findOne().sort({ id: -1 });
+    const nextId = last ? last.id + 1 : 1;
+
+
+
+    const project = await Project.create({
+      id: nextId,
+      projectName: data.projectName || quotation.projectName,
+      projectCode: data.projectCode,
+      companyId: data.companyId || quotation.companyId,
+      clientId: data.clientId || quotation.clientId,
+      quotationId: data.quotationId,
+      projectType: data.projectType,
+      department: data.department,
+      startDate: data.startDate,
+      expectedEndDate: data.expectedEndDate,
+      remarks: data.remarks,
+      // Auto-populate budget from quotation (READ-ONLY)
+      budgetLabor: quotation.totalManpowerCost,
+      budgetMaterials: quotation.totalMaterialCost,
+      budgetTools: quotation.totalToolCost,
+      budgetTransport: quotation.totalTransportCost,
+      budgetWarranty: quotation.totalWarrantyCost,
+      budgetCertification: quotation.totalCertificationCost
     });
+
+    return res.json({ status: "success", projectId: project._id });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
   }
 };
 
-// ✅ Update project
 export const updateProject = async (req, res) => {
   try {
-    const projectId = parseInt(req.params.id);
-    if (isNaN(projectId)) {
-      return res.status(400).json({ success: false, message: 'Invalid project ID format' });
-    }
+    const { projectId } = req.params;
+    const data = req.body;
 
-    const updateData = { ...req.body };
-    delete updateData.id;
-    delete updateData._id;
-
-    // Get the current project data before update to detect changes
-    const currentProject = await Project.findOne({ id: projectId });
-    if (!currentProject) {
-      return res.status(404).json({ success: false, message: 'Project not found' });
-    }
-
-    const project = await Project.findOneAndUpdate(
-      { id: projectId },
-      { ...updateData, updatedAt: new Date() },
-      { new: true, runValidators: true }
-    );
-
-    // Check for site changes that require notifications
-    await handleSiteChangeNotifications(currentProject, project, updateData);
-
-    res.json({
-      success: true,
-      message: 'Project updated successfully',
-      data: project,
+    await Project.findByIdAndUpdate(projectId, {
+      projectName: data.projectName,
+      projectCode: data.projectCode,
+      companyId: data.companyId,
+      clientId: data.clientId,
+      projectType: data.projectType,
+      department: data.department,
+      startDate: data.startDate,
+      expectedEndDate: data.expectedEndDate,
+      remarks: data.remarks
     });
-  } catch (error) {
-    console.error('❌ Error updating project:', error);
 
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project code already exists',
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Server error while updating project',
-      error: error.message,
-    });
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
   }
 };
 
-/**
- * Handle site change notifications when project is updated
- * Implements Requirements 2.1, 2.2, 2.3, 2.4
- */
-async function handleSiteChangeNotifications(currentProject, updatedProject, updateData) {
+//  export const getProject = async (req, res) => {
+  
+//   try {
+//     const { projectId } = req.params;
+
+//     const project = await Project.findById(projectId).lean();
+//     if (!project) return res.status(404).json({ status: "error", message: "Project not found" });
+
+//     return res.json(project);
+//   } catch (err) {
+//     console.error(err);
+//     return res.status(500).json({ status: "error", message: err.message });
+//   }
+// };
+
+export const getProjectsByCompany = async (req, res) => {
   try {
-    // Get all workers assigned to this project
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata"
-    });
-    
-    const assignments = await WorkerTaskAssignment.find({
-      projectId: updatedProject.id,
-      date: today
-    });
-    
-    const affectedWorkerIds = assignments.map(a => a.employeeId);
+    const companyId = req.params.companyId;
 
-    // Check for location changes (Requirement 2.1)
-    const locationChanged = hasLocationChanged(currentProject, updatedProject);
-    if (locationChanged && affectedWorkerIds.length > 0) {
-      const oldLocation = {
-        latitude: currentProject.latitude,
-        longitude: currentProject.longitude,
-        address: currentProject.address
-      };
-      const newLocation = {
-        latitude: updatedProject.latitude,
-        longitude: updatedProject.longitude,
-        address: updatedProject.address
-      };
-
-      // Send location change notifications to all affected workers
-      for (const workerId of affectedWorkerIds) {
-        try {
-          await SiteChangeNotificationService.notifyLocationChange(
-            workerId,
-            oldLocation,
-            newLocation,
-            updatedProject.id
-          );
-        } catch (error) {
-          console.error(`Failed to send location change notification to worker ${workerId}:`, error);
-        }
-      }
+    if (!companyId) {
+      return res.status(400).json({ status: "error", message: "Company ID is required" });
     }
 
-    // Check for supervisor reassignment (Requirement 2.2)
-    if (currentProject.supervisorId !== updatedProject.supervisorId && affectedWorkerIds.length > 0) {
-      // Send supervisor reassignment notifications to all affected workers
-      for (const workerId of affectedWorkerIds) {
-        try {
-          await SiteChangeNotificationService.notifySupervisorReassignment(
-            workerId,
-            currentProject.supervisorId,
-            updatedProject.supervisorId,
-            updatedProject.id
-          );
-        } catch (error) {
-          console.error(`Failed to send supervisor reassignment notification to worker ${workerId}:`, error);
-        }
-      }
-    }
+    // Fetch projects for the company
+    const projects = await Project.find({ companyId }).lean();
 
-    // Check for geofence updates (Requirement 2.3)
-    const geofenceChanged = hasGeofenceChanged(currentProject, updatedProject);
-    if (geofenceChanged && affectedWorkerIds.length > 0) {
-      const geofenceChanges = {
-        oldGeofence: currentProject.geofence,
-        newGeofence: updatedProject.geofence,
-        oldRadius: currentProject.geofenceRadius,
-        newRadius: updatedProject.geofenceRadius
-      };
-
-      try {
-        await SiteChangeNotificationService.notifyGeofenceUpdate(
-          updatedProject.id,
-          affectedWorkerIds,
-          geofenceChanges
-        );
-      } catch (error) {
-        console.error('Failed to send geofence update notifications:', error);
-      }
-    }
-
-  } catch (error) {
-    console.error('Error handling site change notifications:', error);
-    // Don't throw error to prevent project update from failing
-  }
-}
-
-/**
- * Check if project location has changed
- */
-function hasLocationChanged(currentProject, updatedProject) {
-  return (
-    currentProject.latitude !== updatedProject.latitude ||
-    currentProject.longitude !== updatedProject.longitude ||
-    currentProject.address !== updatedProject.address
-  );
-}
-
-/**
- * Check if project geofence has changed
- */
-function hasGeofenceChanged(currentProject, updatedProject) {
-  // Check basic geofence radius
-  if (currentProject.geofenceRadius !== updatedProject.geofenceRadius) {
-    return true;
-  }
-
-  // Check enhanced geofence structure
-  const oldGeofence = currentProject.geofence;
-  const newGeofence = updatedProject.geofence;
-
-  if (!oldGeofence && !newGeofence) {
-    return false;
-  }
-
-  if (!oldGeofence || !newGeofence) {
-    return true;
-  }
-
-  return (
-    oldGeofence.center?.latitude !== newGeofence.center?.latitude ||
-    oldGeofence.center?.longitude !== newGeofence.center?.longitude ||
-    oldGeofence.radius !== newGeofence.radius ||
-    oldGeofence.strictMode !== newGeofence.strictMode ||
-    oldGeofence.allowedVariance !== newGeofence.allowedVariance
-  );
-}
-
-// ✅ Delete project
-export const deleteProject = async (req, res) => {
-  try {
-    const projectId = parseInt(req.params.id);
-    if (isNaN(projectId)) {
-      return res.status(400).json({ success: false, message: 'Invalid project ID format' });
-    }
-
-    const project = await Project.findOneAndDelete({ id: projectId });
-
-    if (!project) {
-      return res.status(404).json({ success: false, message: 'Project not found' });
-    }
-
-    res.json({
-      success: true,
-      message: 'Project deleted successfully',
-      data: { id: projectId },
-    });
-  } catch (error) {
-    console.error('❌ Error deleting project:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while deleting project',
-      error: error.message,
-    });
+    return res.json({ status: "success", data: projects });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
   }
 };
 
-// ✅ Get project statistics
-export const getProjectStats = async (req, res) => {
+export const getProject = async (req, res) => {
   try {
-    const companyId = parseInt(req.params.companyId);
-    if (isNaN(companyId)) {
-      return res.status(400).json({ success: false, message: 'Invalid company ID format' });
+    const { projectId } = req.params;
+
+    // 1️⃣ Validate projectId format
+    if (!projectId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ status: "error", message: "Invalid projectId format" });
     }
 
-    const stats = await Project.aggregate([
-      { $match: { companyId } },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 },
-          totalBudget: { $sum: '$budget' },
-        },
-      },
+    // 2️⃣ Fetch main project
+    const project = await Project.findById(projectId).lean();
+    if (!project) return res.status(404).json({ status: "error", message: "Project not found" });
+
+    // 3️⃣ Fetch related collections in parallel
+    const [teamMembers, manpower, materials, tools, documents, allTools] = await Promise.all([
+      ProjectTeamMember.find({ projectId }).lean(),
+      ProjectManpowerRequirement.find({ projectId }).lean(),
+      ProjectMaterialRequirement.find({ projectId }).lean(),
+      ProjectToolRequirement.find({ projectId }).lean(),
+      ProjectDocument.find({ projectId }).lean(),
+      Tools.find({}).lean() // ✅ fetch all master tools
     ]);
 
-    const totalProjects = await Project.countDocuments({ companyId });
-    const totalBudgetResult = await Project.aggregate([
-      { $match: { companyId } },
-      { $group: { _id: null, total: { $sum: '$budget' } } },
-    ]);
+    // 4️⃣ Format team consistently (all arrays)
+    const team = {};
+    teamMembers.forEach(member => {
+      const role = member.role.toLowerCase();
+      if (!team[role]) team[role] = [];
+      team[role].push(member.userId);
+    });
 
-    res.json({
-      success: true,
-      data: {
-        stats,
-        totalProjects,
-        totalBudget: totalBudgetResult[0]?.total || 0,
+    // 5️⃣ Build response payload
+    const payload = {
+      basicInfo: {
+        projectName: project.projectName,
+        projectCode: project.projectCode,
+        companyId: project.companyId,
+        clientId: project.clientId ?? null,
+        projectType: project.projectType ?? null,
+        department: project.department ?? null,
+        startDate: project.startDate,
+        expectedEndDate: project.expectedEndDate ?? null,
+        remarks: project.remarks ?? null
       },
-    });
-  } catch (error) {
-    console.error('❌ Error fetching project stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching project statistics',
-      error: error.message,
-    });
+      location: {
+        latitude: project.latitude ?? null,
+        longitude: project.longitude ?? null,
+        geofenceRadius: project.geofenceRadius ?? null
+      },
+      team,
+      manpower: manpower.map(m => ({
+        _id: m._id,
+        tradeName: m.tradeName,
+        requiredWorkers: m.requiredWorkers,
+        bufferWorkers: m.bufferWorkers
+      })),
+      materials: materials.map(m => ({
+        _id: m._id,
+        materialId: m.materialId,
+        materialName: m.materialName,
+        qty: m.qty,
+        unit: m.unit,
+        date: m.requiredBy
+      })),
+      tools: tools.map(t => {
+        const masterTool = allTools.find(tool => tool.id === t.toolId);
+        return {
+          _id: t._id,
+          toolId: t.toolId,
+          toolName: masterTool?.name || "Unknown", // ✅ get name from master tools
+          qty: t.requiredQuantity,
+          rentalStart: t.rentalStart,
+          rentalEnd: t.rentalEnd
+        };
+      }),
+      budget: {
+        labor: project.budgetLabor ?? 0,
+        material: project.budgetMaterials ?? 0,
+        tools: project.budgetTools ?? 0,
+        transport: project.budgetTransport ?? 0,
+        warranty: project.budgetWarranty ?? 0,
+        certification: project.budgetCertification ?? 0
+      },
+      transport: {
+        required: project.transportRequired ?? false,
+        dailyWorkers: project.transportDailyWorkers ?? 0,
+        pickupLocation: project.transportPickupLocation ?? null,
+        driverId: project.transportDriverId ?? null,
+        pickupTime: project.transportPickupTime ?? null,
+        dropTime: project.transportDropTime ?? null
+      },
+      status: {
+        projectStatus: project.projectStatus ?? project.status ?? null,
+        startDate: project.startDate,
+        expectedEndDate: project.expectedEndDate ?? null,
+        actualCompletion: project.actualEndDate ?? null
+      },
+      documents: documents.map(d => ({
+        _id: d._id,
+        name: d.fileName ?? d.filePath.split("/").pop(),
+        type: d.docType,
+        uploadedBy: d.uploadedBy,
+        uploadedAt: d.createdAt,
+        filePath: d.filePath
+      }))
+    };
+
+    return res.json({ status: "success", data: payload });
+  } catch (err) {
+    console.error(err);
+    if (err.name === "CastError") {
+      return res.status(400).json({ status: "error", message: "Invalid projectId format" });
+    }
+    return res.status(500).json({ status: "error", message: err.message });
   }
 };
 
 
-export const getAssignedProjects = async (req, res) => {
+
+
+// export const listProjects = async (req, res) => {
+//   try {
+//     const projects = await Project.find().lean();
+//     return res.json(projects);
+//   } catch (err) {
+//     console.error(err);
+//     return res.status(500).json({ status: "error", message: err.message });
+//   }
+// };
+
+
+export const listProjects = async (req, res) => {
   try {
-    const employeeId = Number(req.query.employeeId);
+    const filter = {};
 
-    if (!employeeId) {
-      return res.status(400).json({
-        success: false,
-        message: "employeeId is required"
-      });
+    if (req.query.status) {
+      filter.status = req.query.status;
     }
 
-    // ✅ India-safe today date (avoid UTC mistakes)
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata"
-    });
-
-    // 1️⃣ Get today's assignments from correct collection
-    const assignments = await WorkerTaskAssignment.find({
-      employeeId,
-      date: today
-    });
-
-    if (!assignments.length) {
-      return res.status(200).json({
-        success: true,
-        projects: []
-      });
-    }
-
-    // 2️⃣ Remove duplicate project IDs
-    const projectIds = [...new Set(assignments.map(a => a.projectId))];
-
-    // 3️⃣ Fetch project details
-    const projects = await Project.find({
-      id: { $in: projectIds }
-    }).select("id projectName");
-
-    return res.status(200).json({
-      success: true,
-      projects
-    });
+    const projects = await Project.find(filter).lean();
+    return res.json(projects);
 
   } catch (err) {
-    console.error("❌ Error fetching projects:", err);
+    console.error(err);
     return res.status(500).json({
-      success: false,
-      message: "Server error"
+      status: "error",
+      message: err.message
     });
   }
-}
+};
+
+// DELETE /projects/:projectId
+export const deleteProject = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    // Validate projectId format
+    if (!projectId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ status: "error", message: "Invalid projectId format" });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ status: "error", message: "Project not found" });
+    }
+
+    // Delete main project
+    await Project.findByIdAndDelete(projectId);
+
+    // Delete all related collections in parallel
+    await Promise.all([
+      ProjectTeamMember.deleteMany({ projectId }),
+      ProjectManpowerRequirement.deleteMany({ projectId }),
+      ProjectMaterialRequirement.deleteMany({ projectId }),
+      ProjectToolRequirement.deleteMany({ projectId }),
+      ProjectDocument.deleteMany({ projectId })
+    ]);
+
+    return res.json({ status: "success", message: "Project and all related data deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+// 2. LOCATION / GEOFENCING
+
+export const setProjectLocation = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { latitude, longitude, geofenceRadius } = req.body;
+
+    await Project.findByIdAndUpdate(projectId, { latitude, longitude, geofenceRadius });
+
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const getProjectLocation = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = await Project.findById(projectId, "latitude longitude geofenceRadius").lean();
+    if (!project) return res.status(404).json({ status: "error", message: "Project not found" });
+
+    return res.json(project);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+// 3. TEAM ASSIGNMENT
+
+export const assignTeam = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const team = req.body; //
+
+    // Delete existing members for the project
+    await ProjectTeamMember.deleteMany({ projectId });
+
+    const docs = [];
+
+    // Iterate over each role in the payload
+    for (const [roleKey, value] of Object.entries(team)) {
+      if (Array.isArray(value)) {
+        value.forEach(userId => docs.push({ projectId, userId, role: roleKey }));
+      } else if (value) {
+        docs.push({ projectId, userId: value, role: roleKey });
+      }
+    }
+
+    // Insert into MongoDB
+    if (docs.length) await ProjectTeamMember.insertMany(docs);
+
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+
+export const getTeam = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const members = await ProjectTeamMember.find({ projectId }).lean();
+    return res.json(members);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const removeTeamMember = async (req, res) => {
+  try {
+    const { projectId, userId } = req.params;
+    await ProjectTeamMember.deleteOne({ projectId, userId });
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+// 4. MANPOWER REQUIREMENTS
+
+export const addManpowerRequirements = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const payload = req.body;
+
+    const items = Array.isArray(payload) ? payload : [payload];
+    const docs = items.map(i => ({
+      projectId,
+      tradeName: i.tradeName || i.trade,
+      requiredWorkers: i.requiredWorkers || i.required,
+      bufferWorkers: i.bufferWorkers || i.buffer || 0
+    }));
+
+    await ProjectManpowerRequirement.insertMany(docs);
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const listManpowerRequirements = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const list = await ProjectManpowerRequirement.find({ projectId }).lean();
+    return res.json(list || []); // <-- always an array
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const updateManpowerRequirement = async (req, res) => {
+  try {
+    const { mpId } = req.params;
+    const payload = req.body;
+
+    const updated = await ProjectManpowerRequirement.findByIdAndUpdate(
+      mpId,
+      {
+        tradeName: payload.tradeName,
+        requiredWorkers: payload.requiredWorkers,
+        bufferWorkers: payload.bufferWorkers || 0
+      },
+      { new: true }
+    );
+
+    return res.json(updated);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+
+export const deleteManpowerRequirement = async (req, res) => {
+  try {
+    const { mpId } = req.params; // <-- Must match route param
+    await ProjectManpowerRequirement.findByIdAndDelete(mpId);
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+// 5. MATERIAL REQUIREMENTS
+
+export const addMaterialRequirement = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const materials = req.body; // expect array
+
+    const newMaterials = await ProjectMaterialRequirement.insertMany(
+      materials.map(m => ({
+        projectId,
+        id: m.id,
+        materialId: m.materialId,
+        materialName: m.materialName,
+        qty: m.qty,
+        estimatedQuantity: m.qty,
+        unit: m.unit,
+        requiredBy: m.date
+      }))
+    );
+
+    return res.json({ status: "success", data: newMaterials });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+
+
+export const listMaterialRequirements = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const list = await ProjectMaterialRequirement.find({ projectId })
+      .populate("materialId", "name unit")
+      .lean();
+
+    return res.json(list);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const deleteMaterialRequirement = async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    await ProjectMaterialRequirement.findByIdAndDelete(itemId);
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+// 6. TOOL REQUIREMENTS
+
+export const addToolRequirement = async (req, res) => {
+  const { projectId } = req.params;
+  const tools = req.body; // expect array
+
+  const inserted = await ProjectToolRequirement.insertMany(
+    tools.map(t => ({
+      id: t.id,
+      projectId,
+      toolId: t.toolId,
+      requiredQuantity: t.qty,
+      rentalStart: t.rentalStart,
+      rentalEnd: t.rentalEnd
+    }))
+  );
+
+  return res.json({ status: "success", data: inserted });
+};
+
+
+export const listToolRequirements = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const list = await ProjectToolRequirement.find({ projectId })
+      .populate("toolId", "name")
+      .lean();
+    return res.json(list);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const deleteToolRequirement = async (req, res) => {
+  try {
+    const { toolReqId } = req.params;
+    await ProjectToolRequirement.findByIdAndDelete(toolReqId);
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+// 7. DOCUMENTS
+
+export const uploadDocument = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { docType, uploadedBy } = req.body;
+    const file = req.file;
+
+    if (!file) return res.status(400).json({ status: "error", message: "File is required" });
+
+    const doc = await ProjectDocument.create({
+  projectId,
+  docType,
+  uploadedBy,
+  filePath: `/uploads/projectDocuments/${file.filename}` // <-- use this
+});
+
+    return res.json({ status: "success", documentId: doc._id });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const listDocuments = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const docs = await ProjectDocument.find({ projectId }).lean();
+    return res.json(docs);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const deleteDocument = async (req, res) => {
+  try {
+    const { docId } = req.params;  // ✅ match the router
+    await ProjectDocument.findByIdAndDelete(docId);
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+// 8. BUDGET - READ-ONLY if project created from quotation
+
+export const setBudget = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { labor, material, tools, transport, warranty, certification } = req.body;
+
+    // Check if project was created from quotation
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ status: "error", message: "Project not found" });
+    }
+
+    if (project.quotationId) {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Cannot modify budget for projects created from quotations. Budget is derived from approved quotation." 
+      });
+    }
+
+    await Project.findByIdAndUpdate(projectId, {
+      budgetLabor: labor,
+      budgetMaterials: material,
+      budgetTools: tools,
+      budgetTransport: transport,
+      budgetWarranty: warranty,
+      budgetCertification: certification
+    });
+
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const getBudget = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = await Project.findById(projectId, "budgetLabor budgetMaterials budgetTools budgetTransport budgetWarranty budgetCertification").lean();
+    if (!project) return res.status(404).json({ status: "error", message: "Project not found" });
+
+    return res.json(project);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+// 9. TRANSPORT PLAN
+
+export const setTransportPlan = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { transportRequired, dailyWorkers, pickupLocation, driverId, pickupTime, dropTime } = req.body;
+
+   await Project.findByIdAndUpdate(
+  projectId,
+  {
+    transportRequired,
+    transportDailyWorkers: dailyWorkers,
+    transportPickupLocation: pickupLocation,
+    transportDriverId: driverId,
+    transportPickupTime: pickupTime,
+    transportDropTime: dropTime
+  },
+  { new: true, runValidators: true } // <--- added
+);
+
+
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const getTransportPlan = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const plan = await Project.findById(projectId, "transportRequired transportDailyWorkers transportPickupLocation transportDriverId transportPickupTime transportDropTime").lean();
+    if (!plan) return res.status(404).json({ status: "error", message: "Project not found" });
+
+    return res.json(plan);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+// 10. STATUS & TIMELINE
+
+export const updateStatus = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { status, projectStatus } = req.body; // Accept both fields
+
+    const updateData = {};
+    if (status) updateData.status = status;
+    if (projectStatus) updateData.projectStatus = projectStatus; // Include projectStatus
+
+    await Project.findByIdAndUpdate(projectId, updateData);
+    return res.json({ status: "success" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+export const updateTimeline = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { startDate, status, actualCompletion, ...rest } = req.body;
+
+    // Map actualCompletion to actualEndDate if provided
+    if (actualCompletion) {
+      rest.actualEndDate = actualCompletion;
+    }
+
+    // Include startDate and status in the update if needed
+    if (startDate) rest.startDate = startDate;
+    if (status) rest.status = status;
+
+    const updatedProject = await Project.findByIdAndUpdate(projectId, rest, { new: true });
+
+    return res.json({ 
+      status: "success", 
+      data: updatedProject // ✅ only return updated project, no separate payload
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+};
+
+
+
+// 12. DASHBOARD
+
+// export const getProjectDashboard = async (req, res) => {
+//   try {
+//     const { projectId } = req.params;
+
+//     const manpowerUsed = await ProjectManpowerRequirement.countDocuments({ projectId });
+//     const materialsCount = await ProjectMaterialRequirement.countDocuments({ projectId });
+//     const toolsInUse = await ProjectToolRequirement.countDocuments({ projectId });
+//     const documentsCount = await ProjectDocument.countDocuments({ projectId });
+
+//     return res.json({
+//       manpowerUsed,
+//       materialsDelivered: materialsCount,
+//       toolsInUse,
+//       progressPercentage: 0,
+//       documentsCount
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     return res.status(500).json({ status: "error", message: err.message });
+//   }
+// };

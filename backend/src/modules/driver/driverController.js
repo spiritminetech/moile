@@ -1,24 +1,12 @@
-// ==============================
-// Imports (ESM Syntax)
-// ==============================
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import Driver from './DriverModel.js';
+import Company from '../company/CompanyModel.js';
+import Employee from '../employees/EmployeeModel.js';
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import bcrypt from "bcryptjs";
 
-import User from "../user/User.js";
-import Company from "../company/Company.js";
 
-import Employee from "../employee/Employee.js";
-import FleetTask from "../fleetTask/models/FleetTask.js";
-import FleetVehicle from "../fleetTask/submodules/fleetvehicle/FleetVehicle.js";
-import Project from "../project/models/Project.js";
-import FleetTaskPassenger from "../fleetTask/submodules/fleetTaskPassenger/FleetTaskPassenger.js";
-
-// ==============================
-// Multer Configuration for Driver Photo Upload
-// ==============================
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = "uploads/drivers/";
@@ -44,10 +32,316 @@ export const upload = multer({
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
+/**
+ * Validates driver input data with comprehensive business rules
+ * @param {Object} data - Driver data to validate
+ * @returns {Array} Array of validation errors
+ */
+const validateDriverInput = (data) => {
+  const { companyId, employeeId, licenseNo, licenseExpiry, status } = data;
+  const errors = [];
 
-// ==============================
-// DRIVER PROFILE APIs
-// ==============================
+  // Required fields validation
+  if (!companyId) errors.push('Company ID is required');
+  if (!employeeId) errors.push('Employee ID is required');
+  if (!licenseNo) errors.push('License number is required');
+
+  // Data format validation
+  if (companyId && isNaN(companyId)) errors.push('Company ID must be a number');
+  if (employeeId && isNaN(employeeId)) errors.push('Employee ID must be a number');
+
+  // License validation
+  if (licenseNo && licenseNo.trim().length === 0) {
+    errors.push('License number cannot be empty');
+  }
+
+  // License expiry validation
+  if (licenseExpiry) {
+    const expiryDate = new Date(licenseExpiry);
+    if (isNaN(expiryDate.getTime())) {
+      errors.push('License expiry must be a valid date');
+    } else if (expiryDate < new Date()) {
+      errors.push('License expiry date cannot be in the past');
+    }
+  }
+
+  // Status validation
+  const validStatuses = ['ACTIVE', 'INACTIVE', 'SUSPENDED'];
+  if (status && !validStatuses.includes(status)) {
+    errors.push(`Status must be one of: ${validStatuses.join(', ')}`);
+  }
+
+  return errors;
+};
+
+/**
+ * Normalizes driver data for consistent storage
+ * @param {Object} data - Raw driver data
+ * @returns {Object} Normalized driver data
+ */
+const normalizeDriverData = (data) => {
+  const normalized = { ...data };
+
+  // Type conversion
+  if (normalized.companyId) normalized.companyId = parseInt(normalized.companyId, 10);
+  if (normalized.employeeId) normalized.employeeId = parseInt(normalized.employeeId, 10);
+  if (normalized.vehicleId) normalized.vehicleId = parseInt(normalized.vehicleId, 10);
+
+  // String sanitization
+  if (normalized.licenseNo) normalized.licenseNo = normalized.licenseNo.trim().toUpperCase();
+  if (normalized.employeeName) normalized.employeeName = normalized.employeeName.trim();
+  if (normalized.employeeCode) normalized.employeeCode = normalized.employeeCode.trim();
+  if (normalized.jobTitle) normalized.jobTitle = normalized.jobTitle.trim();
+
+  // Date handling
+  if (normalized.licenseExpiry) {
+    const expiryDate = new Date(normalized.licenseExpiry);
+    normalized.licenseExpiry = isNaN(expiryDate.getTime()) ? undefined : expiryDate;
+  }
+
+  // Default values
+  if (!normalized.status) normalized.status = 'ACTIVE';
+  normalized.updatedAt = new Date();
+
+  return normalized;
+};
+
+/**
+ * Generates next available driver ID
+ * @returns {Promise<number>} Next driver ID
+ */
+const generateNextDriverId = async () => {
+  try {
+    const latestDriver = await Driver.findOne()
+      .select('id')
+      .sort({ id: -1 })
+      .lean()
+      .exec();
+    
+    return latestDriver ? latestDriver.id + 1 : 1;
+  } catch (error) {
+    console.error('Error generating driver ID:', error);
+    throw new Error('Failed to generate driver ID');
+  }
+};
+
+/**
+ * Validates employee existence and retrieves employee data
+ * @param {number} employeeId - Employee ID to validate
+ * @returns {Promise<Object>} Employee data
+ */
+const validateEmployeeExistence = async (employeeId) => {
+  const employee = await Employee.findOne({ id: employeeId })
+    .select('fullName employeeCode jobTitle')
+    .lean()
+    .exec();
+
+  if (!employee) {
+    throw new Error(`Employee with ID ${employeeId} not found`);
+  }
+
+  return employee;
+};
+
+/**
+ * Checks for existing active drivers for an employee
+ * @param {number} employeeId - Employee ID to check
+ * @param {string} status - New driver status
+ * @param {number} excludeDriverId - Driver ID to exclude (for updates)
+ * @returns {Promise<boolean>} True if active driver exists
+ */
+const checkExistingActiveDriver = async (employeeId, status, excludeDriverId = null) => {
+  const query = { 
+    employeeId: employeeId,
+    status: 'ACTIVE'
+  };
+
+  if (excludeDriverId) {
+    query.id = { $ne: excludeDriverId };
+  }
+
+  const existingDriver = await Driver.findOne(query)
+    .select('_id')
+    .lean()
+    .exec();
+
+  return !!existingDriver && status === 'ACTIVE';
+};
+
+/**
+ * Creates a new driver with comprehensive validation
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+const createDriver = async (req, res) => {
+  try {
+    console.log('🚗 Creating new driver with data:', req.body);
+
+    // Execute input validation
+    const validationErrors = validateDriverInput(req.body);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: validationErrors.join(', ')
+      });
+    }
+
+    // Normalize input data
+    const normalizedData = normalizeDriverData(req.body);
+
+    // Execute parallel validations
+    const [employee, existingActiveDriver, nextDriverId] = await Promise.all([
+      validateEmployeeExistence(normalizedData.employeeId),
+      checkExistingActiveDriver(normalizedData.employeeId, normalizedData.status),
+      generateNextDriverId()
+    ]);
+
+    // Check for active driver conflict
+    if (existingActiveDriver) {
+      return res.status(409).json({
+        success: false,
+        message: `Active driver already exists for employee ${normalizedData.employeeId}`
+      });
+    }
+
+    // Prepare driver document
+    const driverData = {
+      id: nextDriverId,
+      companyId: normalizedData.companyId,
+      employeeId: normalizedData.employeeId,
+      employeeName: normalizedData.employeeName || employee.fullName,
+      employeeCode: normalizedData.employeeCode || employee.employeeCode,
+      jobTitle: normalizedData.jobTitle || employee.jobTitle,
+      licenseNo: normalizedData.licenseNo,
+      licenseExpiry: normalizedData.licenseExpiry,
+      vehicleId: normalizedData.vehicleId,
+      status: normalizedData.status,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    console.log('✅ Creating driver with data:', driverData);
+
+    // Persist driver document
+    const driver = new Driver(driverData);
+    await driver.save();
+
+    // Return successful creation response
+    return res.status(201).json({
+      success: true,
+      message: 'Driver created successfully',
+      data: driver
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating driver:', error);
+    
+    // Handle specific error cases
+    if (error.message.includes('Employee with ID')) {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    if (error.message.includes('Failed to generate driver ID')) {
+      return res.status(500).json({
+        success: false,
+        message: 'System error: Unable to generate driver ID'
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Error creating driver: ' + error.message
+    });
+  }
+};
+
+/**
+ * Retrieves all drivers with optimized query execution
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+
+const getAllDrivers = async (req, res) => {
+  try {
+    // Execute optimized query with field projection
+    const drivers = await Driver.find()
+      .select('id companyId employeeId employeeName employeeCode licenseNo licenseExpiry status createdAt')
+      .sort({ createdAt: -1 })
+      .lean()
+      .maxTimeMS(10000)
+      .exec();
+
+    // Return successful retrieval response
+    return res.json({
+      success: true,
+      data: drivers,
+      count: drivers.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching drivers:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve drivers due to server error',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Retrieves specific driver by ID with comprehensive validation
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+const getDriverById = async (req, res) => {
+  try {
+    const driverId = parseInt(req.params.id, 10);
+    
+    // Validate driver ID parameter
+    if (isNaN(driverId) || driverId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid driver ID. Must be a positive integer.'
+      });
+    }
+
+    // Execute optimized query
+    const driver = await Driver.findOne({ id: driverId })
+      .select('-__v')
+      .lean()
+      .exec();
+    
+    // Handle driver not found scenario
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: `Driver with ID ${driverId} not found`
+      });
+    }
+
+    // Return successful retrieval response
+    return res.json({
+      success: true,
+      data: driver
+    });
+
+  } catch (error) {
+    console.error(`❌ Error fetching driver ${req.params.id}:`, error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve driver due to server error',
+      error: error.message
+    });
+  }
+};
+
 export const getDriverProfile = async (req, res) => {
   try {
     const { id, userId, companyId, role } = req.user || {};
@@ -113,10 +407,6 @@ export const getDriverProfile = async (req, res) => {
     });
   }
 };
-
-// ==============================
-// Change Driver Password
-// ==============================
 export const changeDriverPassword = async (req, res) => {
   try {
     const driverId = Number(req.user.id || req.user.userId);
@@ -149,9 +439,6 @@ export const changeDriverPassword = async (req, res) => {
   }
 };
 
-// ==============================
-// Upload Driver Photo
-// ==============================
 export const uploadDriverPhoto = async (req, res) => {
   try {
     const driverId = Number(req.user.id || req.user.userId);
@@ -195,630 +482,270 @@ export const uploadDriverPhoto = async (req, res) => {
     res.status(500).json({ success: false, message: "Upload failed", error: err.message });
   }
 };
-
-// ==============================
-// DRIVER TASK APIs
-// ==============================
-export const getTodaysTasks = async (req, res) => {
+/**
+ * Updates existing driver with comprehensive validation
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+const updateDriver = async (req, res) => {
   try {
-    const driverId = Number(req.user.id || req.user.userId);
-    const companyId = Number(req.user.companyId);
-
-    console.log(`📌 Fetching today's tasks for driver: ${driverId}, company: ${companyId}`);
-
-    const now = new Date();
-    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-
-    console.log(`📌 Date range: ${startOfDay.toISOString()} to ${endOfDay.toISOString()}`);
-
-    const tasks = await FleetTask.find({
-      driverId,
-      companyId,
-      taskDate: {
-        $gte: startOfDay,
-        $lte: endOfDay
-      }
-    }).lean();
-
-    console.log(`📌 Found ${tasks.length} tasks for today`);
-
-    if (!tasks.length) {
-      return res.json({
-        success: true,
-        message: 'No tasks found for today',
-        tasks: []
+    const driverId = parseInt(req.params.id, 10);
+    
+    // Validate driver ID parameter
+    if (isNaN(driverId) || driverId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid driver ID. Must be a positive integer.'
       });
     }
 
-    const projectIds = [...new Set(tasks.map(t => t.projectId))];
-    const vehicleIds = [...new Set(tasks.map(t => t.vehicleId))];
-    const taskIds = tasks.map(t => t.id);
+    // Normalize update data
+    const updateData = normalizeDriverData(req.body);
 
-    const [projects, vehicles, passengerCounts, driver] = await Promise.all([
-      Project.find({ id: { $in: projectIds } }).lean(),
-      FleetVehicle.find({ id: { $in: vehicleIds } }).lean(),
-      FleetTaskPassenger.aggregate([
-        { $match: { fleetTaskId: { $in: taskIds } } },
-        { $group: { _id: "$fleetTaskId", count: { $sum: 1 } } }
-      ]),
-      Employee.findOne({ id: driverId, companyId }).lean() // Fetch driver info
+    // Execute parallel validations
+    const [existingDriver, employee, hasActiveDriverConflict] = await Promise.all([
+      Driver.findOne({ id: driverId }).exec(),
+      updateData.employeeId ? validateEmployeeExistence(updateData.employeeId) : Promise.resolve(null),
+      updateData.employeeId && updateData.status ? 
+        checkExistingActiveDriver(updateData.employeeId, updateData.status, driverId) : 
+        Promise.resolve(false)
     ]);
 
-    const projectMap = Object.fromEntries(projects.map(p => [p.id, p]));
-    const vehicleMap = Object.fromEntries(vehicles.map(v => [v.id, v]));
-    const passengerCountMap = Object.fromEntries(passengerCounts.map(p => [p._id, p.count]));
-
-    const formatTime = (date) => {
-      if (!date) return 'N/A';
-      return new Date(date).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
-    };
-
-    const taskList = tasks.map(task => ({
-      taskId: task.id,
-      projectName: projectMap[task.projectId]?.projectName || 'Unknown Project',
-      startTime: formatTime(task.plannedPickupTime),
-      endTime: formatTime(task.plannedDropTime),
-      vehicleNumber: vehicleMap[task.vehicleId]?.registrationNo || 'N/A',
-      passengers: passengerCountMap[task.id] || 0,
-      status: task.status,
-      pickupLocation: task.pickupAddress || task.pickupLocation || 'Location not specified',
-      dropLocation: task.dropAddress || task.dropLocation || 'Location not specified',
-      // Driver information
-      driverName: driver?.fullName || 'Unknown Driver',
-      driverPhone: driver?.phone || 'Not available',
-      driverPhoto: driver?.photoUrl || driver?.photo_url || null,
-      employeeId: driver?.id || null
-    }));
-
-    res.json({
-      success: true,
-      message: `Found ${taskList.length} tasks for today`,
-      tasks: taskList
-    });
-
-  } catch (err) {
-    console.error("❌ Error fetching today's tasks:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching today's tasks",
-      error: err.message
-    });
-  }
-};
-
-// ==============================
-// Trip History
-// ==============================
-export const getTripHistory = async (req, res) => {
-  try {
-    const driverId = Number(req.user.id || req.user.userId);
-    const companyId = Number(req.user.companyId);
-    const { startDate, endDate } = req.query;
-
-    console.log(`📌 Fetching trip history for driver: ${driverId}, from ${startDate} to ${endDate}`);
-
-    const start = startDate ? new Date(startDate) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const end = endDate ? new Date(endDate) : new Date();
-    end.setHours(23, 59, 59, 999);
-
-    console.log(`📌 Date range: ${start.toISOString()} to ${end.toISOString()}`);
-
-    const tasks = await FleetTask.find({
-      status: "COMPLETED",
-      driverId,
-      companyId,
-      taskDate: {
-        $gte: start,
-        $lte: end
-      }
-    })
-    .sort({ taskDate: -1 })
-    .lean();
-
-    console.log(`📌 Found ${tasks.length} historical tasks`);
-
-    if (!tasks.length) {
-      return res.json({
-        success: true,
-        message: 'No trips found for the selected period',
-        trips: []
-      });
-    }
-
-    const projectIds = [...new Set(tasks.map(t => t.projectId))];
-    const vehicleIds = [...new Set(tasks.map(t => t.vehicleId))];
-    const taskIds = tasks.map(t => t.id);
-
-    const [projects, vehicles, passengerCounts] = await Promise.all([
-      Project.find({ id: { $in: projectIds } }).lean(),
-      FleetVehicle.find({ id: { $in: vehicleIds } }).lean(),
-      FleetTaskPassenger.aggregate([
-        { $match: { fleetTaskId: { $in: taskIds } } },
-        { $group: { _id: "$fleetTaskId", count: { $sum: 1 } } }
-      ])
-    ]);
-
-    const projectMap = Object.fromEntries(projects.map(p => [p.id, p]));
-    const vehicleMap = Object.fromEntries(vehicles.map(v => [v.id, v]));
-    const passengerCountMap = Object.fromEntries(passengerCounts.map(p => [p._id, p.count]));
-
-    const tripHistory = tasks.map(task => ({
-      taskId: task.id,
-      projectName: projectMap[task.projectId]?.projectName || 'Unknown Project',
-      startTime: task.plannedPickupTime,
-      endTime: task.plannedDropTime,
-      actualStartTime: task.actualStartTime,
-      actualEndTime: task.actualEndTime,
-      vehicleNumber: vehicleMap[task.vehicleId]?.registrationNo || 'N/A',
-      passengers: passengerCountMap[task.id] || 0,
-      status: task.status,
-      pickupLocation: task.pickupAddress || task.pickupLocation || 'Location not specified',
-      dropLocation: task.dropAddress || task.dropLocation || 'Location not specified',
-      taskDate: task.taskDate
-    }));
-
-    res.json({
-      success: true,
-      message: `Found ${tripHistory.length} trips`,
-      trips: tripHistory
-    });
-
-  } catch (err) {
-    console.error("❌ Error fetching trip history:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching trip history",
-      error: err.message
-    });
-  }
-};
-
-// ==============================
-// Task Details
-// ==============================
-export const getTaskDetails = async (req, res) => {
-  try {
-    const { taskId } = req.params;
-    const driverId = Number(req.user.id || req.user.userId);
-    const companyId = Number(req.user.companyId);
-
-    console.log(`📌 Fetching task details for: ${taskId}, driver: ${driverId}, company: ${companyId}`);
-
-    const numericTaskId = Number(taskId);
-
-    if (!numericTaskId || isNaN(numericTaskId)) {
-      console.log('❌ Invalid task ID provided');
-      return res.status(400).json({ 
-        success: false,
-        message: "Invalid task ID" 
-      });
-    }
-
-    console.log(`📌 Searching for task with numeric ID: ${numericTaskId}`);
-
-    const task = await FleetTask.findOne({
-      id: numericTaskId,
-      driverId: driverId,
-      companyId: companyId
-    }).lean();
-
-    console.log(`📌 Task query result:`, task ? 'Found' : 'Not found');
-
-    if (!task) {
-      console.log(`❌ Task not found for numeric ID: ${numericTaskId}`);
-      return res.status(404).json({ 
-        success: false,
-        message: "Task not found" 
-      });
-    }
-
-    console.log(`✅ Task found: ${task._id}, Project ID: ${task.projectId}, Vehicle ID: ${task.vehicleId}`);
-
-    const passengers = await FleetTaskPassenger.find({ 
-      fleetTaskId: task.id 
-    })
-      .select("id name pickupPoint pickupStatus dropStatus")
-      .lean();
-
-    console.log(`✅ Found ${passengers.length} passengers`);
-
-    const project = await Project.findOne({ id: task.projectId }).lean();
-    console.log(`✅ Project: ${project?.ProjectName || 'Not found'}`);
-    
-    const vehicle = await FleetVehicle.findOne({ id: task.vehicleId }).lean();
-    console.log(`✅ Vehicle: ${vehicle?.registrationNo || 'Not found'}`);
-
-    const response = {
-      _id: task._id,
-      id: task.id,
-      projectName: project?.projectName || 'Unknown Project',
-      vehicleNo: vehicle?.registrationNo || 'N/A',
-      startTime: task.plannedPickupTime,
-      endTime: task.plannedDropTime,
-      actualStartTime: task.actualStartTime,
-      actualEndTime: task.actualEndTime,
-      passengers: passengers.map(p => ({
-        id: p.id,
-        name: p.name,
-        pickupPoint: p.pickupPoint,
-        pickupStatus: p.pickupStatus || 'pending',
-        dropStatus: p.dropStatus || 'pending'
-      })),
-      status: task.status,
-      pickupLocation: task.pickupAddress || task.pickupLocation || 'Location not specified',
-      dropLocation: task.dropAddress || task.dropLocation || 'Location not specified',
-      expectedPassengers: task.expectedPassengers || passengers.length
-    };
-
-    console.log(`✅ Task details prepared: ${response.projectName} with ${response.passengers.length} passengers`);
-    return res.json(response);
-
-  } catch (err) {
-    console.error("❌ Error fetching task details:", err);
-    console.error("❌ Error stack:", err.stack);
-    
-    res.status(500).json({ 
-      success: false,
-      message: "Internal server error",
-      error: err.message 
-    });
-  }
-};
-
-// ==============================
-// Confirm Pickup
-// ==============================
-export const confirmPickup = async (req, res) => {
-  try {
-    const { taskId } = req.params;
-    const { confirmed = [], missed = [] } = req.body;
-    const driverId = Number(req.user.id || req.user.userId);
-    const companyId = Number(req.user.companyId);
-
-    console.log(`📌 Confirm pickup for task: ${taskId}, driver: ${driverId}`);
-    console.log(`📌 Confirmed passengers:`, confirmed);
-    console.log(`📌 Missed passengers:`, missed);
-
-    const task = await FleetTask.findOne({
-      id: Number(taskId),
-      driverId: driverId,
-      companyId: companyId
-    });
-
-    if (!task) {
+    // Verify driver exists
+    if (!existingDriver) {
       return res.status(404).json({
         success: false,
-        message: "Task not found or not assigned to this driver.",
+        message: `Driver with ID ${driverId} not found`
       });
     }
 
-    if (confirmed.length > 0) {
-      await FleetTaskPassenger.updateMany(
-        { 
-          fleetTaskId: Number(taskId), 
-          id: { $in: confirmed.map(id => Number(id)) } 
-        },
-        {
-          $set: {
-            pickupStatus: "confirmed",
-            pickupConfirmedAt: new Date(),
-          },
-        }
-      );
+    // Check for active driver conflict
+    if (hasActiveDriverConflict) {
+      return res.status(409).json({
+        success: false,
+        message: `Active driver already exists for employee ${updateData.employeeId}`
+      });
     }
 
-    if (missed.length > 0) {
-      await FleetTaskPassenger.updateMany(
-        { 
-          fleetTaskId: Number(taskId), 
-          id: { $in: missed.map(id => Number(id)) } 
-        },
-        {
-          $set: {
-            pickupStatus: "missed",
-            pickupConfirmedAt: new Date(),
-          },
-        }
-      );
+    // Update employee information if employee changed
+    if (employee && !updateData.employeeName) {
+      updateData.employeeName = employee.fullName;
+    }
+    if (employee && !updateData.employeeCode) {
+      updateData.employeeCode = employee.employeeCode;
+    }
+    if (employee && !updateData.jobTitle) {
+      updateData.jobTitle = employee.jobTitle;
     }
 
-    const currentTime = new Date();
-    await FleetTask.updateOne(
-      { id: Number(taskId) },
-      {
-        $set: {
-          status: "ONGOING",
-          actualStartTime: currentTime,
-          updatedAt: currentTime
-        }
+    // Execute update operation
+    const driver = await Driver.findOneAndUpdate(
+      { id: driverId },
+      updateData,
+      { 
+        new: true, 
+        runValidators: true,
+        context: 'query'
       }
     );
 
-    const [updatedTask, updatedPassengers, project, vehicle] = await Promise.all([
-      FleetTask.findOne({ id: Number(taskId) }).lean(),
-      FleetTaskPassenger.find({ fleetTaskId: Number(taskId) }).lean(),
-      Project.findOne({ id: task.projectId }).lean(),
-      FleetVehicle.findOne({ id: task.vehicleId }).lean()
-    ]);
-
-    const response = {
+    // Return successful update response
+    return res.json({
       success: true,
-      message: "Pickup confirmed successfully",
-      status: updatedTask.status,
-      task: {
-        _id: updatedTask._id,
-        id: updatedTask.id,
-        projectName: project?.projectName || 'Unknown Project',
-        vehicleNo: vehicle?.registrationNo || 'N/A',
-        startTime: updatedTask.plannedPickupTime,
-        endTime: updatedTask.plannedDropTime,
-        actualStartTime: updatedTask.actualStartTime,
-        status: updatedTask.status,
-        pickupLocation: updatedTask.pickupAddress || updatedTask.pickupLocation,
-        dropLocation: updatedTask.dropAddress || updatedTask.dropLocation
-      },
-      updatedPassengers: updatedPassengers.map(p => ({
-        id: p.id,
-        name: p.name,
-        pickupPoint: p.pickupPoint,
-        pickupStatus: p.pickupStatus || 'pending',
-        dropStatus: p.dropStatus || 'pending'
-      }))
-    };
+      message: 'Driver updated successfully',
+      data: driver
+    });
 
-    console.log(`✅ Pickup confirmed for task ${taskId}`);
-    console.log(`✅ Task status updated to: ${updatedTask.status}`);
-    console.log(`✅ Actual start time set to: ${currentTime}`);
+  } catch (error) {
+    console.error(`❌ Error updating driver ${req.params.id}:`, error);
     
-    return res.status(200).json(response);
+    // Handle specific error cases
+    if (error.message.includes('Employee with ID')) {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
 
-  } catch (err) {
-    console.error("❌ Pickup confirmation error:", err);
-    res.status(500).json({
+    return res.status(400).json({
       success: false,
-      message: "Server error during pickup confirmation.",
-      error: err.message,
+      message: 'Error updating driver: ' + error.message
     });
   }
 };
 
-// ==============================
-// Confirm Drop
-// ==============================
-export const confirmDrop = async (req, res) => {
+/**
+ * Deletes driver by ID with proper validation
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+const deleteDriver = async (req, res) => {
   try {
-    const { taskId } = req.params;
-    const { confirmed = [], missed = [] } = req.body;
-    const driverId = Number(req.user.id || req.user.userId);
-    const companyId = Number(req.user.companyId);
-
-    console.log(`📌 Confirm drop for task: ${taskId}, driver: ${driverId}`);
-    console.log(`📌 Confirmed passengers:`, confirmed);
-    console.log(`📌 Missed passengers:`, missed);
-
-    const task = await FleetTask.findOne({
-      id: Number(taskId),
-      driverId: driverId,
-      companyId: companyId
-    });
-
-    if (!task) {
-      return res.status(404).json({
+    const driverId = parseInt(req.params.id, 10);
+    
+    // Validate driver ID parameter
+    if (isNaN(driverId) || driverId <= 0) {
+      return res.status(400).json({
         success: false,
-        message: "Task not found or not assigned to this driver.",
+        message: 'Invalid driver ID. Must be a positive integer.'
       });
     }
 
-    if (confirmed.length > 0) {
-      await FleetTaskPassenger.updateMany(
-        { 
-          fleetTaskId: Number(taskId), 
-          id: { $in: confirmed.map(id => Number(id)) } 
-        },
-        {
-          $set: {
-            dropStatus: "confirmed",
-            dropConfirmedAt: new Date(),
-          },
-        }
-      );
+    // Execute deletion operation
+    const driver = await Driver.findOneAndDelete({ id: driverId });
+
+    // Handle driver not found scenario
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: `Driver with ID ${driverId} not found`
+      });
     }
 
-    if (missed.length > 0) {
-      await FleetTaskPassenger.updateMany(
-        { 
-          fleetTaskId: Number(taskId), 
-          id: { $in: missed.map(id => Number(id)) } 
-        },
-        {
-          $set: {
-            dropStatus: "missed",
-            dropConfirmedAt: new Date(),
-          },
-        }
-      );
-    }
-
-    const currentTime = new Date();
-    await FleetTask.updateOne(
-      { id: Number(taskId) },
-      {
-        $set: {
-          status: "COMPLETED",
-          actualEndTime: currentTime,
-          updatedAt: currentTime
-        }
+    // Return successful deletion response
+    return res.json({
+      success: true,
+      message: 'Driver deleted successfully',
+      deletedDriver: {
+        id: driver.id,
+        employeeId: driver.employeeId,
+        employeeName: driver.employeeName,
+        licenseNo: driver.licenseNo
       }
-    );
+    });
 
-    const [updatedTask, updatedPassengers, project, vehicle] = await Promise.all([
-      FleetTask.findOne({ id: Number(taskId) }).lean(),
-      FleetTaskPassenger.find({ fleetTaskId: Number(taskId) }).lean(),
-      Project.findOne({ id: task.projectId }).lean(),
-      FleetVehicle.findOne({ id: task.vehicleId }).lean()
-    ]);
-
-    const response = {
-      success: true,
-      message: "Drop-off confirmed successfully",
-      status: updatedTask.status,
-      task: {
-        _id: updatedTask._id,
-        id: updatedTask.id,
-        projectName: project?.projectName || 'Unknown Project',
-        vehicleNo: vehicle?.registrationNo || 'N/A',
-        startTime: updatedTask.plannedPickupTime,
-        endTime: updatedTask.plannedDropTime,
-        actualStartTime: updatedTask.actualStartTime,
-        actualEndTime: updatedTask.actualEndTime,
-        status: updatedTask.status,
-        pickupLocation: updatedTask.pickupAddress || updatedTask.pickupLocation,
-        dropLocation: updatedTask.dropAddress || updatedTask.dropLocation
-      },
-      updatedPassengers: updatedPassengers.map(p => ({
-        id: p.id,
-        name: p.name,
-        pickupPoint: p.pickupPoint,
-        pickupStatus: p.pickupStatus || 'pending',
-        dropStatus: p.dropStatus || 'pending'
-      }))
-    };
-
-    console.log(`✅ Drop confirmed for task ${taskId}`);
-    console.log(`✅ Task status updated to: ${updatedTask.status}`);
-    console.log(`✅ Actual end time set to: ${currentTime}`);
-    
-    return res.status(200).json(response);
-
-  } catch (err) {
-    console.error("❌ Drop confirmation error:", err);
-    res.status(500).json({
+  } catch (error) {
+    console.error(`❌ Error deleting driver ${req.params.id}:`, error);
+    return res.status(500).json({
       success: false,
-      message: "Server error during drop confirmation.",
-      error: err.message,
+      message: 'Failed to delete driver due to server error',
+      error: error.message
     });
   }
 };
 
-// ==============================
-// Trip Summary
-// ==============================
-export const getTripSummary = async (req, res) => {
+/**
+ * Retrieves drivers by company ID with flexible ID support
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+const getDriversByCompany = async (req, res) => {
   try {
-    const { taskId } = req.params;
-    const driverId = Number(req.user.id || req.user.userId);
-    const companyId = Number(req.user.companyId);
+    const { companyId } = req.params;
 
-    console.log(`📌 Fetching trip summary for task: ${taskId}, driver: ${driverId}`);
+    console.log('🔍 Fetching drivers for company ID:', companyId, 'Type:', typeof companyId);
 
-    const numericTaskId = Number(taskId);
+    let queryCompanyId;
 
-    // 🧭 Find the Fleet Task assigned to this driver
-    const task = await FleetTask.findOne({
-      id: numericTaskId,
-      driverId: driverId,
-      companyId: companyId
-    }).lean();
-
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: "Task not found or not assigned to this driver.",
-      });
+    // Handle both numeric ID and MongoDB ObjectId
+    if (typeof companyId === 'string' && companyId.length === 24) {
+      console.log('📝 Detected MongoDB _id, finding numeric ID from company');
+      
+      const company = await Company.findOne({ _id: companyId })
+        .select('id name')
+        .lean()
+        .exec();
+        
+      if (!company) {
+        return res.status(404).json({
+          success: false,
+          message: `Company with _id ${companyId} not found`
+        });
+      }
+      
+      queryCompanyId = company.id;
+      console.log('✅ Found company:', company.name, 'Numeric ID:', queryCompanyId);
+    } else {
+      queryCompanyId = parseInt(companyId, 10);
+      if (isNaN(queryCompanyId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid company ID. Must be a number or valid MongoDB _id.'
+        });
+      }
     }
 
-    console.log(`📌 Fetching driver details for driverId: ${driverId}`);
+    console.log('🔍 Querying drivers with companyId:', queryCompanyId);
 
-    // ✅ Get driver name from Employee collection using 'id' (not userId)
-    let employee = await Employee.findOne({ id: driverId }).lean();
-    let driverName = employee?.fullName;
+    // Execute optimized query
+    const drivers = await Driver.find({ companyId: queryCompanyId })
+      .select('id employeeId employeeName employeeCode licenseNo licenseExpiry status vehicleId')
+      .sort({ employeeName: 1 })
+      .lean()
+      .exec();
 
-    console.log("employees:", employee);
+    console.log('✅ Found', drivers.length, 'drivers for company', queryCompanyId);
 
-    console.log(`✅ Driver Name: ${driverName}`);
+    // Return successful retrieval response
+    return res.json({
+      success: true,
+      data: drivers,
+      count: drivers.length,
+      companyId: queryCompanyId
+    });
 
-    // 🧾 Get passenger stats
-    const passengers = await FleetTaskPassenger.find({
-      fleetTaskId: numericTaskId
-    }).lean();
-
-    const totalPassengers = passengers.length;
-    const pickedUp = passengers.filter(p => p.pickupStatus === 'confirmed').length;
-    const dropped = passengers.filter(p => p.dropStatus === 'confirmed').length;
-    const missedPickups = passengers.filter(p => p.pickupStatus === 'missed').length;
-    const missedDrops = passengers.filter(p => p.dropStatus === 'missed').length;
-    const totalMissed = missedPickups + missedDrops;
-
-    // 🕒 Duration calculation
-    let durationMinutes = 0;
-    if (task.actualStartTime && task.actualEndTime) {
-      const start = new Date(task.actualStartTime);
-      const end = new Date(task.actualEndTime);
-      durationMinutes = Math.ceil((end - start) / (1000 * 60));
-    } else if (task.plannedPickupTime && task.plannedDropTime) {
-      const start = new Date(task.plannedPickupTime);
-      const end = new Date(task.plannedDropTime);
-      durationMinutes = Math.ceil((end - start) / (1000 * 60));
-    }
-
-    const formatDate = (date) => {
-      if (!date) return 'N/A';
-      return new Date(date).toLocaleDateString('en-US', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      });
-    };
-
-    console.log(`⏱️ Duration calculation: ${durationMinutes} minutes`);
-
-    // 🔗 Fetch related project & vehicle
-    const [project, vehicle] = await Promise.all([
-      Project.findOne({ id: task.projectId }).lean(),
-      FleetVehicle.findOne({ id: task.vehicleId }).lean()
-    ]);
-
-    // 🧩 Prepare Summary Object
-    const summary = {
-      _id: task._id,
-      id: task.id,
-      projectName: project?.projectName || 'Unknown Project',
-      vehicleNo: vehicle?.registrationNo || 'N/A',
-      driverName: driverName, 
-      driverId: driverId,
-      totalPassengers: totalPassengers,
-      pickedUp: totalPassengers,
-      dropped: totalPassengers,
-      missed: totalMissed,
-      durationMinutes: durationMinutes,
-      startTime: task.plannedPickupTime,
-      endTime: task.plannedDropTime,
-      actualStartTime: task.actualStartTime,
-      actualEndTime: task.actualEndTime,
-      status: task.status,
-      pickupLocation: task.pickupAddress || task.pickupLocation || 'Location not specified',
-      dropLocation: task.dropAddress || task.dropLocation || 'Location not specified',
-      taskDate: task.taskDate,
-      formattedDate: formatDate(task.taskDate),
-      pickupConfirmedAt: task.actualStartTime,
-      dropConfirmedAt: task.actualEndTime
-    };
-
-    console.log(`✅ Trip summary prepared for task ${taskId}`);
-    console.log(`👨‍✈️ Driver: ${driverName}`);
-    res.json(summary);
-
-  } catch (err) {
-    console.error("❌ Error fetching trip summary:", err);
-    res.status(500).json({
+  } catch (error) {
+    console.error('❌ Error fetching drivers by company:', error);
+    return res.status(500).json({
       success: false,
-      message: "Server error while fetching trip summary.",
-      error: err.message,
+      message: 'Failed to retrieve drivers by company due to server error',
+      error: error.message
     });
   }
+};
+
+/**
+ * Retrieves drivers by vehicle ID with optimized query
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @returns {Promise<void>}
+ */
+const getDriversByVehicle = async (req, res) => {
+  try {
+    const vehicleId = parseInt(req.params.vehicleId, 10);
+    
+    // Validate vehicle ID parameter
+    if (isNaN(vehicleId) || vehicleId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid vehicle ID. Must be a positive integer.'
+      });
+    }
+
+    // Execute optimized query
+    const drivers = await Driver.find({ vehicleId: vehicleId })
+      .select('id employeeId employeeName employeeCode licenseNo status')
+      .sort({ status: -1, employeeName: 1 })
+      .lean()
+      .exec();
+    
+    // Return successful retrieval response
+    return res.json({
+      success: true,
+      data: drivers,
+      count: drivers.length,
+      vehicleId: vehicleId
+    });
+
+  } catch (error) {
+    console.error(`❌ Error fetching drivers for vehicle ${req.params.vehicleId}:`, error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve drivers by vehicle due to server error',
+      error: error.message
+    });
+  }
+};
+
+export {
+  getAllDrivers,
+  getDriverById,
+  createDriver,
+  updateDriver,
+  deleteDriver,
+  getDriversByCompany,
+  getDriversByVehicle,
 };

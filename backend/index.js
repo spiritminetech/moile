@@ -1,225 +1,195 @@
+// server.js
+
+import dns from 'dns';
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+console.log('🔧 DNS servers configured for MongoDB Atlas connectivity');
+
+
 import express from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Import centralized configuration
-import appConfig from './src/config/app.config.js';
+// DB
+import connectDB from './src/config/database.js';
 
-// Import routes
+// Routes
 import authRoutes from './src/modules/auth/authRoutes.js';
-import companyUserRoutes from './src/modules/companyUser/companyUserRoutes.js';
-import driverRoutes from './src/modules/driver/driverRoutes.js';
+//import userRoutes from './routes/user/userRoutes.js';
+import companyRoutes from './src/modules/company/companyRoutes.js';
+import employeeRoutes from './src/modules/employees/employeeRoutes.js';
+import employeePassportRoutes from './src/modules/employees/submodules/employeePassport/employeePassportRoutes.js';
+import employeeWorkPassRoutes from './src/modules/employees/submodules/employeeWorkPass/employeeWorkPassRoutes.js';
+import employeeQualificationRoutes from './src/modules/employees/submodules/employeeQualification/employeeQualificationRoutes.js';
+import employeeCertificationRoutes from './src/modules/employees/submodules/employeeCertification/employeeCertificationRoutes.js';
+import employeeDocumentRoutes from './src/modules/employees/submodules/employeeDocument/employeeDocumentRoutes.js';
+
+import fleetVehicleRoutes from './src/modules/fleetVehicle/fleetVehicleRoutes.js';
 import fleetTaskRoutes from './src/modules/fleetTask/fleetTaskRoutes.js';
-import fleetTaskPassengerRoutes from './src/modules/fleetTask/submodules/fleetTaskPassenger/fleetTaskPassengerRoutes.js';
-import fleetVehicleRoutes from './src/modules/fleetTask/submodules/fleetvehicle/fleetVehicleRoutes.js';
+import fleetTaskPassengerRoutes from './src/modules/fleetTaskPassenger/fleetTaskPassengerRoutes.js';
+// import fleetAlertRoutes from './routes/fleetTask/fleetAlertRoutes.js';
+import driverRoutes from './src/modules/driver/driverRoutes.js';
 import projectRoutes from './src/modules/project/projectRoutes.js';
-import projectToolsRoutes from './src/modules/project/projectToolsRoutes.js';
-import workerRoutes from './src/modules/worker/workerRoutes.js';
-import workerRequestRoutes from './src/modules/worker/workerRequestRoutes.js';
-import workerAttendanceRoutes from './src/modules/worker/workerAttendanceRoutes.js';
-import attendanceRoutes from'./src/modules/attendance/attendanceRoutes.js';
-import supervisorRoutes from './src/modules/supervisor/supervisorRoutes.js';
-import supervisorDailyProgressRoutes  from "./src/modules/supervisorDailyProgress/supervisorDailyProgressRoutes.js";
-import leaveRequestRoutes from './src/modules/leaveRequest/leaveRequestRoutes.js';
-import paymentRequestRoutes from './src/modules/leaveRequest/paymentRequestRoutes.js';
-import medicalClaimRoutes from './src/modules/leaveRequest/medicalClaimRoutes.js';
-import materialRequestRoutes from './src/modules/project/materialRequestRoutes.js';
-import notificationRoutes from './src/modules/notification/notificationRoutes.js';
-import supervisorNotificationRoutes from './src/modules/notification/supervisorNotificationRoutes.js';
-import migrationRoutes from './src/routes/migration.js';
+import taskRoutes from './src/modules/task/taskRoutes.js';
+import toolRoutes from './src/modules/tool/toolRoute.js';
+import materialRoutes from './src/modules/materials/materialRoutes.js';
+import workerTaskAssignmentRoutes from './src/modules/workerTaskAssignment/workerTaskAssignmentRoutes.js';
+import workerRoute from './src/modules/worker/workerRoute.js'; 
+import companyUserRoute from './src/modules/companyUser/companyUserRoute.js';
+import adminManpowerRoutes from "./src/modules/adminManpower/adminManpowerRoutes.js";
+import adminProgressRoutes from "./src/modules/adminProgress/adminProgressRoutes.js";
+import progressReportRoutes from './src/modules/progressReport/progressReportRoutes.js';
+import clientRoutes from "./src/modules/client/clientRoutes.js";
+import dashboardRoutes from "./src/modules/bossDashboard/dashboardRoutes.js"
+import bossRoutes from "./src/modules/bossProject/bossRoutes.js"
+import bossReportsRoutes from "./src/modules/bossReports/bossReportsRoutes.js"
+import attendanceRoutes from './src/modules/bossAttendance/attendanceRoutes.js';
+import masterRoutes from"./src/modules/project/submodules/projectMaster/masterRoute.js";
+import bossProgressReportRoutes from './src/modules/bossProgressReport/bossProgressReportRoutes.js';
+import adminRoutes from './src/modules/adminDashboard/adminRoutes.js';
+import workerViewRoutes from "./src/modules/worker/submodules/workerViewRoutes.js";
+import projectManagerDashboardRoutes from "./src/modules/managerDashboard/ManagerDashboardRoutes.js"
+import transportAssignmentRoutes from "./src/modules/adminTransportAssignment/transportAssignmentRoutes.js";
+import driverTaskRoutes from "./src/modules/adminDriverTaskAssignment/driverTaskRoutes.js";
+import adminAttendanceRoutes from "./src/modules/adminAttendance/adminAttendanceRoutes.js";
+import roleRoutes from "./src/modules/role/roleRoutes.js";
+import userManagementRoutes from "./src/modules/user/userManagementRoutes.js";
+import permissionRoutes from "./src/modules/Permission/permissionRoutes.js";
+import rolePermissionRoutes from "./src/modules/rolePermission/rolePermissionRoutes.js";
+import managerTaskRoutes from "./src/modules/managerTaskAssignment/managerTaskRoutes.js";
+import managerDailyProgressRoutes from "./src/modules/managerDailyProgressApproval/managerDailyProgressRoutes.js";
+import payrollRoutes from "./src/modules/payroll/payrollRoutes.js";
+import quotationTermRoutes from "./src/modules/quotation/quotationTermRoutes.js";
+import quotationRoutes from "./src/modules/quotation/quotationRoutes.js";
+import costBreakdownRoutes from "./src/modules/costBreakdown/costBreakdownRoutes.js";
 
-// Import Firebase service for initialization
-import firebaseService from './src/modules/notification/services/FirebaseService.js';
 
-// Import Notification Escalation Service
-import notificationEscalationService from './src/modules/notification/services/NotificationEscalationService.js';
+dotenv.config();
 
-// Import Performance Monitoring Service
-import performanceMonitoringService from './src/modules/notification/services/PerformanceMonitoringService.js';
-
-// Import Attendance Scheduler
-import attendanceScheduler from './src/modules/attendance/attendanceScheduler.js';
-
-const app = express();
-
-// Middleware
-app.use(cors(appConfig.cors));
-app.use(express.json({ limit: `${appConfig.upload.maxFileSize}b` }));
-app.use(express.urlencoded({ extended: true, limit: `${appConfig.upload.maxFileSize}b` }));
-
-// Resolve __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✅ Serve uploaded files statically - THIS IS CRITICAL FOR PHOTO PREVIEWS
+const app = express();
+
+// Connect to MongoDB
+connectDB();
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Log static file requests for debugging
-if (appConfig.server.isDevelopment) {
-  app.use('/uploads', (req, res, next) => {
-    appConfig.log(`📁 Static file request: ${req.path}`);
-    next();
-  });
-}
 
-// API Routes with centralized prefix
-const apiPrefix = appConfig.api.prefix;
-app.use(`${apiPrefix}/auth`, authRoutes);
-app.use(`${apiPrefix}/company-users`, companyUserRoutes);
-app.use(`${apiPrefix}/driver`, driverRoutes);
-app.use(`${apiPrefix}/fleet-tasks`, fleetTaskRoutes);
-app.use(`${apiPrefix}/fleet-task-passengers`, fleetTaskPassengerRoutes);
-app.use(`${apiPrefix}/fleet-vehicles`, fleetVehicleRoutes);
-app.use(`${apiPrefix}/projects`, projectRoutes);
-app.use(`${apiPrefix}/project`, projectToolsRoutes);
-app.use(`${apiPrefix}/worker`, workerRoutes);
-app.use(`${apiPrefix}/worker/requests`, workerRequestRoutes);
-app.use(`${apiPrefix}/worker/attendance`, workerAttendanceRoutes);
-app.use(`${apiPrefix}/attendance`, attendanceRoutes);
-app.use(`${apiPrefix}/supervisor`, supervisorRoutes);
-app.use(`${apiPrefix}/supervisor`, supervisorDailyProgressRoutes);
-app.use(`${apiPrefix}/leave-requests`, leaveRequestRoutes);
-app.use(`${apiPrefix}/payment-requests`, paymentRequestRoutes);
-app.use(`${apiPrefix}/medical-claims`, medicalClaimRoutes);
-app.use(`${apiPrefix}/material-requests`, materialRequestRoutes);
-app.use(`${apiPrefix}/notifications`, notificationRoutes);
-app.use(`${apiPrefix}/supervisor/notifications`, supervisorNotificationRoutes);
-app.use(`${apiPrefix}/migration`, migrationRoutes);
 
-// Enhanced health check route
-app.get(`${apiPrefix}/health`, (req, res) => {
-  res.json({ 
-    success: true, 
-    message: 'ERP System API is running', 
-    timestamp: new Date().toISOString(),
-    version: appConfig.api.version,
-    environment: appConfig.server.environment,
-    port: appConfig.server.port,
-    endpoints: {
-      api: apiPrefix,
-      uploads: '/uploads',
-      health: `${apiPrefix}/health`
-    }
-  });
-});
 
-// Test static file route
-app.get(`${apiPrefix}/test-upload`, (req, res) => {
+
+
+// API Routes
+
+app.use('/api/auth', authRoutes);
+// app.use('/api/users', userRoutes);
+app.use('/api/companies', companyRoutes);
+app.use('/api/employees', employeeRoutes);
+app.use('/api/employees/passports', employeePassportRoutes);
+app.use('/api/employees/work-passes', employeeWorkPassRoutes);
+app.use('/api/employees/qualifications', employeeQualificationRoutes);
+app.use('/api/employees/certifications', employeeCertificationRoutes);
+app.use('/api/employees/documents', employeeDocumentRoutes);
+
+app.use('/api/fleet-vehicles', fleetVehicleRoutes);
+app.use('/api/fleet-tasks', fleetTaskRoutes);
+app.use('/api/fleet-task-passengers', fleetTaskPassengerRoutes);
+// app.use('/api/fleet-alerts', fleetAlertRoutes);
+app.use('/api/drivers', driverRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/tools', toolRoutes);
+app.use('/api/materials', materialRoutes);
+app.use('/api/company-users', companyUserRoute);
+
+app.use("/api/master", masterRoutes);
+app.use("/api/clients", clientRoutes);
+
+
+app.use('/api/workers', workerRoute);
+app.use('/api/workers-assignments', workerTaskAssignmentRoutes);
+app.use("/api/admin", adminManpowerRoutes);
+app.use("/api/admin", adminProgressRoutes);
+app.use('/api', progressReportRoutes);
+app.use('/api',dashboardRoutes);
+app.use('/api',bossRoutes);
+app.use('/api',bossReportsRoutes);
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/boss', bossProgressReportRoutes);
+app.use('/api/admin', adminRoutes);
+app.use("/api/worker-view", workerViewRoutes);
+app.use("/api", projectManagerDashboardRoutes);
+app.use("/api/transport", transportAssignmentRoutes);
+app.use("/api/transport", driverTaskRoutes);
+app.use("/api/admin", adminAttendanceRoutes);
+app.use("/api/admin/roles", roleRoutes);
+app.use("/api/user-management", userManagementRoutes);
+app.use("/api/admin/permissions", permissionRoutes);
+app.use("/api/admin/role-permissions", rolePermissionRoutes);
+app.use("/api/manager/tasks", managerTaskRoutes);
+app.use("/api/manager/daily-progress", managerDailyProgressRoutes);
+app.use("/api/payroll", payrollRoutes);
+app.use("/api", quotationTermRoutes);
+app.use("/api/quotations", quotationRoutes);
+app.use("/api/cost-breakdown", costBreakdownRoutes);
+
+// Root route
+app.get('/', (req, res) => {
   res.json({
-    success: true,
-    message: 'Static file serving test',
-    uploadsPath: path.join(__dirname, 'uploads'),
-    staticRoute: '/uploads',
-    maxFileSize: appConfig.upload.maxFileSize,
-    allowedTypes: appConfig.upload.allowedTypes
+    message: 'ERP API is running!',
+    endpoints: {
+      users: '/api/users',
+      companies: '/api/companies',
+      employees: '/api/employees',
+      fleetVehicles: '/api/fleet-vehicles',
+      fleetTasks: '/api/fleet-tasks',
+      fleetTaskPassengers: '/api/fleet-task-passengers',
+      fleetAlerts: '/api/fleet-alerts',
+      drivers: '/api/drivers',
+      projects: '/api/projects',
+      tasks: '/api/tasks',
+    },
   });
 });
 
-// MongoDB connection with centralized config
-mongoose.connect(appConfig.database.uri, { 
-  dbName: appConfig.database.name,
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-  .then(async () => {
-    appConfig.log(`✅ Connected to MongoDB database: ${appConfig.database.name}`);
-    appConfig.log(`🌐 Database URI: ${appConfig.database.uri.replace(/\/\/.*@/, '//***:***@')}`);
-    
-    // Initialize Firebase service for push notifications
-    try {
-      await firebaseService.initialize();
-      appConfig.log('🔥 Firebase service initialized for push notifications');
-    } catch (error) {
-      appConfig.error('⚠️ Firebase service initialization failed:', error.message);
-      appConfig.log('📱 Push notifications will be unavailable');
-    }
-
-    // Initialize Notification Escalation Service
-    try {
-      notificationEscalationService.start();
-      appConfig.log('⏰ Notification escalation service started');
-    } catch (error) {
-      appConfig.error('⚠️ Notification escalation service failed to start:', error.message);
-      appConfig.log('📢 Critical notification escalation will be unavailable');
-    }
-
-    // Initialize Performance Monitoring Service
-    try {
-      // Performance monitoring starts automatically in constructor
-      appConfig.log('📊 Performance monitoring service started');
-      appConfig.log('🔍 Monitoring: delivery times, system load, uptime, and performance metrics');
-    } catch (error) {
-      appConfig.error('⚠️ Performance monitoring service failed to start:', error.message);
-      appConfig.log('📈 Performance metrics will be unavailable');
-    }
-
-    // Initialize Attendance Scheduler
-    try {
-      attendanceScheduler.start(15); // Check every 15 minutes
-      appConfig.log('📅 Attendance scheduler started - checking every 15 minutes');
-    } catch (error) {
-      appConfig.error('⚠️ Attendance scheduler failed to start:', error.message);
-      appConfig.log('⏰ Attendance alerts will need to be triggered manually');
-    }
-  })
-  .catch(err => {
-    appConfig.error('❌ MongoDB connection error:', err);
-    if (appConfig.server.isProduction) {
-      process.exit(1);
-    }
-  });
-
-// Start server
-app.listen(appConfig.server.port, () => {
-  console.log('🚀 ERP System Backend Started');
-  console.log('================================');
-  appConfig.log(`🌍 Environment: ${appConfig.server.environment}`);
-  appConfig.log(`🚀 Server: ${appConfig.getFullUrl()}`);
-  appConfig.log(`📁 Static files: ${appConfig.getFullUrl('/uploads/')}`);
-  appConfig.log(`🔗 Health check: ${appConfig.getFullUrl(`${apiPrefix}/health`)}`);
-  appConfig.log(`🖼️  Upload endpoints: ${Object.keys(appConfig.upload.paths).join(', ')}`);
-  appConfig.log(`🔒 CORS origins: ${appConfig.cors.origin.join(', ')}`);
-  console.log('================================');
-});
-
-// Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully...');
-  
-  // Stop performance monitoring
-  try {
-    performanceMonitoringService.stopMonitoring();
-    appConfig.log('📊 Performance monitoring service stopped');
-  } catch (error) {
-    appConfig.error('⚠️ Error stopping performance monitoring:', error.message);
-  }
-  
-  // Stop notification escalation service
-  try {
-    notificationEscalationService.stop();
-    appConfig.log('⏰ Notification escalation service stopped');
-  } catch (error) {
-    appConfig.error('⚠️ Error stopping escalation service:', error.message);
-  }
-  
-  // Stop attendance scheduler
-  try {
-    attendanceScheduler.stop();
-    appConfig.log('📅 Attendance scheduler stopped');
-  } catch (error) {
-    appConfig.error('⚠️ Error stopping attendance scheduler:', error.message);
-  }
-  
-  // Close database connection
-  mongoose.connection.close(() => {
-    appConfig.log('🔌 MongoDB connection closed');
-    process.exit(0);
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    database: 'Connected',
   });
 });
 
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down gracefully...');
-  process.emit('SIGTERM');
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    message: 'Something went wrong!',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+  });
 });
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ message: 'Route not found' });
+});
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📊 API base URL: http://localhost:${PORT}/api`);
+  console.log(`📂 Uploaded files available at: http://localhost:${PORT}/uploads`);
+});
+
+export default app;

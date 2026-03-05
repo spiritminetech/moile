@@ -1,38 +1,27 @@
 import express from 'express';
 import {
-  createFleetTask,
-  getFleetTasks,
+  getAllFleetTasks,
   getFleetTaskById,
-  getFleetTasksByCompany,
-  getFleetTasksByStatus,
-  getFleetTasksByVehicle,
+  createFleetTask,
   updateFleetTask,
-  deleteFleetTask,
-  confirmPickup,
-  confirmDrop,
-  uploadTaskPhoto,
-  deleteTaskPhoto,
-  getTaskPhotos,
-  uploadMiddleware
+  deleteFleetTask
 } from './fleetTaskController.js';
 
 const router = express.Router();
 
-// Existing routes
-router.get('/', getFleetTasks);
-router.get('/:id', getFleetTaskById);
-router.post('/', createFleetTask);
-router.put('/:id', updateFleetTask);
-router.delete('/:id', deleteFleetTask);
-router.get('/company/:companyId', getFleetTasksByCompany);
-router.get('/status/:status', getFleetTasksByStatus);
-router.get('/vehicle/:vehicleId', getFleetTasksByVehicle);
+// GET /api/fleet-tasks - Get all fleet tasks
+router.get('/', getAllFleetTasks);
 
-// Photo and confirmation routes
-router.post('/:id/pickup', confirmPickup);
-router.post('/:id/drop', confirmDrop);
-router.post('/:id/photos', uploadMiddleware, uploadTaskPhoto);
-router.delete('/photos/:photoId', deleteTaskPhoto);
-router.get('/:id/photos', getTaskPhotos);
+// GET /api/fleet-tasks/:id - Get fleet task by ID
+router.get('/:id', getFleetTaskById);
+
+// POST /api/fleet-tasks - Create new fleet task
+router.post('/', createFleetTask);
+
+// PUT /api/fleet-tasks/:id - Update fleet task
+router.put('/:id', updateFleetTask);
+
+// DELETE /api/fleet-tasks/:id - Delete fleet task
+router.delete('/:id', deleteFleetTask);
 
 export default router;
