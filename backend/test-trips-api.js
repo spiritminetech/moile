@@ -4,13 +4,13 @@ const testTripsAPI = async () => {
     console.log('🧪 Testing Worker Trips API...');
     
     // First, let's try to test if the server is responding
-    const healthResponse = await fetch('http://localhost:5002/api/health');
+    const healthResponse = await fetch('http://localhost:5001/api/health');
     const healthData = await healthResponse.json();
     console.log('✅ Server health check:', healthData);
     
     // Test the trips endpoint (this will fail without auth, but we can see the error)
     try {
-      const tripsResponse = await fetch('http://localhost:5002/api/worker/today-trip');
+      const tripsResponse = await fetch('http://localhost:5001/api/worker/today-trip');
       const tripsData = await tripsResponse.json();
       
       if (tripsResponse.ok) {

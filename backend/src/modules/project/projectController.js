@@ -1,6 +1,5 @@
 import Project from './models/Project.js';
 import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
-// import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
 // ✅ Get all projects (with pagination + filters)
 export const getAllProjects = async (req, res) => {
   try {
@@ -157,20 +156,15 @@ export const updateProject = async (req, res) => {
     delete updateData.id;
     delete updateData._id;
 
-    // Get the current project data before update to detect changes
-    const currentProject = await Project.findOne({ id: projectId });
-    if (!currentProject) {
-      return res.status(404).json({ success: false, message: 'Project not found' });
-    }
-
     const project = await Project.findOneAndUpdate(
       { id: projectId },
       { ...updateData, updatedAt: new Date() },
       { new: true, runValidators: true }
     );
 
-    // Check for site changes that require notifications
-    await handleSiteChangeNotifications(currentProject, project, updateData);
+    if (!project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
 
     res.json({
       success: true,
@@ -194,138 +188,6 @@ export const updateProject = async (req, res) => {
     });
   }
 };
-
-/**
- * Handle site change notifications when project is updated
- * Implements Requirements 2.1, 2.2, 2.3, 2.4
- */
-async function handleSiteChangeNotifications(currentProject, updatedProject, updateData) {
-  try {
-    // Get all workers assigned to this project
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata"
-    });
-    
-    const assignments = await WorkerTaskAssignment.find({
-      projectId: updatedProject.id,
-      date: today
-    });
-    
-    const affectedWorkerIds = assignments.map(a => a.employeeId);
-
-    // Check for location changes (Requirement 2.1)
-    const locationChanged = hasLocationChanged(currentProject, updatedProject);
-    if (locationChanged && affectedWorkerIds.length > 0) {
-      const oldLocation = {
-        latitude: currentProject.latitude,
-        longitude: currentProject.longitude,
-        address: currentProject.address
-      };
-      const newLocation = {
-        latitude: updatedProject.latitude,
-        longitude: updatedProject.longitude,
-        address: updatedProject.address
-      };
-
-      // Send location change notifications to all affected workers
-      for (const workerId of affectedWorkerIds) {
-        try {
-          await SiteChangeNotificationService.notifyLocationChange(
-            workerId,
-            oldLocation,
-            newLocation,
-            updatedProject.id
-          );
-        } catch (error) {
-          console.error(`Failed to send location change notification to worker ${workerId}:`, error);
-        }
-      }
-    }
-
-    // Check for supervisor reassignment (Requirement 2.2)
-    if (currentProject.supervisorId !== updatedProject.supervisorId && affectedWorkerIds.length > 0) {
-      // Send supervisor reassignment notifications to all affected workers
-      for (const workerId of affectedWorkerIds) {
-        try {
-          await SiteChangeNotificationService.notifySupervisorReassignment(
-            workerId,
-            currentProject.supervisorId,
-            updatedProject.supervisorId,
-            updatedProject.id
-          );
-        } catch (error) {
-          console.error(`Failed to send supervisor reassignment notification to worker ${workerId}:`, error);
-        }
-      }
-    }
-
-    // Check for geofence updates (Requirement 2.3)
-    const geofenceChanged = hasGeofenceChanged(currentProject, updatedProject);
-    if (geofenceChanged && affectedWorkerIds.length > 0) {
-      const geofenceChanges = {
-        oldGeofence: currentProject.geofence,
-        newGeofence: updatedProject.geofence,
-        oldRadius: currentProject.geofenceRadius,
-        newRadius: updatedProject.geofenceRadius
-      };
-
-      try {
-        await SiteChangeNotificationService.notifyGeofenceUpdate(
-          updatedProject.id,
-          affectedWorkerIds,
-          geofenceChanges
-        );
-      } catch (error) {
-        console.error('Failed to send geofence update notifications:', error);
-      }
-    }
-
-  } catch (error) {
-    console.error('Error handling site change notifications:', error);
-    // Don't throw error to prevent project update from failing
-  }
-}
-
-/**
- * Check if project location has changed
- */
-function hasLocationChanged(currentProject, updatedProject) {
-  return (
-    currentProject.latitude !== updatedProject.latitude ||
-    currentProject.longitude !== updatedProject.longitude ||
-    currentProject.address !== updatedProject.address
-  );
-}
-
-/**
- * Check if project geofence has changed
- */
-function hasGeofenceChanged(currentProject, updatedProject) {
-  // Check basic geofence radius
-  if (currentProject.geofenceRadius !== updatedProject.geofenceRadius) {
-    return true;
-  }
-
-  // Check enhanced geofence structure
-  const oldGeofence = currentProject.geofence;
-  const newGeofence = updatedProject.geofence;
-
-  if (!oldGeofence && !newGeofence) {
-    return false;
-  }
-
-  if (!oldGeofence || !newGeofence) {
-    return true;
-  }
-
-  return (
-    oldGeofence.center?.latitude !== newGeofence.center?.latitude ||
-    oldGeofence.center?.longitude !== newGeofence.center?.longitude ||
-    oldGeofence.radius !== newGeofence.radius ||
-    oldGeofence.strictMode !== newGeofence.strictMode ||
-    oldGeofence.allowedVariance !== newGeofence.allowedVariance
-  );
-}
 
 // ✅ Delete project
 export const deleteProject = async (req, res) => {

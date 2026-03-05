@@ -3,7 +3,6 @@ import LeaveRequestDocument from './models/LeaveRequestDocument.js';
 import LeaveApproval from './models/LeaveApproval.js';
 import Notification from './models/Notification.js';
 import Employee from '../employee/Employee.js';
-import ApprovalStatusNotificationService from '../notification/services/ApprovalStatusNotificationService.js';
 
 
 /* ===============================
@@ -124,12 +123,6 @@ export const approveLeaveRequest = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
 
-        // Get the leave request to find the employee
-        const leaveRequest = await LeaveRequest.findOne({ id });
-        if (!leaveRequest) {
-            return res.status(404).json({ message: 'Leave request not found' });
-        }
-
         await LeaveRequest.findOneAndUpdate(
             { id },
             { status: 'APPROVED', currentApproverId: userId }
@@ -148,18 +141,6 @@ export const approveLeaveRequest = async (req, res) => {
             message: 'Your leave request has been approved'
         });
 
-        // Send approval notification to worker
-        try {
-            await ApprovalStatusNotificationService.notifyLeaveRequestStatus(
-                parseInt(id),
-                'APPROVED',
-                userId
-            );
-        } catch (notificationError) {
-            console.error('❌ Error sending leave approval notification:', notificationError);
-            // Don't fail the approval if notification fails
-        }
-
         res.json({ message: 'Leave approved successfully' });
 
     } catch (err) {
@@ -176,12 +157,6 @@ export const rejectLeaveRequest = async (req, res) => {
         const { remarks } = req.body;
         const userId = req.user.id;
 
-        // Get the leave request to find the employee
-        const leaveRequest = await LeaveRequest.findOne({ id });
-        if (!leaveRequest) {
-            return res.status(404).json({ message: 'Leave request not found' });
-        }
-
         await LeaveRequest.findOneAndUpdate(
             { id },
             { status: 'REJECTED', currentApproverId: userId }
@@ -191,19 +166,6 @@ export const rejectLeaveRequest = async (req, res) => {
             { leaveRequestId: id },
             { action: 'REJECTED', remarks, approverId: userId, actionAt: new Date() }
         );
-
-        // Send rejection notification to worker
-        try {
-            await ApprovalStatusNotificationService.notifyLeaveRequestStatus(
-                parseInt(id),
-                'REJECTED',
-                userId,
-                remarks
-            );
-        } catch (notificationError) {
-            console.error('❌ Error sending leave rejection notification:', notificationError);
-            // Don't fail the rejection if notification fails
-        }
 
         res.json({ message: 'Leave rejected' });
 

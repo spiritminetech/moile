@@ -4,7 +4,7 @@ async function testApiLogin() {
   try {
     console.log('Testing API login endpoint...');
     
-    const response = await fetch('http://localhost:5002/api/auth/login', {
+    const response = await fetch('http://localhost:5001/api/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -42,7 +42,7 @@ async function testApiLogin() {
 async function testDashboardApi(token, userId) {
   try {
     // Test today's tasks endpoint
-    const tasksResponse = await fetch('http://localhost:5002/api/worker/tasks/today', {
+    const tasksResponse = await fetch('http://localhost:5001/api/worker/tasks/today', {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
@@ -59,7 +59,7 @@ async function testDashboardApi(token, userId) {
     }
     
     // Test attendance endpoint
-    const attendanceResponse = await fetch('http://localhost:5002/api/attendance/today', {
+    const attendanceResponse = await fetch('http://localhost:5001/api/attendance/today', {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'

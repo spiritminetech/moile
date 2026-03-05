@@ -1,7 +1,7 @@
 // Test script to verify all API integrations are working
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:5002/api';
+const API_BASE = 'http://localhost:5001/api';
 
 // Test credentials
 const testCredentials = {

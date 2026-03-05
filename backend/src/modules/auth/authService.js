@@ -8,7 +8,6 @@ import Role from '../role/Role.js';
 import RolePermission from '../rolePermission/RolePermission.js';
 import Permission from '../permission/Permission.js';
 import RefreshToken from './RefreshToken.js';
-import Employee from '../employee/Employee.js';
 
 /**
  * LOGIN
@@ -119,10 +118,7 @@ const issueToken = async (user, mapping, autoSelected, deviceInfo = {}) => {
   const token = generateToken(tokenPayload, '8h');
   const refreshToken = generateRefreshToken();
 
-  // 4️⃣ Get employee data (including currentProject)
-  const employee = await Employee.findOne({ userId: user.id });
-
-  // 5️⃣ Store refresh token
+  // 4️⃣ Store refresh token
   // Get next ID for RefreshToken
   const lastRefreshToken = await RefreshToken.findOne({}, {}, { sort: { id: -1 } });
   const nextId = lastRefreshToken ? lastRefreshToken.id + 1 : 1;
@@ -152,18 +148,13 @@ const issueToken = async (user, mapping, autoSelected, deviceInfo = {}) => {
     user: {
       id: user.id,
       email: user.email,
-      name: user.name,
-      currentProject: employee?.currentProject || null
+      name: user.name
     },
     company: {
       id: company.id,
       name: company.name,
       role: role.name
     },
-    employee: employee ? {
-      id: employee.id,
-      currentProject: employee.currentProject
-    } : null,
     permissions: permissionCodes
   };
 };
@@ -183,9 +174,6 @@ const buildResponse = async (user, company, role, permissions, autoSelected, dev
 
   const token = generateToken(tokenPayload, '8h');
   const refreshToken = generateRefreshToken();
-
-  // Get employee data (including currentProject)
-  const employee = await Employee.findOne({ userId: user.id });
 
   // Store refresh token
   // Get next ID for RefreshToken
@@ -216,18 +204,13 @@ const buildResponse = async (user, company, role, permissions, autoSelected, dev
     user: {
       id: user.id,
       email: user.email,
-      name: user.name,
-      currentProject: employee?.currentProject || null
+      name: user.name
     },
     company: {
       id: company.id,
       name: company.name,
       role: role.name
     },
-    employee: employee ? {
-      id: employee.id,
-      currentProject: employee.currentProject
-    } : null,
     permissions
   };
 };

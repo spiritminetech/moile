@@ -1,35 +1,11 @@
 // routes/workerRoutes.js
 import express from "express";
-import { 
-  getWorkerTodayTrip, 
-  getWorkerTodayTask, 
-  getWorkerTasksToday, 
-  getWorkerTaskDetails,
-  validateWorkerGeofence, 
-  startWorkerTask, 
-  startWorkerTaskById,
-  submitWorkerTaskProgress, 
-  updateWorkerTaskProgress,
-  completeWorkerTask,
-  getWorkerTaskHistory,
-  uploadWorkerTaskPhotos, 
-  reportWorkerTaskIssue,
-  getWorkerProfile,
-  changeWorkerPassword,
-  uploadWorkerPhoto,
-  getWorkerCertificationAlerts,
-  upload as workerUpload
-} from "./workerController.js";
-import { verifyToken } from "../../middleware/authMiddleware.js";
+import { getWorkerTodayTrip, getWorkerTodayTask, getWorkerTasksToday, validateWorkerGeofence, startWorkerTask, submitWorkerTaskProgress, uploadWorkerTaskPhotos, reportWorkerTaskIssue } from "./workerController.js";
+import { verifyToken} from "../../middleware/authMiddleware.js";
 import upload from "../../middleware/upload.js";
+import authMiddleware from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
-
-// Worker Profile Routes
-router.get("/profile", verifyToken, getWorkerProfile);
-router.put("/profile/password", verifyToken, changeWorkerPassword);
-router.post("/profile/photo", verifyToken, workerUpload.single('photo'), uploadWorkerPhoto);
-router.get("/profile/certification-alerts", verifyToken, getWorkerCertificationAlerts);
 
 // Worker Portal - Today's Trip
 router.get("/today-trip",
@@ -41,18 +17,6 @@ router.get("/today-trip",
 router.get("/tasks/today",
   verifyToken,
   getWorkerTasksToday
-);
-
-// Get individual task details
-router.get("/tasks/:taskId",
-  verifyToken,
-  getWorkerTaskDetails
-);
-
-// Get task history with filtering and pagination
-router.get("/tasks/history",
-  verifyToken,
-  getWorkerTaskHistory
 );
 
 // Legacy endpoint - keeping for backward compatibility
@@ -69,28 +33,7 @@ router.get(
   validateWorkerGeofence
 );
 
-// Start a task with geofence validation (new RESTful endpoint)
-router.post(
-  "/tasks/:taskId/start",
-  verifyToken,
-  startWorkerTaskById
-);
-
-// Update task progress (new RESTful endpoint)
-router.put(
-  "/tasks/:taskId/progress",
-  verifyToken,
-  updateWorkerTaskProgress
-);
-
-// Complete a task (new endpoint)
-router.post(
-  "/tasks/:taskId/complete",
-  verifyToken,
-  completeWorkerTask
-);
-
-// Legacy endpoints - keeping for backward compatibility
+// Start a task with geofence validation
 router.post(
   "/task/start",
   verifyToken,
@@ -100,6 +43,7 @@ router.post(
 router.post(
   "/task-progress",
   verifyToken,
+  authMiddleware,
   submitWorkerTaskProgress
 );
 
@@ -115,5 +59,9 @@ router.post(
   upload.array("photos", 5),
   uploadWorkerTaskPhotos
 );
+//router.put('/passengers/:passengerId/confirm', authMiddleware, confirmPassengerJourney);
+
+// In your routes file
+
 
 export default router;

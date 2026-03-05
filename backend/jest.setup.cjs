@@ -1,5 +1,4 @@
 // Jest setup file for global test configuration
-const { jest } = require('@jest/globals');
 
 // Set test timeout
 jest.setTimeout(30000);

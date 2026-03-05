@@ -1,3 +1,9 @@
+import dns from 'dns';
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+console.log('🔧 DNS servers configured for MongoDB Atlas connectivity');
+
+
+
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
@@ -16,31 +22,13 @@ import fleetTaskPassengerRoutes from './src/modules/fleetTask/submodules/fleetTa
 import fleetVehicleRoutes from './src/modules/fleetTask/submodules/fleetvehicle/fleetVehicleRoutes.js';
 import projectRoutes from './src/modules/project/projectRoutes.js';
 import projectToolsRoutes from './src/modules/project/projectToolsRoutes.js';
-import workerRoutes from './src/modules/worker/workerRoutes.js';
-import workerRequestRoutes from './src/modules/worker/workerRequestRoutes.js';
-import workerAttendanceRoutes from './src/modules/worker/workerAttendanceRoutes.js';
+import workerRoutes from './src/modules/worker/workerRoutes.js'; 
 import attendanceRoutes from'./src/modules/attendance/attendanceRoutes.js';
 import supervisorRoutes from './src/modules/supervisor/supervisorRoutes.js';
 import supervisorDailyProgressRoutes  from "./src/modules/supervisorDailyProgress/supervisorDailyProgressRoutes.js";
 import leaveRequestRoutes from './src/modules/leaveRequest/leaveRequestRoutes.js';
-import paymentRequestRoutes from './src/modules/leaveRequest/paymentRequestRoutes.js';
-import medicalClaimRoutes from './src/modules/leaveRequest/medicalClaimRoutes.js';
-import materialRequestRoutes from './src/modules/project/materialRequestRoutes.js';
-import notificationRoutes from './src/modules/notification/notificationRoutes.js';
-import supervisorNotificationRoutes from './src/modules/notification/supervisorNotificationRoutes.js';
 import migrationRoutes from './src/routes/migration.js';
-
-// Import Firebase service for initialization
-import firebaseService from './src/modules/notification/services/FirebaseService.js';
-
-// Import Notification Escalation Service
-import notificationEscalationService from './src/modules/notification/services/NotificationEscalationService.js';
-
-// Import Performance Monitoring Service
-import performanceMonitoringService from './src/modules/notification/services/PerformanceMonitoringService.js';
-
-// Import Attendance Scheduler
-import attendanceScheduler from './src/modules/attendance/attendanceScheduler.js';
+import escalationManager from './src/modules/supervisor/escalationManager.js';
 
 const app = express();
 
@@ -75,17 +63,10 @@ app.use(`${apiPrefix}/fleet-vehicles`, fleetVehicleRoutes);
 app.use(`${apiPrefix}/projects`, projectRoutes);
 app.use(`${apiPrefix}/project`, projectToolsRoutes);
 app.use(`${apiPrefix}/worker`, workerRoutes);
-app.use(`${apiPrefix}/worker/requests`, workerRequestRoutes);
-app.use(`${apiPrefix}/worker/attendance`, workerAttendanceRoutes);
 app.use(`${apiPrefix}/attendance`, attendanceRoutes);
 app.use(`${apiPrefix}/supervisor`, supervisorRoutes);
 app.use(`${apiPrefix}/supervisor`, supervisorDailyProgressRoutes);
 app.use(`${apiPrefix}/leave-requests`, leaveRequestRoutes);
-app.use(`${apiPrefix}/payment-requests`, paymentRequestRoutes);
-app.use(`${apiPrefix}/medical-claims`, medicalClaimRoutes);
-app.use(`${apiPrefix}/material-requests`, materialRequestRoutes);
-app.use(`${apiPrefix}/notifications`, notificationRoutes);
-app.use(`${apiPrefix}/supervisor/notifications`, supervisorNotificationRoutes);
 app.use(`${apiPrefix}/migration`, migrationRoutes);
 
 // Enhanced health check route
@@ -123,46 +104,9 @@ mongoose.connect(appConfig.database.uri, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 })
-  .then(async () => {
+  .then(() => {
     appConfig.log(`✅ Connected to MongoDB database: ${appConfig.database.name}`);
     appConfig.log(`🌐 Database URI: ${appConfig.database.uri.replace(/\/\/.*@/, '//***:***@')}`);
-    
-    // Initialize Firebase service for push notifications
-    try {
-      await firebaseService.initialize();
-      appConfig.log('🔥 Firebase service initialized for push notifications');
-    } catch (error) {
-      appConfig.error('⚠️ Firebase service initialization failed:', error.message);
-      appConfig.log('📱 Push notifications will be unavailable');
-    }
-
-    // Initialize Notification Escalation Service
-    try {
-      notificationEscalationService.start();
-      appConfig.log('⏰ Notification escalation service started');
-    } catch (error) {
-      appConfig.error('⚠️ Notification escalation service failed to start:', error.message);
-      appConfig.log('📢 Critical notification escalation will be unavailable');
-    }
-
-    // Initialize Performance Monitoring Service
-    try {
-      // Performance monitoring starts automatically in constructor
-      appConfig.log('📊 Performance monitoring service started');
-      appConfig.log('🔍 Monitoring: delivery times, system load, uptime, and performance metrics');
-    } catch (error) {
-      appConfig.error('⚠️ Performance monitoring service failed to start:', error.message);
-      appConfig.log('📈 Performance metrics will be unavailable');
-    }
-
-    // Initialize Attendance Scheduler
-    try {
-      attendanceScheduler.start(15); // Check every 15 minutes
-      appConfig.log('📅 Attendance scheduler started - checking every 15 minutes');
-    } catch (error) {
-      appConfig.error('⚠️ Attendance scheduler failed to start:', error.message);
-      appConfig.log('⏰ Attendance alerts will need to be triggered manually');
-    }
   })
   .catch(err => {
     appConfig.error('❌ MongoDB connection error:', err);
@@ -182,44 +126,25 @@ app.listen(appConfig.server.port, () => {
   appConfig.log(`🖼️  Upload endpoints: ${Object.keys(appConfig.upload.paths).join(', ')}`);
   appConfig.log(`🔒 CORS origins: ${appConfig.cors.origin.join(', ')}`);
   console.log('================================');
+  
+  // Start escalation manager for alert processing
+  try {
+    escalationManager.start();
+    appConfig.log('🚨 Alert escalation manager started');
+  } catch (error) {
+    appConfig.error('❌ Failed to start escalation manager:', error);
+  }
 });
 
-// Graceful shutdown handling
+// Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully...');
-  
-  // Stop performance monitoring
-  try {
-    performanceMonitoringService.stopMonitoring();
-    appConfig.log('📊 Performance monitoring service stopped');
-  } catch (error) {
-    appConfig.error('⚠️ Error stopping performance monitoring:', error.message);
-  }
-  
-  // Stop notification escalation service
-  try {
-    notificationEscalationService.stop();
-    appConfig.log('⏰ Notification escalation service stopped');
-  } catch (error) {
-    appConfig.error('⚠️ Error stopping escalation service:', error.message);
-  }
-  
-  // Stop attendance scheduler
-  try {
-    attendanceScheduler.stop();
-    appConfig.log('📅 Attendance scheduler stopped');
-  } catch (error) {
-    appConfig.error('⚠️ Error stopping attendance scheduler:', error.message);
-  }
-  
-  // Close database connection
-  mongoose.connection.close(() => {
-    appConfig.log('🔌 MongoDB connection closed');
-    process.exit(0);
-  });
+  console.log('SIGTERM received, shutting down gracefully...');
+  escalationManager.stop();
+  process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down gracefully...');
-  process.emit('SIGTERM');
+  console.log('SIGINT received, shutting down gracefully...');
+  escalationManager.stop();
+  process.exit(0);
 });

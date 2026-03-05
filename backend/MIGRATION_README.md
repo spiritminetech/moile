@@ -122,7 +122,7 @@ cd backend
 node index.js
 
 # In another terminal, call migration endpoint
-curl -X POST http://localhost:5002/api/migration/mobile-fields
+curl -X POST http://localhost:5001/api/migration/mobile-fields
 ```
 
 ### Option 3: Original Migration Script

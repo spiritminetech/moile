@@ -36,14 +36,6 @@ const employeeSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  currentProject: {  // Add currentProject field
-    type: {
-      id: Number,
-      name: String,
-      code: String
-    },
-    default: null
-  },
   status: {
     type: String,
     enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED'],

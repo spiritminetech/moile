@@ -4,23 +4,9 @@ import Employee from '../employee/Employee.js';
 import LocationLog from '../attendance/LocationLog.js';
 import WorkerTaskAssignment from '../worker/models/WorkerTaskAssignment.js';
 import CompanyUser from "../companyUser/CompanyUser.js";
-import Task from "../task/Task.js"
-import TaskNotificationService from '../notification/services/TaskNotificationService.js';
-// import SiteChangeNotificationService from '../notification/services/SiteChangeNotificationService.js';
-
-// Helper function for distance calculation
-function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000; // Radius of the earth in meters
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+import Task from "../task/Task.js";
+import LeaveRequest from '../leaveRequest/models/LeaveRequest.js';
+import alertService from './alertService.js';
 
 export const getAssignedWorkers = async (req, res) => {
   try {
@@ -94,398 +80,6 @@ export const getAssignedWorkers = async (req, res) => {
   }
 };
 
-
-/**
- * Get real-time geofence violations for supervisor monitoring
- * @route GET /api/supervisor/geofence-violations
- */
-export const getGeofenceViolations = async (req, res) => {
-  try {
-    const { projectId, timeRange = '24', status = 'all' } = req.query;
-    
-    if (!projectId) {
-      return res.status(400).json({ message: 'projectId is required' });
-    }
-
-    const project = await Project.findOne({ id: Number(projectId) });
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    // Calculate time range for filtering
-    const now = new Date();
-    const hoursBack = parseInt(timeRange);
-    const startTime = new Date(now.getTime() - (hoursBack * 60 * 60 * 1000));
-
-    // Build query for location logs
-    const query = {
-      projectId: Number(projectId),
-      createdAt: { $gte: startTime },
-      insideGeofence: false // Only violations
-    };
-
-    // Get violation location logs
-    const violationLogs = await LocationLog.find(query)
-      .sort({ createdAt: -1 })
-      .limit(100); // Limit to prevent performance issues
-
-    if (violationLogs.length === 0) {
-      return res.status(200).json({
-        violations: [],
-        summary: {
-          totalViolations: 0,
-          activeViolations: 0,
-          resolvedViolations: 0,
-          uniqueWorkers: 0,
-          timeRange: `${hoursBack} hours`
-        },
-        projectName: project.projectName || project.name
-      });
-    }
-
-    // Get employee information for all violations
-    const employeeIds = [...new Set(violationLogs.map(log => log.employeeId))];
-    const employees = await Employee.find({ id: { $in: employeeIds } }).lean();
-    const employeeMap = employees.reduce((map, emp) => {
-      map[emp.id] = emp;
-      return map;
-    }, {});
-
-    // Process violations and group by worker
-    const violationsByWorker = {};
-    const processedViolations = [];
-
-    for (const log of violationLogs) {
-      const employee = employeeMap[log.employeeId];
-      if (!employee) continue;
-
-      // Calculate distance from project center
-      const distance = getDistanceFromLatLonInMeters(
-        log.latitude,
-        log.longitude,
-        project.latitude || project.geofence?.center?.latitude || 0,
-        project.longitude || project.geofence?.center?.longitude || 0
-      );
-
-      // Check if this is still an active violation (no recent inside-geofence log)
-      const recentInsideLog = await LocationLog.findOne({
-        employeeId: log.employeeId,
-        projectId: Number(projectId),
-        insideGeofence: true,
-        createdAt: { $gt: log.createdAt }
-      });
-
-      const isActive = !recentInsideLog;
-      const violationDuration = isActive 
-        ? Math.floor((now - log.createdAt) / (1000 * 60)) // minutes
-        : Math.floor((recentInsideLog.createdAt - log.createdAt) / (1000 * 60));
-
-      const violation = {
-        id: log.id,
-        employeeId: log.employeeId,
-        workerName: employee.fullName,
-        role: employee.role,
-        phone: employee.phone,
-        email: employee.email,
-        violationTime: log.createdAt,
-        resolvedTime: recentInsideLog?.createdAt || null,
-        isActive: isActive,
-        duration: violationDuration,
-        distance: Math.round(distance),
-        location: {
-          latitude: log.latitude,
-          longitude: log.longitude,
-          accuracy: log.accuracy
-        },
-        logType: log.logType,
-        taskAssignmentId: log.taskAssignmentId,
-        severity: distance > 500 ? 'HIGH' : distance > 200 ? 'MEDIUM' : 'LOW'
-      };
-
-      processedViolations.push(violation);
-
-      // Group by worker for summary
-      if (!violationsByWorker[log.employeeId]) {
-        violationsByWorker[log.employeeId] = {
-          workerName: employee.fullName,
-          totalViolations: 0,
-          activeViolations: 0,
-          lastViolation: null,
-          maxDistance: 0
-        };
-      }
-
-      violationsByWorker[log.employeeId].totalViolations++;
-      if (isActive) violationsByWorker[log.employeeId].activeViolations++;
-      if (!violationsByWorker[log.employeeId].lastViolation || log.createdAt > violationsByWorker[log.employeeId].lastViolation) {
-        violationsByWorker[log.employeeId].lastViolation = log.createdAt;
-      }
-      if (distance > violationsByWorker[log.employeeId].maxDistance) {
-        violationsByWorker[log.employeeId].maxDistance = Math.round(distance);
-      }
-    }
-
-    // Filter by status if specified
-    let filteredViolations = processedViolations;
-    if (status === 'active') {
-      filteredViolations = processedViolations.filter(v => v.isActive);
-    } else if (status === 'resolved') {
-      filteredViolations = processedViolations.filter(v => !v.isActive);
-    }
-
-    // Calculate summary statistics
-    const summary = {
-      totalViolations: processedViolations.length,
-      activeViolations: processedViolations.filter(v => v.isActive).length,
-      resolvedViolations: processedViolations.filter(v => !v.isActive).length,
-      uniqueWorkers: Object.keys(violationsByWorker).length,
-      timeRange: `${hoursBack} hours`,
-      lastUpdated: now.toISOString()
-    };
-
-    return res.status(200).json({
-      violations: filteredViolations,
-      violationsByWorker: Object.values(violationsByWorker),
-      summary,
-      projectName: project.projectName || project.name,
-      projectGeofence: {
-        center: {
-          latitude: project.latitude || project.geofence?.center?.latitude || 0,
-          longitude: project.longitude || project.geofence?.center?.longitude || 0
-        },
-        radius: project.geofenceRadius || project.geofence?.radius || 100
-      }
-    });
-
-  } catch (err) {
-    console.error('Error fetching geofence violations:', err);
-    return res.status(500).json({ message: 'Error fetching geofence violations' });
-  }
-};
-
-/**
- * Send attendance alert to selected workers
- * @route POST /api/supervisor/send-attendance-alert
- */
-export const sendAttendanceAlert = async (req, res) => {
-  try {
-    const { workerIds, message, projectId } = req.body;
-    
-    if (!workerIds || !Array.isArray(workerIds) || workerIds.length === 0) {
-      return res.status(400).json({ message: 'workerIds array is required' });
-    }
-
-    if (!projectId) {
-      return res.status(400).json({ message: 'projectId is required' });
-    }
-
-    const project = await Project.findOne({ id: Number(projectId) });
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    // Get supervisor information from token
-    const supervisorId = req.user?.userId || 1;
-
-    const alertMessage = message || 'Please check your attendance status and ensure you are at the work site on time.';
-    
-    // Send notifications to each worker
-    const notificationPromises = workerIds.map(async (workerId) => {
-      try {
-        // Import AttendanceNotificationService dynamically to avoid circular dependency
-        const { default: AttendanceNotificationService } = await import('../notification/services/AttendanceNotificationService.js');
-        
-        // Create a custom attendance alert notification
-        return await AttendanceNotificationService.createNotification({
-          type: 'ATTENDANCE_ALERT',
-          priority: 'HIGH',
-          title: 'Attendance Alert',
-          message: alertMessage,
-          senderId: supervisorId,
-          recipients: [workerId],
-          actionData: {
-            alertType: 'SUPERVISOR_ATTENDANCE_ALERT',
-            timestamp: new Date().toISOString(),
-            projectId: projectId,
-            projectName: project.projectName || project.name,
-            actionUrl: '/attendance'
-          },
-          requiresAcknowledgment: true,
-          language: 'en'
-        });
-      } catch (error) {
-        console.error(`Failed to send alert to worker ${workerId}:`, error);
-        return { success: false, workerId, error: error.message };
-      }
-    });
-
-    const results = await Promise.allSettled(notificationPromises);
-    
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
-
-    return res.status(200).json({
-      message: `Attendance alert sent successfully`,
-      summary: {
-        total: workerIds.length,
-        successful,
-        failed
-      },
-      results: results.map((result, index) => ({
-        workerId: workerIds[index],
-        status: result.status,
-        error: result.status === 'rejected' ? result.reason : null
-      }))
-    });
-
-  } catch (err) {
-    console.error('Error sending attendance alert:', err);
-    return res.status(500).json({ message: 'Error sending attendance alert' });
-  }
-};
-
-/**
- * Get Late and Absent Workers for a project
- * @route GET /api/supervisor/late-absent-workers
- */
-export const getLateAbsentWorkers = async (req, res) => {
-  try {
-    const { projectId, date } = req.query;
-    
-    if (!projectId) {
-      return res.status(400).json({ message: 'projectId is required' });
-    }
-
-    const workDate = date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const currentTime = new Date();
-    const currentHour = currentTime.getHours();
-    const currentMinute = currentTime.getMinutes();
-
-    const project = await Project.findOne({ id: Number(projectId) });
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    // Get assignments for the project & date
-    const assignments = await WorkerTaskAssignment.find({
-      projectId: Number(projectId),
-      date: workDate
-    });
-
-    if (assignments.length === 0) {
-      return res.status(200).json({ 
-        lateWorkers: [], 
-        absentWorkers: [],
-        summary: {
-          totalAssigned: 0,
-          lateCount: 0,
-          absentCount: 0,
-          onTimeCount: 0
-        }
-      });
-    }
-
-    const employeeIds = assignments.map(a => a.employeeId);
-
-    // Fetch employees
-    const employees = await Employee.find({
-      id: { $in: employeeIds }
-    }).lean();
-
-    const lateWorkers = [];
-    const absentWorkers = [];
-    let onTimeCount = 0;
-
-    // Define thresholds
-    const LATE_THRESHOLD_MINUTES = 15; // 15 minutes after 8:00 AM
-    const ABSENT_THRESHOLD_HOUR = 9; // Consider absent after 9:00 AM
-    const WORK_START_HOUR = 8;
-    const WORK_START_MINUTE = 0;
-
-    for (const worker of employees) {
-      const attendance = await Attendance.findOne({
-        employeeId: worker.id,
-        projectId: Number(projectId),
-        date: {
-          $gte: new Date(workDate),
-          $lt: new Date(new Date(workDate).setDate(new Date(workDate).getDate() + 1))
-        }
-      }).lean();
-
-      const assignment = assignments.find(a => a.employeeId === worker.id);
-
-      if (!attendance || !attendance.checkIn) {
-        // No check-in record
-        if (currentHour >= ABSENT_THRESHOLD_HOUR) {
-          absentWorkers.push({
-            employeeId: worker.id,
-            workerName: worker.fullName,
-            role: worker.role,
-            phone: worker.phone,
-            email: worker.email,
-            expectedStartTime: `${WORK_START_HOUR}:${WORK_START_MINUTE.toString().padStart(2, '0')} AM`,
-            status: 'Absent',
-            minutesLate: null,
-            lastSeen: null,
-            taskAssigned: assignment?.taskName || 'No task assigned',
-            supervisorId: assignment?.supervisorId || null
-          });
-        }
-      } else {
-        // Has check-in record
-        const checkInTime = new Date(attendance.checkIn);
-        const expectedStartTime = new Date(workDate);
-        expectedStartTime.setHours(WORK_START_HOUR, WORK_START_MINUTE, 0, 0);
-        
-        const minutesLate = Math.floor((checkInTime - expectedStartTime) / (1000 * 60));
-
-        if (minutesLate > LATE_THRESHOLD_MINUTES) {
-          lateWorkers.push({
-            employeeId: worker.id,
-            workerName: worker.fullName,
-            role: worker.role,
-            phone: worker.phone,
-            email: worker.email,
-            expectedStartTime: `${WORK_START_HOUR}:${WORK_START_MINUTE.toString().padStart(2, '0')} AM`,
-            actualCheckIn: checkInTime.toLocaleTimeString('en-US', { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            }),
-            status: 'Late',
-            minutesLate: minutesLate,
-            taskAssigned: assignment?.taskName || 'No task assigned',
-            supervisorId: assignment?.supervisorId || null,
-            insideGeofence: attendance.insideGeofenceAtCheckin || false
-          });
-        } else {
-          onTimeCount++;
-        }
-      }
-    }
-
-    const summary = {
-      totalAssigned: employees.length,
-      lateCount: lateWorkers.length,
-      absentCount: absentWorkers.length,
-      onTimeCount: onTimeCount,
-      checkTime: currentTime.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      })
-    };
-
-    return res.status(200).json({
-      lateWorkers,
-      absentWorkers,
-      summary,
-      projectName: project.projectName || project.name
-    });
-
-  } catch (err) {
-    console.error('Error fetching late/absent workers:', err);
-    return res.status(500).json({ message: 'Error fetching late/absent workers' });
-  }
-};
 
 /**
  * Export Daily Attendance Report (CSV/PDF)
@@ -784,19 +378,7 @@ export const assignTask = async (req, res) => {
       createdAt: new Date(),
     }));
 
-    const createdAssignments = await WorkerTaskAssignment.insertMany(assignments);
-
-    // Send task assignment notifications
-    try {
-      // Get supervisor ID from request user or use a default
-      const supervisorId = req.user?.userId || req.user?.id || 1; // Fallback to 1 if no user context
-      
-      await TaskNotificationService.notifyTaskAssignment(createdAssignments, supervisorId);
-      console.log(`✅ Task assignment notifications sent for ${createdAssignments.length} assignments`);
-    } catch (notificationError) {
-      console.error("❌ Error sending task assignment notifications:", notificationError);
-      // Don't fail the request if notifications fail
-    }
+    await WorkerTaskAssignment.insertMany(assignments);
 
     res.json({
       success: true,
@@ -806,216 +388,6 @@ export const assignTask = async (req, res) => {
 
   } catch (err) {
     console.error("assignTasks error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/**
- * Update task assignment details (modification/reassignment)
- * Implements Requirement 1.2: Task modification and reassignment notifications
- * Implements Requirement 2.4: Task location change notifications
- */
-export const updateTaskAssignment = async (req, res) => {
-  try {
-    const { assignmentId, changes } = req.body;
-
-    if (!assignmentId || !changes) {
-      return res.status(400).json({ message: "Assignment ID and changes are required" });
-    }
-
-    // Find the assignment
-    const assignment = await WorkerTaskAssignment.findOne({ id: assignmentId });
-    if (!assignment) {
-      return res.status(404).json({ message: "Assignment not found" });
-    }
-
-    // Store original values for notification
-    const originalAssignment = { ...assignment.toObject() };
-
-    // Check for task location changes (Requirement 2.4)
-    const taskLocationChanged = (
-      (changes.workArea && changes.workArea !== assignment.workArea) ||
-      (changes.floor && changes.floor !== assignment.floor) ||
-      (changes.zone && changes.zone !== assignment.zone)
-    );
-
-    // Update assignment fields
-    if (changes.status) assignment.status = changes.status;
-    if (changes.priority) assignment.priority = changes.priority;
-    if (changes.workArea) assignment.workArea = changes.workArea;
-    if (changes.floor) assignment.floor = changes.floor;
-    if (changes.zone) assignment.zone = changes.zone;
-    if (changes.timeEstimate) assignment.timeEstimate = { ...assignment.timeEstimate, ...changes.timeEstimate };
-    if (changes.dailyTarget) assignment.dailyTarget = { ...assignment.dailyTarget, ...changes.dailyTarget };
-    if (changes.supervisorId) assignment.supervisorId = changes.supervisorId;
-
-    await assignment.save();
-
-    // Send task modification notification
-    try {
-      const supervisorId = req.user?.userId || req.user?.id || 1;
-      await TaskNotificationService.notifyTaskModification(assignment, changes, supervisorId);
-      console.log(`✅ Task modification notification sent for assignment ${assignmentId}`);
-    } catch (notificationError) {
-      console.error("❌ Error sending task modification notification:", notificationError);
-      // Don't fail the request if notifications fail
-    }
-
-    // Send task location change notification if location changed (Requirement 2.4)
-    if (taskLocationChanged) {
-      try {
-        const oldTaskLocation = {
-          workArea: originalAssignment.workArea,
-          floor: originalAssignment.floor,
-          zone: originalAssignment.zone
-        };
-        const newTaskLocation = {
-          workArea: assignment.workArea,
-          floor: assignment.floor,
-          zone: assignment.zone
-        };
-
-        await SiteChangeNotificationService.notifyTaskLocationChange(
-          assignmentId,
-          assignment.employeeId,
-          oldTaskLocation,
-          newTaskLocation
-        );
-        console.log(`✅ Task location change notification sent for assignment ${assignmentId}`);
-      } catch (notificationError) {
-        console.error("❌ Error sending task location change notification:", notificationError);
-        // Don't fail the request if notifications fail
-      }
-    }
-
-    res.json({
-      success: true,
-      message: "Task assignment updated successfully",
-      assignment: {
-        id: assignment.id,
-        status: assignment.status,
-        priority: assignment.priority,
-        workArea: assignment.workArea,
-        updatedAt: assignment.updatedAt
-      }
-    });
-
-  } catch (err) {
-    console.error("updateTaskAssignment error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/**
- * Send overtime instructions to selected workers
- * Implements Requirement 1.4: Overtime instruction notifications
- */
-export const sendOvertimeInstructions = async (req, res) => {
-  try {
-    const { workerIds, projectId, overtimeDetails } = req.body;
-
-    if (!workerIds || !Array.isArray(workerIds) || workerIds.length === 0) {
-      return res.status(400).json({ message: "Worker IDs are required" });
-    }
-
-    if (!projectId) {
-      return res.status(400).json({ message: "Project ID is required" });
-    }
-
-    if (!overtimeDetails || !overtimeDetails.reason) {
-      return res.status(400).json({ message: "Overtime details with reason are required" });
-    }
-
-    // Validate workers exist and are assigned to the project
-    const validWorkers = await Employee.find({
-      id: { $in: workerIds },
-      status: 'ACTIVE'
-    });
-
-    if (validWorkers.length !== workerIds.length) {
-      return res.status(400).json({ message: "Some worker IDs are invalid or inactive" });
-    }
-
-    // Send overtime instruction notifications
-    try {
-      const supervisorId = req.user?.userId || req.user?.id || 1;
-      const notificationResult = await TaskNotificationService.notifyOvertimeInstructions(
-        workerIds, 
-        { ...overtimeDetails, projectId }, 
-        supervisorId
-      );
-      
-      console.log(`✅ Overtime instruction notifications sent to ${workerIds.length} workers`);
-
-      res.json({
-        success: true,
-        message: `Overtime instructions sent to ${workerIds.length} workers`,
-        notificationResult: notificationResult
-      });
-
-    } catch (notificationError) {
-      console.error("❌ Error sending overtime instruction notifications:", notificationError);
-      res.status(500).json({ message: "Failed to send overtime instructions" });
-    }
-
-  } catch (err) {
-    console.error("sendOvertimeInstructions error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-};
-
-/**
- * Update daily targets for multiple assignments
- * Implements Requirement 1.3: Daily target update notifications within 2 minutes
- */
-export const updateDailyTargets = async (req, res) => {
-  try {
-    const { assignmentUpdates } = req.body;
-
-    if (!assignmentUpdates || !Array.isArray(assignmentUpdates) || assignmentUpdates.length === 0) {
-      return res.status(400).json({ message: "Assignment updates are required" });
-    }
-
-    const updatedAssignments = [];
-
-    // Update each assignment's daily target
-    for (const update of assignmentUpdates) {
-      const { assignmentId, dailyTarget } = update;
-      
-      if (!assignmentId || !dailyTarget) {
-        continue; // Skip invalid updates
-      }
-
-      const assignment = await WorkerTaskAssignment.findOne({ id: assignmentId });
-      if (assignment) {
-        assignment.dailyTarget = { ...assignment.dailyTarget, ...dailyTarget };
-        await assignment.save();
-        updatedAssignments.push(assignment);
-      }
-    }
-
-    if (updatedAssignments.length === 0) {
-      return res.status(400).json({ message: "No valid assignments found to update" });
-    }
-
-    // Send daily target update notifications
-    try {
-      const supervisorId = req.user?.userId || req.user?.id || 1;
-      await TaskNotificationService.notifyDailyTargetUpdate(updatedAssignments, supervisorId);
-      console.log(`✅ Daily target update notifications sent for ${updatedAssignments.length} assignments`);
-    } catch (notificationError) {
-      console.error("❌ Error sending daily target update notifications:", notificationError);
-      // Don't fail the request if notifications fail
-    }
-
-    res.json({
-      success: true,
-      message: `Daily targets updated for ${updatedAssignments.length} assignments`,
-      updatedCount: updatedAssignments.length
-    });
-
-  } catch (err) {
-    console.error("updateDailyTargets error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -1189,617 +561,938 @@ export const removeQueuedTask = async (req, res) => {
 };
 
 
-/**
- * Get comprehensive attendance monitoring data for supervisors
- * @route GET /api/supervisor/attendance-monitoring
- */
-export const getAttendanceMonitoring = async (req, res) => {
-  try {
-    const { projectId, date, status = 'all', search = '' } = req.query;
-    
-    const workDate = date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const currentTime = new Date();
-
-    // Build query for projects
-    let projectQuery = {};
-    if (projectId && projectId !== 'all') {
-      projectQuery = { id: Number(projectId) };
-    }
-
-    // Get all projects accessible to supervisor
-    const projects = await Project.find(projectQuery);
-    if (projects.length === 0) {
-      return res.status(200).json({ 
-        workers: [],
-        summary: {
-          totalWorkers: 0,
-          checkedIn: 0,
-          checkedOut: 0,
-          absent: 0,
-          late: 0,
-          onTime: 0
-        },
-        projects: []
-      });
-    }
-
-    const projectIds = projects.map(p => p.id);
-    const projectMap = projects.reduce((map, p) => {
-      map[p.id] = p;
-      return map;
-    }, {});
-
-    // Get all assignments for the date and projects
-    const assignments = await WorkerTaskAssignment.find({
-      projectId: { $in: projectIds },
-      date: workDate
-    });
-
-    if (assignments.length === 0) {
-      return res.status(200).json({ 
-        workers: [],
-        summary: {
-          totalWorkers: 0,
-          checkedIn: 0,
-          checkedOut: 0,
-          absent: 0,
-          late: 0,
-          onTime: 0
-        },
-        projects: projects.map(p => ({
-          id: p.id,
-          name: p.projectName || p.name,
-          location: p.location || 'Unknown'
-        }))
-      });
-    }
-
-    const employeeIds = [...new Set(assignments.map(a => a.employeeId))];
-
-    // Fetch employees with search filter
-    let employeeQuery = { id: { $in: employeeIds } };
-    if (search) {
-      employeeQuery.fullName = { $regex: search, $options: 'i' };
-    }
-
-    const employees = await Employee.find(employeeQuery).lean();
-    const employeeMap = employees.reduce((map, emp) => {
-      map[emp.id] = emp;
-      return map;
-    }, {});
-
-    // Get attendance records for all employees and date
-    const attendanceRecords = await Attendance.find({
-      employeeId: { $in: employeeIds },
-      date: {
-        $gte: new Date(workDate),
-        $lt: new Date(new Date(workDate).setDate(new Date(workDate).getDate() + 1))
-      }
-    }).lean();
-
-    const attendanceMap = attendanceRecords.reduce((map, att) => {
-      const key = `${att.employeeId}-${att.projectId}`;
-      map[key] = att;
-      return map;
-    }, {});
-
-    // Process worker data
-    const workers = [];
-    const summary = {
-      totalWorkers: 0,
-      checkedIn: 0,
-      checkedOut: 0,
-      absent: 0,
-      late: 0,
-      onTime: 0
-    };
-
-    const WORK_START_HOUR = 8;
-    const LATE_THRESHOLD_MINUTES = 15;
-
-    for (const assignment of assignments) {
-      const employee = employeeMap[assignment.employeeId];
-      if (!employee) continue;
-
-      const project = projectMap[assignment.projectId];
-      if (!project) continue;
-
-      const attendanceKey = `${assignment.employeeId}-${assignment.projectId}`;
-      const attendance = attendanceMap[attendanceKey];
-
-      // Determine status and timing
-      let status = 'ABSENT';
-      let isLate = false;
-      let minutesLate = 0;
-      let workingHours = 0;
-
-      if (attendance) {
-        if (attendance.checkOut) {
-          status = 'CHECKED_OUT';
-          // Calculate working hours
-          const checkInTime = new Date(attendance.checkIn);
-          const checkOutTime = new Date(attendance.checkOut);
-          workingHours = Math.round((checkOutTime - checkInTime) / (1000 * 60 * 60) * 100) / 100;
-        } else if (attendance.checkIn) {
-          status = 'CHECKED_IN';
-          // Calculate current working hours
-          const checkInTime = new Date(attendance.checkIn);
-          workingHours = Math.round((currentTime - checkInTime) / (1000 * 60 * 60) * 100) / 100;
-        }
-
-        // Check if late
-        if (attendance.checkIn) {
-          const checkInTime = new Date(attendance.checkIn);
-          const expectedStartTime = new Date(workDate);
-          expectedStartTime.setHours(WORK_START_HOUR, 0, 0, 0);
-          
-          minutesLate = Math.floor((checkInTime - expectedStartTime) / (1000 * 60));
-          isLate = minutesLate > LATE_THRESHOLD_MINUTES;
-        }
-      }
-
-      // Get recent location data
-      const recentLocation = await LocationLog.findOne({
-        employeeId: assignment.employeeId,
-        projectId: assignment.projectId,
-        createdAt: { $gte: new Date(Date.now() - 2 * 60 * 60 * 1000) } // Last 2 hours
-      }).sort({ createdAt: -1 });
-
-      const workerData = {
-        employeeId: assignment.employeeId,
-        workerName: employee.fullName,
-        role: employee.role,
-        phone: employee.phone,
-        email: employee.email,
-        projectId: assignment.projectId,
-        projectName: project.projectName || project.name,
-        projectLocation: project.location || 'Unknown',
-        status: status,
-        checkInTime: attendance?.checkIn || null,
-        checkOutTime: attendance?.checkOut || null,
-        workingHours: workingHours,
-        isLate: isLate,
-        minutesLate: Math.max(0, minutesLate),
-        insideGeofence: attendance?.insideGeofenceAtCheckin || false,
-        insideGeofenceAtCheckout: attendance?.insideGeofenceAtCheckout || false,
-        taskAssigned: assignment.taskName || 'No task assigned',
-        supervisorId: assignment.supervisorId,
-        lastLocationUpdate: recentLocation?.createdAt || null,
-        lastKnownLocation: recentLocation ? {
-          latitude: recentLocation.latitude,
-          longitude: recentLocation.longitude,
-          insideGeofence: recentLocation.insideGeofence
-        } : null,
-        hasManualOverride: attendance?.manualOverrides?.length > 0 || false,
-        attendanceId: attendance?.id || null
-      };
-
-      // Apply status filter
-      if (status !== 'all' && status.toLowerCase() !== workerData.status.toLowerCase()) {
-        continue;
-      }
-
-      workers.push(workerData);
-
-      // Update summary
-      summary.totalWorkers++;
-      switch (status) {
-        case 'CHECKED_IN':
-          summary.checkedIn++;
-          break;
-        case 'CHECKED_OUT':
-          summary.checkedOut++;
-          break;
-        case 'ABSENT':
-          summary.absent++;
-          break;
-      }
-
-      if (isLate) {
-        summary.late++;
-      } else if (attendance?.checkIn) {
-        summary.onTime++;
-      }
-    }
-
-    // Sort workers by project, then by name
-    workers.sort((a, b) => {
-      if (a.projectName !== b.projectName) {
-        return a.projectName.localeCompare(b.projectName);
-      }
-      return a.workerName.localeCompare(b.workerName);
-    });
-
-    return res.status(200).json({
-      workers,
-      summary: {
-        ...summary,
-        lastUpdated: currentTime.toISOString(),
-        date: workDate
-      },
-      projects: projects.map(p => ({
-        id: p.id,
-        name: p.projectName || p.name,
-        location: p.location || 'Unknown',
-        geofenceRadius: p.geofenceRadius || 100
-      }))
-    });
-
-  } catch (err) {
-    console.error('Error fetching attendance monitoring data:', err);
-    return res.status(500).json({ message: 'Error fetching attendance monitoring data' });
-  }
-};
-
-/**
- * Get workers for manual attendance override
- * @route GET /api/supervisor/manual-attendance-workers
- */
-export const getManualAttendanceWorkers = async (req, res) => {
-  try {
-    const { projectId, date } = req.query;
-    
-    if (!projectId) {
-      return res.status(400).json({ message: 'projectId is required' });
-    }
-
-    const workDate = date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-
-    const project = await Project.findOne({ id: Number(projectId) });
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    // Get assignments for the project & date
-    const assignments = await WorkerTaskAssignment.find({
-      projectId: Number(projectId),
-      date: workDate
-    });
-
-    if (assignments.length === 0) {
-      return res.status(200).json({ 
-        workers: [],
-        projectName: project.projectName || project.name
-      });
-    }
-
-    const employeeIds = assignments.map(a => a.employeeId);
-
-    // Fetch employees
-    const employees = await Employee.find({
-      id: { $in: employeeIds }
-    }).lean();
-
-    // Build worker data with current attendance status
-    const workers = await Promise.all(
-      employees.map(async (worker) => {
-        const attendance = await Attendance.findOne({
-          employeeId: worker.id,
-          projectId: Number(projectId),
-          date: {
-            $gte: new Date(workDate),
-            $lt: new Date(new Date(workDate).setDate(new Date(workDate).getDate() + 1))
-          }
-        }).lean();
-
-        const assignment = assignments.find(a => a.employeeId === worker.id);
-
-        return {
-          employeeId: worker.id,
-          workerName: worker.fullName,
-          role: worker.role,
-          phone: worker.phone,
-          email: worker.email,
-          currentStatus: attendance ? (attendance.checkOut ? 'CHECKED_OUT' : 'CHECKED_IN') : 'ABSENT',
-          checkInTime: attendance?.checkIn || null,
-          checkOutTime: attendance?.checkOut || null,
-          insideGeofenceAtCheckin: attendance?.insideGeofenceAtCheckin || false,
-          insideGeofenceAtCheckout: attendance?.insideGeofenceAtCheckout || false,
-          taskAssigned: assignment?.taskName || 'No task assigned',
-          supervisorId: assignment?.supervisorId || null,
-          canOverride: true // All assigned workers can have attendance overridden
-        };
-      })
-    );
-
-    return res.status(200).json({
-      workers,
-      projectName: project.projectName || project.name,
-      date: workDate
-    });
-
-  } catch (err) {
-    console.error('Error fetching manual attendance workers:', err);
-    return res.status(500).json({ message: 'Error fetching workers for manual attendance' });
-  }
-};
-
-/**
- * Submit manual attendance override
- * @route POST /api/supervisor/manual-attendance-override
- */
-export const submitManualAttendanceOverride = async (req, res) => {
-  try {
-    const { 
-      employeeId, 
-      projectId, 
-      date, 
-      overrideType, 
-      checkInTime, 
-      checkOutTime, 
-      reason, 
-      notes 
-    } = req.body;
-
-    // Validation
-    if (!employeeId || !projectId || !date || !overrideType || !reason) {
-      return res.status(400).json({ 
-        message: 'employeeId, projectId, date, overrideType, and reason are required' 
-      });
-    }
-
-    if (!['CHECK_IN', 'CHECK_OUT', 'FULL_DAY', 'CORRECTION'].includes(overrideType)) {
-      return res.status(400).json({ 
-        message: 'Invalid overrideType. Must be CHECK_IN, CHECK_OUT, FULL_DAY, or CORRECTION' 
-      });
-    }
-
-    // Verify supervisor permissions
-    const supervisorId = req.user?.userId || req.user?.id || 1;
-    
-    // Verify project exists
-    const project = await Project.findOne({ id: Number(projectId) });
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    // Verify employee exists and is assigned to project
-    const employee = await Employee.findOne({ id: Number(employeeId) });
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-
-    const assignment = await WorkerTaskAssignment.findOne({
-      employeeId: Number(employeeId),
-      projectId: Number(projectId),
-      date: date
-    });
-
-    if (!assignment) {
-      return res.status(400).json({ 
-        message: 'Employee is not assigned to this project on the specified date' 
-      });
-    }
-
-    // Find or create attendance record
-    let attendance = await Attendance.findOne({
-      employeeId: Number(employeeId),
-      projectId: Number(projectId),
-      date: {
-        $gte: new Date(date),
-        $lt: new Date(new Date(date).setDate(new Date(date).getDate() + 1))
-      }
-    });
-
-    const now = new Date();
-    const overrideData = {
-      supervisorId: supervisorId,
-      overrideType: overrideType,
-      reason: reason,
-      notes: notes || '',
-      timestamp: now,
-      originalCheckIn: attendance?.checkIn || null,
-      originalCheckOut: attendance?.checkOut || null
-    };
-
-    if (!attendance) {
-      // Create new attendance record
-      attendance = new Attendance({
-        employeeId: Number(employeeId),
-        projectId: Number(projectId),
-        date: date,
-        createdAt: now
-      });
-    }
-
-    // Apply override based on type
-    switch (overrideType) {
-      case 'CHECK_IN':
-        if (!checkInTime) {
-          return res.status(400).json({ message: 'checkInTime is required for CHECK_IN override' });
-        }
-        attendance.checkIn = new Date(checkInTime);
-        attendance.insideGeofenceAtCheckin = true; // Manual override assumes valid
-        attendance.pendingCheckout = !attendance.checkOut;
-        break;
-
-      case 'CHECK_OUT':
-        if (!checkOutTime) {
-          return res.status(400).json({ message: 'checkOutTime is required for CHECK_OUT override' });
-        }
-        if (!attendance.checkIn) {
-          return res.status(400).json({ message: 'Cannot set check-out without check-in' });
-        }
-        attendance.checkOut = new Date(checkOutTime);
-        attendance.insideGeofenceAtCheckout = true; // Manual override assumes valid
-        attendance.pendingCheckout = false;
-        break;
-
-      case 'FULL_DAY':
-        if (!checkInTime || !checkOutTime) {
-          return res.status(400).json({ message: 'Both checkInTime and checkOutTime are required for FULL_DAY override' });
-        }
-        attendance.checkIn = new Date(checkInTime);
-        attendance.checkOut = new Date(checkOutTime);
-        attendance.insideGeofenceAtCheckin = true;
-        attendance.insideGeofenceAtCheckout = true;
-        attendance.pendingCheckout = false;
-        break;
-
-      case 'CORRECTION':
-        // Allow correction of existing times
-        if (checkInTime) {
-          attendance.checkIn = new Date(checkInTime);
-          attendance.insideGeofenceAtCheckin = true;
-        }
-        if (checkOutTime) {
-          attendance.checkOut = new Date(checkOutTime);
-          attendance.insideGeofenceAtCheckout = true;
-        }
-        attendance.pendingCheckout = attendance.checkIn && !attendance.checkOut;
-        break;
-    }
-
-    // Add override metadata
-    if (!attendance.manualOverrides) {
-      attendance.manualOverrides = [];
-    }
-    attendance.manualOverrides.push(overrideData);
-
-    await attendance.save();
-
-    // Send notification to worker about manual attendance override
-    try {
-      const { default: AttendanceNotificationService } = await import('../notification/services/AttendanceNotificationService.js');
-      
-      await AttendanceNotificationService.createNotification({
-        type: 'ATTENDANCE_OVERRIDE',
-        priority: 'MEDIUM',
-        title: 'Attendance Override Applied',
-        message: `Your attendance for ${date} has been manually adjusted by supervisor. Reason: ${reason}`,
-        senderId: supervisorId,
-        recipients: [Number(employeeId)],
-        actionData: {
-          overrideType: overrideType,
-          date: date,
-          projectId: projectId,
-          projectName: project.projectName || project.name,
-          reason: reason,
-          actionUrl: '/attendance/history'
-        },
-        requiresAcknowledgment: true,
-        language: 'en'
-      });
-    } catch (notificationError) {
-      console.error('Error sending attendance override notification:', notificationError);
-      // Don't fail the request if notification fails
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Manual attendance override applied successfully',
-      attendance: {
-        employeeId: attendance.employeeId,
-        projectId: attendance.projectId,
-        date: attendance.date,
-        checkIn: attendance.checkIn,
-        checkOut: attendance.checkOut,
-        overrideType: overrideType,
-        reason: reason
-      }
-    });
-
-  } catch (err) {
-    console.error('Error applying manual attendance override:', err);
-    return res.status(500).json({ message: 'Error applying manual attendance override' });
-  }
-};
-
-/**
- * Get active tasks for a project
- * @route GET /api/supervisor/active-tasks/:projectId
- */
 export const getActiveTasks = async (req, res) => {
   try {
     const { projectId } = req.params;
-    
-    if (!projectId) {
-      return res.status(400).json({ message: 'projectId is required' });
-    }
 
-    // Get today's date
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // Find active task assignments for today
     const activeAssignments = await WorkerTaskAssignment.find({
       projectId: Number(projectId),
-      date: { $gte: today },
-      status: { $in: ['queued', 'in_progress'] }
-    }).sort({ sequence: 1 });
+      status: "in_progress"
+    }).select("taskId");
 
-    if (activeAssignments.length === 0) {
-      return res.status(200).json({ 
-        activeTasks: [],
-        summary: {
-          totalActive: 0,
-          queued: 0,
-          inProgress: 0
-        }
+    const activeTaskIds = activeAssignments.map(a => a.taskId);
+
+    res.json(activeTaskIds);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Get workforce count for a supervisor
+ * @route GET /api/supervisor/:id/workforce-count
+ */
+export const getWorkforceCount = async (req, res) => {
+  try {
+    const { id: supervisorId } = req.params;
+    const { date } = req.query;
+
+    // Use provided date or default to today
+    const targetDate = date ? new Date(date) : new Date();
+    const dateString = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // Set up date range for queries (start and end of day)
+    const dayStart = new Date(targetDate);
+    dayStart.setHours(0, 0, 0, 0);
+    
+    const dayEnd = new Date(targetDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Get all projects assigned to this supervisor
+    const supervisorProjects = await Project.find({ supervisorId: Number(supervisorId) });
+    const projectIds = supervisorProjects.map(p => p.id);
+
+    if (projectIds.length === 0) {
+      return res.json({
+        total: 0,
+        present: 0,
+        absent: 0,
+        late: 0,
+        onLeave: 0,
+        overtime: 0,
+        lastUpdated: new Date()
       });
     }
 
-    // Get task details and employee information
-    const taskIds = [...new Set(activeAssignments.map(a => a.taskId))];
-    const employeeIds = [...new Set(activeAssignments.map(a => a.employeeId))];
-
-    const [tasks, employees] = await Promise.all([
-      Task.find({ id: { $in: taskIds } }).lean(),
-      Employee.find({ id: { $in: employeeIds } }).lean()
-    ]);
-
-    // Create lookup maps
-    const taskMap = tasks.reduce((map, task) => {
-      map[task.id] = task;
-      return map;
-    }, {});
-
-    const employeeMap = employees.reduce((map, emp) => {
-      map[emp.id] = emp;
-      return map;
-    }, {});
-
-    // Build response with task and employee details
-    const activeTasks = activeAssignments.map(assignment => {
-      const task = taskMap[assignment.taskId];
-      const employee = employeeMap[assignment.employeeId];
-
-      return {
-        assignmentId: assignment.id,
-        taskId: assignment.taskId,
-        taskName: task?.taskName || 'Unknown Task',
-        taskDescription: task?.description || '',
-        employeeId: assignment.employeeId,
-        workerName: employee?.fullName || 'Unknown Worker',
-        status: assignment.status,
-        sequence: assignment.sequence,
-        startTime: assignment.startTime,
-        endTime: assignment.endTime,
-        workArea: assignment.workArea,
-        floor: assignment.floor,
-        zone: assignment.zone,
-        priority: assignment.priority || 'MEDIUM',
-        timeEstimate: assignment.timeEstimate,
-        dailyTarget: assignment.dailyTarget,
-        createdAt: assignment.createdAt
-      };
+    // Get all worker assignments for supervisor's projects on the target date
+    const assignments = await WorkerTaskAssignment.find({
+      projectId: { $in: projectIds },
+      date: dateString
     });
+
+    const assignedEmployeeIds = assignments.map(a => a.employeeId);
+
+    if (assignedEmployeeIds.length === 0) {
+      return res.json({
+        total: 0,
+        present: 0,
+        absent: 0,
+        late: 0,
+        onLeave: 0,
+        overtime: 0,
+        lastUpdated: new Date()
+      });
+    }
+
+    // Get attendance records for assigned workers on target date
+    const attendanceRecords = await Attendance.find({
+      employeeId: { $in: assignedEmployeeIds },
+      projectId: { $in: projectIds },
+      date: {
+        $gte: dayStart,
+        $lte: dayEnd
+      }
+    });
+
+    // Get approved leave requests for the target date
+    const leaveRequests = await LeaveRequest.find({
+      employeeId: { $in: assignedEmployeeIds },
+      status: 'APPROVED',
+      fromDate: { $lte: dayEnd },
+      toDate: { $gte: dayStart }
+    });
+
+    const onLeaveEmployeeIds = leaveRequests.map(lr => lr.employeeId);
+
+    // Initialize counters
+    let present = 0;
+    let absent = 0;
+    let late = 0;
+    let onLeave = 0;
+    let overtime = 0;
+
+    // Standard work hours (8 AM to 6 PM = 10 hours)
+    const standardWorkHours = 10 * 60 * 60 * 1000; // 10 hours in milliseconds
+    const lateThreshold = 8 * 60 + 30; // 8:30 AM in minutes from midnight
+
+    // Process each assigned employee
+    for (const employeeId of assignedEmployeeIds) {
+      // Check if employee is on approved leave
+      if (onLeaveEmployeeIds.includes(employeeId)) {
+        onLeave++;
+        continue;
+      }
+
+      // Find attendance record for this employee
+      const attendance = attendanceRecords.find(a => a.employeeId === employeeId);
+
+      if (!attendance || !attendance.checkIn) {
+        // No check-in record = absent
+        absent++;
+      } else {
+        // Employee has checked in
+        const checkInTime = new Date(attendance.checkIn);
+        const checkInMinutes = checkInTime.getHours() * 60 + checkInTime.getMinutes();
+
+        // Check if late (after 8:30 AM)
+        if (checkInMinutes > lateThreshold) {
+          late++;
+        } else {
+          present++;
+        }
+
+        // Check for overtime (if still working after standard hours)
+        if (attendance.checkIn && !attendance.checkOut) {
+          const now = new Date();
+          const workDuration = now - checkInTime;
+          
+          if (workDuration > standardWorkHours) {
+            overtime++;
+          }
+        } else if (attendance.checkIn && attendance.checkOut) {
+          const checkOutTime = new Date(attendance.checkOut);
+          const workDuration = checkOutTime - checkInTime;
+          
+          if (workDuration > standardWorkHours) {
+            overtime++;
+          }
+        }
+      }
+    }
+
+    const total = assignedEmployeeIds.length;
+
+    const workforceCount = {
+      total,
+      present,
+      absent,
+      late,
+      onLeave,
+      overtime,
+      lastUpdated: new Date()
+    };
+
+    res.json(workforceCount);
+
+  } catch (err) {
+    console.error('getWorkforceCount error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Get attendance summary for supervisor
+ * @route GET /api/supervisor/:id/attendance
+ */
+export const getAttendanceSummary = async (req, res) => {
+  try {
+    const { id: supervisorId } = req.params;
+    const { date } = req.query;
+
+    // Use provided date or default to today
+    const targetDate = date ? new Date(date) : new Date();
+    const dateString = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // Set up date range for queries (start and end of day)
+    const dayStart = new Date(targetDate);
+    dayStart.setHours(0, 0, 0, 0);
+    
+    const dayEnd = new Date(targetDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Get all projects assigned to this supervisor
+    const supervisorProjects = await Project.find({ supervisorId: Number(supervisorId) });
+    const projectIds = supervisorProjects.map(p => p.id);
+
+    if (projectIds.length === 0) {
+      return res.json({
+        workers: [],
+        summary: {
+          total: 0,
+          present: 0,
+          absent: 0,
+          late: 0,
+          onLeave: 0,
+          overtime: 0,
+          geofenceViolations: 0,
+          missingLogouts: 0
+        },
+        lastUpdated: new Date()
+      });
+    }
+
+    // Get all worker assignments for supervisor's projects on the target date
+    const assignments = await WorkerTaskAssignment.find({
+      projectId: { $in: projectIds },
+      date: dateString
+    });
+
+    const assignedEmployeeIds = assignments.map(a => a.employeeId);
+
+    if (assignedEmployeeIds.length === 0) {
+      return res.json({
+        workers: [],
+        summary: {
+          total: 0,
+          present: 0,
+          absent: 0,
+          late: 0,
+          onLeave: 0,
+          overtime: 0,
+          geofenceViolations: 0,
+          missingLogouts: 0
+        },
+        lastUpdated: new Date()
+      });
+    }
+
+    // Get employee details
+    const employees = await Employee.find({
+      id: { $in: assignedEmployeeIds }
+    }).lean();
+
+    // Get attendance records for assigned workers on target date
+    const attendanceRecords = await Attendance.find({
+      employeeId: { $in: assignedEmployeeIds },
+      projectId: { $in: projectIds },
+      date: {
+        $gte: dayStart,
+        $lte: dayEnd
+      }
+    });
+
+    // Get approved leave requests for the target date
+    const leaveRequests = await LeaveRequest.find({
+      employeeId: { $in: assignedEmployeeIds },
+      status: 'APPROVED',
+      fromDate: { $lte: dayEnd },
+      toDate: { $gte: dayStart }
+    });
+
+    const onLeaveEmployeeIds = leaveRequests.map(lr => lr.employeeId);
+
+    // Standard work hours and thresholds
+    const standardWorkHours = 10 * 60 * 60 * 1000; // 10 hours in milliseconds
+    const lateThreshold = 8 * 60 + 30; // 8:30 AM in minutes from midnight
+    const standardEndTime = 18 * 60; // 6:00 PM in minutes from midnight
+    const now = new Date();
+
+    // Initialize summary counters
+    let summary = {
+      total: assignedEmployeeIds.length,
+      present: 0,
+      absent: 0,
+      late: 0,
+      onLeave: 0,
+      overtime: 0,
+      geofenceViolations: 0,
+      missingLogouts: 0
+    };
+
+    // Process each assigned employee
+    const workers = await Promise.all(
+      employees.map(async (employee) => {
+        const employeeId = employee.id;
+        
+        // Check if employee is on approved leave
+        if (onLeaveEmployeeIds.includes(employeeId)) {
+          summary.onLeave++;
+          return {
+            workerId: employeeId,
+            workerName: employee.fullName,
+            checkInTime: null,
+            checkOutTime: null,
+            locationStatus: 'on_leave',
+            currentActivity: 'On Leave',
+            isLate: false,
+            isOvertime: false,
+            overtimeDuration: 0,
+            hasGeofenceViolation: false,
+            hasMissingLogout: false,
+            status: 'on_leave'
+          };
+        }
+
+        // Find attendance record for this employee
+        const attendance = attendanceRecords.find(a => a.employeeId === employeeId);
+        
+        // Find project assignment to get project details for geofence validation
+        const assignment = assignments.find(a => a.employeeId === employeeId);
+        const project = assignment ? supervisorProjects.find(p => p.id === assignment.projectId) : null;
+
+        let workerData = {
+          workerId: employeeId,
+          workerName: employee.fullName,
+          checkInTime: null,
+          checkOutTime: null,
+          locationStatus: 'unknown',
+          currentActivity: 'Not Started',
+          isLate: false,
+          isOvertime: false,
+          overtimeDuration: 0,
+          hasGeofenceViolation: false,
+          hasMissingLogout: false,
+          status: 'absent'
+        };
+
+        if (!attendance || !attendance.checkIn) {
+          // No check-in record = absent
+          summary.absent++;
+          workerData.status = 'absent';
+          workerData.currentActivity = 'Absent';
+        } else {
+          // Employee has checked in
+          const checkInTime = new Date(attendance.checkIn);
+          const checkInMinutes = checkInTime.getHours() * 60 + checkInTime.getMinutes();
+          
+          workerData.checkInTime = attendance.checkIn;
+          workerData.checkOutTime = attendance.checkOut;
+
+          // Determine location status based on geofence validation
+          if (attendance.insideGeofenceAtCheckin === false) {
+            workerData.locationStatus = 'outside';
+            workerData.hasGeofenceViolation = true;
+            summary.geofenceViolations++;
+          } else if (attendance.insideGeofenceAtCheckin === true) {
+            workerData.locationStatus = 'inside';
+          } else {
+            workerData.locationStatus = 'unknown';
+          }
+
+          // Check if late (after 8:30 AM)
+          if (checkInMinutes > lateThreshold) {
+            workerData.isLate = true;
+            workerData.status = 'late';
+            summary.late++;
+          } else {
+            workerData.status = 'present';
+            summary.present++;
+          }
+
+          // Check for missing logout after standard work hours
+          if (!attendance.checkOut) {
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            
+            // If it's past 6 PM and worker hasn't checked out
+            if (currentMinutes > standardEndTime && 
+                now.toDateString() === targetDate.toDateString()) {
+              workerData.hasMissingLogout = true;
+              summary.missingLogouts++;
+            }
+            
+            workerData.currentActivity = 'Working';
+            
+            // Check for overtime (if still working after standard hours)
+            const workDuration = now - checkInTime;
+            if (workDuration > standardWorkHours) {
+              workerData.isOvertime = true;
+              workerData.overtimeDuration = Math.round((workDuration - standardWorkHours) / (60 * 60 * 1000) * 10) / 10; // Hours with 1 decimal
+              summary.overtime++;
+            }
+          } else {
+            // Worker has checked out
+            const checkOutTime = new Date(attendance.checkOut);
+            const workDuration = checkOutTime - checkInTime;
+            
+            workerData.currentActivity = 'Completed';
+            
+            // Check for overtime in completed work
+            if (workDuration > standardWorkHours) {
+              workerData.isOvertime = true;
+              workerData.overtimeDuration = Math.round((workDuration - standardWorkHours) / (60 * 60 * 1000) * 10) / 10; // Hours with 1 decimal
+              summary.overtime++;
+            }
+          }
+        }
+
+        return workerData;
+      })
+    );
+
+    // Sort workers by status priority (absent, late, present, on_leave) and then by name
+    const statusPriority = { 'absent': 1, 'late': 2, 'present': 3, 'on_leave': 4 };
+    workers.sort((a, b) => {
+      const priorityDiff = statusPriority[a.status] - statusPriority[b.status];
+      if (priorityDiff !== 0) return priorityDiff;
+      return a.workerName.localeCompare(b.workerName);
+    });
+
+    const response = {
+      workers,
+      summary,
+      lastUpdated: new Date()
+    };
+
+    res.json(response);
+
+  } catch (err) {
+    console.error('getAttendanceSummary error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Get pending approvals for supervisor
+ * @route GET /api/supervisor/:id/approvals
+ */
+export const getPendingApprovals = async (req, res) => {
+  try {
+    const { id: supervisorId } = req.params;
+    const { type, priority } = req.query;
+
+    // Get all projects assigned to this supervisor
+    const supervisorProjects = await Project.find({ supervisorId: Number(supervisorId) });
+    const projectIds = supervisorProjects.map(p => p.id);
+
+    if (projectIds.length === 0) {
+      return res.json({
+        approvals: [],
+        summary: {
+          total: 0,
+          leave: 0,
+          advance_payment: 0,
+          material_request: 0,
+          attendance_correction: 0
+        },
+        lastUpdated: new Date()
+      });
+    }
+
+    // Get all worker assignments for supervisor's projects to identify supervised employees
+    const assignments = await WorkerTaskAssignment.find({
+      projectId: { $in: projectIds }
+    }).distinct('employeeId');
+
+    const supervisedEmployeeIds = assignments;
+
+    if (supervisedEmployeeIds.length === 0) {
+      return res.json({
+        approvals: [],
+        summary: {
+          total: 0,
+          leave: 0,
+          advance_payment: 0,
+          material_request: 0,
+          attendance_correction: 0
+        },
+        lastUpdated: new Date()
+      });
+    }
+
+    // Get employee details for name mapping
+    const employees = await Employee.find({
+      id: { $in: supervisedEmployeeIds }
+    }).lean();
+
+    const employeeMap = {};
+    employees.forEach(emp => {
+      employeeMap[emp.id] = emp.fullName;
+    });
+
+    // Initialize approvals array
+    let approvals = [];
+
+    // 1. Get pending leave requests
+    let leaveQuery = {
+      employeeId: { $in: supervisedEmployeeIds },
+      status: 'PENDING'
+    };
+
+    const leaveRequests = await LeaveRequest.find(leaveQuery).sort({ requestedAt: -1 });
+
+    // Add leave requests to approvals
+    leaveRequests.forEach(leave => {
+      const priority = calculateLeavePriority(leave);
+      approvals.push({
+        approvalId: `leave_${leave.id}`,
+        type: 'leave',
+        requesterId: leave.employeeId,
+        requesterName: employeeMap[leave.employeeId] || 'Unknown Employee',
+        submittedDate: leave.requestedAt,
+        priority: priority,
+        details: {
+          leaveType: leave.leaveType,
+          fromDate: leave.fromDate,
+          toDate: leave.toDate,
+          totalDays: leave.totalDays,
+          reason: leave.reason
+        },
+        originalId: leave.id
+      });
+    });
+
+    // 2. Mock other approval types (since they don't exist in current system)
+    // In a real implementation, these would come from actual collections
+
+    // Filter by type if specified
+    if (type) {
+      approvals = approvals.filter(approval => approval.type === type);
+    }
+
+    // Filter by priority if specified
+    if (priority) {
+      approvals = approvals.filter(approval => approval.priority === priority);
+    }
+
+    // Sort by priority (high -> medium -> low) and then by submission date (newest first)
+    const priorityOrder = { 'high': 1, 'medium': 2, 'low': 3 };
+    approvals.sort((a, b) => {
+      const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+      if (priorityDiff !== 0) return priorityDiff;
+      return new Date(b.submittedDate) - new Date(a.submittedDate);
+    });
+
+    // Calculate summary
+    const summary = {
+      total: approvals.length,
+      leave: approvals.filter(a => a.type === 'leave').length,
+      advance_payment: approvals.filter(a => a.type === 'advance_payment').length,
+      material_request: approvals.filter(a => a.type === 'material_request').length,
+      attendance_correction: approvals.filter(a => a.type === 'attendance_correction').length
+    };
+
+    const response = {
+      approvals,
+      summary,
+      lastUpdated: new Date()
+    };
+
+    res.json(response);
+
+  } catch (err) {
+    console.error('getPendingApprovals error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Helper function to calculate leave request priority
+ */
+function calculateLeavePriority(leaveRequest) {
+  const now = new Date();
+  const fromDate = new Date(leaveRequest.fromDate);
+  const daysUntilLeave = Math.ceil((fromDate - now) / (1000 * 60 * 60 * 24));
+
+  // Emergency leave or medical leave gets high priority
+  if (leaveRequest.leaveType === 'EMERGENCY' || leaveRequest.leaveType === 'MEDICAL') {
+    return 'high';
+  }
+
+  // Leave starting within 3 days gets high priority
+  if (daysUntilLeave <= 3) {
+    return 'high';
+  }
+
+  // Leave starting within 7 days gets medium priority
+  if (daysUntilLeave <= 7) {
+    return 'medium';
+  }
+
+  // All other leave requests get low priority
+  return 'low';
+}
+
+/**
+ * Process approval decision (approve/reject)
+ * @route POST /api/supervisor/approval/:id/process
+ */
+export const processApproval = async (req, res) => {
+  try {
+    const { id: approvalId } = req.params;
+    const { decision, remarks } = req.body;
+    const supervisorId = req.user.id; // From auth middleware
+
+    // Validate input
+    if (!decision || !['approve', 'reject'].includes(decision)) {
+      return res.status(400).json({ 
+        message: 'Invalid decision. Must be "approve" or "reject"' 
+      });
+    }
+
+    if (!remarks || remarks.trim().length === 0) {
+      return res.status(400).json({ 
+        message: 'Remarks are mandatory for approval decisions' 
+      });
+    }
+
+    // Parse approval ID to determine type and original ID
+    const [approvalType, originalId] = approvalId.split('_');
+
+    if (!approvalType || !originalId) {
+      return res.status(400).json({ 
+        message: 'Invalid approval ID format' 
+      });
+    }
+
+    let processedApproval = null;
+
+    // Process based on approval type
+    switch (approvalType) {
+      case 'leave':
+        processedApproval = await processLeaveApproval(originalId, decision, remarks, supervisorId);
+        break;
+      
+      case 'advance_payment':
+        // Mock implementation - in real system would process advance payment
+        processedApproval = await processMockApproval('advance_payment', originalId, decision, remarks, supervisorId);
+        break;
+      
+      case 'material_request':
+        // Mock implementation - in real system would process material request
+        processedApproval = await processMockApproval('material_request', originalId, decision, remarks, supervisorId);
+        break;
+      
+      case 'attendance_correction':
+        // Mock implementation - in real system would process attendance correction
+        processedApproval = await processMockApproval('attendance_correction', originalId, decision, remarks, supervisorId);
+        break;
+      
+      default:
+        return res.status(400).json({ 
+          message: 'Unsupported approval type' 
+        });
+    }
+
+    // Log audit entry
+    await logApprovalAudit({
+      supervisorId,
+      approvalId,
+      approvalType,
+      originalId,
+      decision,
+      remarks: remarks.substring(0, 500), // Limit remarks length for storage
+      processedAt: new Date(),
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('User-Agent')
+    });
+
+    const response = {
+      success: true,
+      message: `${approvalType.replace('_', ' ')} ${decision}d successfully`,
+      approvalId,
+      decision,
+      processedAt: new Date(),
+      details: processedApproval
+    };
+
+    res.json(response);
+
+  } catch (err) {
+    console.error('processApproval error:', err);
+    
+    // Handle specific error types
+    if (err.message.includes('not found')) {
+      return res.status(404).json({ message: err.message });
+    }
+    
+    if (err.message.includes('already processed')) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    res.status(500).json({ message: 'Server error processing approval' });
+  }
+};
+
+/**
+ * Process leave approval
+ */
+async function processLeaveApproval(leaveRequestId, decision, remarks, supervisorId) {
+  const leaveRequest = await LeaveRequest.findOne({ id: Number(leaveRequestId) });
+  
+  if (!leaveRequest) {
+    throw new Error('Leave request not found');
+  }
+
+  if (leaveRequest.status !== 'PENDING') {
+    throw new Error('Leave request already processed');
+  }
+
+  // Update leave request status
+  const newStatus = decision === 'approve' ? 'APPROVED' : 'REJECTED';
+  await LeaveRequest.findOneAndUpdate(
+    { id: Number(leaveRequestId) },
+    { 
+      status: newStatus, 
+      currentApproverId: supervisorId 
+    }
+  );
+
+  // Update leave approval record
+  await LeaveApproval.findOneAndUpdate(
+    { leaveRequestId: Number(leaveRequestId) },
+    { 
+      action: newStatus,
+      remarks,
+      approverId: supervisorId,
+      actionAt: new Date()
+    }
+  );
+
+  // Create notification for employee (mock implementation)
+  // In real system, this would integrate with notification system
+  console.log(`Notification: Leave request ${decision}d for employee ${leaveRequest.employeeId}`);
+
+  return {
+    leaveRequestId: leaveRequest.id,
+    employeeId: leaveRequest.employeeId,
+    leaveType: leaveRequest.leaveType,
+    fromDate: leaveRequest.fromDate,
+    toDate: leaveRequest.toDate,
+    newStatus
+  };
+}
+
+/**
+ * Mock approval processing for non-implemented approval types
+ */
+async function processMockApproval(approvalType, originalId, decision, remarks, supervisorId) {
+  // In a real implementation, this would process actual approval records
+  console.log(`Mock processing: ${approvalType} ${originalId} ${decision}d by supervisor ${supervisorId}`);
+  
+  return {
+    approvalType,
+    originalId,
+    decision,
+    processedBy: supervisorId,
+    processedAt: new Date()
+  };
+}
+
+/**
+ * Log approval audit entry
+ */
+async function logApprovalAudit(auditData) {
+  try {
+    // In a real implementation, this would save to an audit log collection
+    // For now, we'll log to console and could extend to save to database
+    
+    const auditEntry = {
+      timestamp: new Date().toISOString(),
+      action: 'APPROVAL_DECISION',
+      supervisorId: auditData.supervisorId,
+      approvalId: auditData.approvalId,
+      approvalType: auditData.approvalType,
+      originalId: auditData.originalId,
+      decision: auditData.decision.toUpperCase(),
+      remarks: auditData.remarks,
+      processedAt: auditData.processedAt,
+      ipAddress: auditData.ipAddress,
+      userAgent: auditData.userAgent
+    };
+
+    // Log to console (in production, this would go to a proper audit system)
+    console.log('AUDIT LOG:', JSON.stringify(auditEntry, null, 2));
+
+    // TODO: Save to audit collection
+    // await AuditLog.create(auditEntry);
+
+  } catch (err) {
+    console.error('Failed to log audit entry:', err);
+    // Don't throw error here as audit logging failure shouldn't break the main flow
+  }
+}
+
+/**
+ * Get alerts for supervisor
+ * @route GET /api/supervisor/:id/alerts
+ */
+export const getAlerts = async (req, res) => {
+  try {
+    const { id: supervisorId } = req.params;
+    const { type, priority, isRead, limit = 50 } = req.query;
+
+    // Build filters
+    const filters = {};
+    if (type) filters.type = type;
+    if (priority) filters.priority = priority;
+    if (isRead !== undefined) filters.isRead = isRead === 'true';
+
+    // Get alerts from service
+    const alerts = await alertService.getAlertsForSupervisor(
+      Number(supervisorId), 
+      filters
+    );
+
+    // Apply limit
+    const limitedAlerts = alerts.slice(0, Number(limit));
 
     // Calculate summary statistics
     const summary = {
-      totalActive: activeTasks.length,
-      queued: activeTasks.filter(t => t.status === 'queued').length,
-      inProgress: activeTasks.filter(t => t.status === 'in_progress').length
+      total: alerts.length,
+      unread: alerts.filter(a => !a.isRead).length,
+      critical: alerts.filter(a => a.priority === 'critical').length,
+      warning: alerts.filter(a => a.priority === 'warning').length,
+      info: alerts.filter(a => a.priority === 'info').length,
+      byType: {
+        geofence_violation: alerts.filter(a => a.type === 'geofence_violation').length,
+        worker_absence: alerts.filter(a => a.type === 'worker_absence').length,
+        attendance_anomaly: alerts.filter(a => a.type === 'attendance_anomaly').length,
+        safety_alert: alerts.filter(a => a.type === 'safety_alert').length
+      }
     };
 
-    return res.status(200).json({
-      activeTasks,
-      summary
-    });
+    const response = {
+      alerts: limitedAlerts,
+      summary,
+      pagination: {
+        total: alerts.length,
+        limit: Number(limit),
+        hasMore: alerts.length > Number(limit)
+      },
+      lastUpdated: new Date()
+    };
+
+    res.json(response);
 
   } catch (err) {
-    console.error('Error fetching active tasks:', err);
-    return res.status(500).json({ message: 'Error fetching active tasks' });
+    console.error('getAlerts error:', err);
+    res.status(500).json({ message: 'Server error retrieving alerts' });
+  }
+};
+
+/**
+ * Acknowledge alert
+ * @route POST /api/supervisor/alert/:id/acknowledge
+ */
+export const acknowledgeAlert = async (req, res) => {
+  try {
+    const { id: alertId } = req.params;
+    const supervisorId = req.user.id || req.user.employeeId; // From auth middleware
+    const { notes } = req.body;
+
+    console.log('acknowledgeAlert called with:', { alertId, supervisorId, notes });
+
+    if (!alertId) {
+      return res.status(400).json({ message: 'Alert ID is required' });
+    }
+
+    // Convert to number and validate
+    const numericAlertId = Number(alertId);
+    
+    if (isNaN(numericAlertId)) {
+      console.log('Invalid alert ID format:', alertId);
+      return res.status(400).json({ message: 'Invalid alert ID format' });
+    }
+
+    console.log('Processing alert ID:', numericAlertId);
+
+    // Acknowledge alert through service
+    const acknowledgedAlert = await alertService.acknowledgeAlert(
+      numericAlertId, 
+      Number(supervisorId)
+    );
+
+    // Log additional notes if provided
+    if (notes && notes.trim().length > 0) {
+      await alertService.logAlertAction(
+        Number(alertId), 
+        Number(supervisorId), 
+        'acknowledged_with_notes', 
+        { notes: notes.trim() }
+      );
+    }
+
+    const response = {
+      success: true,
+      message: 'Alert acknowledged successfully',
+      alert: acknowledgedAlert,
+      acknowledgedAt: new Date()
+    };
+
+    res.json(response);
+
+  } catch (err) {
+    console.error('acknowledgeAlert error:', err);
+    
+    // Handle specific error types
+    if (err.message.includes('not found')) {
+      return res.status(404).json({ message: err.message });
+    }
+    
+    if (err.message.includes('Access denied')) {
+      return res.status(403).json({ message: err.message });
+    }
+    
+    if (err.message.includes('already acknowledged')) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    res.status(500).json({ message: 'Server error acknowledging alert' });
+  }
+};
+
+/**
+ * Get escalation statistics for supervisor (optional endpoint for monitoring)
+ * @route GET /api/supervisor/:id/escalation-stats
+ */
+export const getEscalationStats = async (req, res) => {
+  try {
+    const { id: supervisorId } = req.params;
+
+    const stats = await alertService.getEscalationStats(Number(supervisorId));
+
+    const response = {
+      supervisorId: Number(supervisorId),
+      escalationStats: stats,
+      generatedAt: new Date()
+    };
+
+    res.json(response);
+
+  } catch (err) {
+    console.error('getEscalationStats error:', err);
+    res.status(500).json({ message: 'Server error retrieving escalation statistics' });
   }
 };
 

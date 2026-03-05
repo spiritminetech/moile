@@ -4,7 +4,7 @@ async function testLogin() {
   try {
     console.log('Testing login with worker@gmail.com...');
     
-    const response = await axios.post('http://localhost:5002/api/auth/login', {
+    const response = await axios.post('http://localhost:5001/api/auth/login', {
       email: 'worker@gmail.com',
       password: 'password123'
     });

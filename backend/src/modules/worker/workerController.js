@@ -2,15 +2,11 @@
 
 import fs from "fs";
 import path from "path";
-import bcrypt from "bcryptjs";
-import multer from "multer";
 import FleetTask from "../fleetTask/models/FleetTask.js";
 import FleetTaskPassenger from "../fleetTask/submodules/fleetTaskPassenger/FleetTaskPassenger.js";
 import Project from '../project/models/Project.js';
 import FleetVehicle from "../fleetTask/submodules/fleetvehicle/FleetVehicle.js";
 import Employee from "../employee/Employee.js";
-import User from "../user/User.js";
-import Company from "../company/Company.js";
 import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
 import WorkerTaskProgress from "../worker/models/WorkerTaskProgress.js";
 import WorkerTaskPhoto from "../worker/models/WorkerTaskPhoto.js";
@@ -19,7 +15,9 @@ import Attendance from "../attendance/Attendance.js";
 import LocationLog from "../attendance/LocationLog.js";
 import Tool from "../project/models/Tool.js";
 import Material from "../project/models/Material.js";
+import TaskIssue from "./models/TaskIssue.js";
 import { validateGeofence } from "../../../utils/geofenceUtil.js";
+import { getNextId } from "../../utils/idGenerator.js";
 import { 
   validateAuthData, 
   validateDateString, 
@@ -29,7 +27,6 @@ import {
   validateCoordinates,
   validateId
 } from "../../../utils/validationUtil.js";
-import TaskNotificationService from '../notification/services/TaskNotificationService.js';
 
 /* ----------------------------------------------------
    Helper: Resolve logged-in employee (MANDATORY)
@@ -94,282 +91,6 @@ const resolveEmployee = async (req) => {
 };
 
 /* ----------------------------------------------------
-   Multer Configuration for Worker Photo Upload
----------------------------------------------------- */
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = "uploads/workers/";
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const userId = req.user?.userId || "unknown";
-    cb(null, `worker-${userId}-${uniqueSuffix}${path.extname(file.originalname)}`);
-  },
-});
-
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith("image/")) cb(null, true);
-  else cb(new Error("Only image files are allowed!"), false);
-};
-
-export const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-});
-
-/* ----------------------------------------------------
-   GET /worker/profile - Get worker profile
----------------------------------------------------- */
-export const getWorkerProfile = async (req, res) => {
-  try {
-    const { userId, companyId, role } = req.user || {};
-
-    if (!userId || !companyId) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid user or company information.",
-      });
-    }
-
-    // Fetch company, user, and employee details in parallel for efficiency
-    const [company, user, employee] = await Promise.all([
-      Company.findOne({ id: companyId }),
-      User.findOne({ id: userId }),
-      Employee.findOne({ userId: userId, companyId: companyId }),
-    ]);
-
-    if (!company) {
-      return res.status(404).json({
-        success: false,
-        message: `Company with ID ${companyId} not found`,
-      });
-    }
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User details not found",
-      });
-    }
-
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee details not found",
-      });
-    }
-
-    // Construct profile
-    const profile = {
-      id: userId,
-      employeeId: employee.id,
-      name: employee.fullName,
-      email: user.email,
-      phoneNumber: employee.phone || user.phone || "N/A",
-      companyName: company.name,
-      role,
-      photoUrl: employee.photoUrl || employee.photo_url || null,
-      employeeCode: employee.employeeCode || null,
-      jobTitle: employee.jobTitle || "Worker",
-      department: employee.department || "Construction",
-      status: employee.status || "ACTIVE",
-      createdAt: employee.createdAt || user.createdAt,
-      updatedAt: employee.updatedAt || employee.createdAt || user.updatedAt,
-    };
-
-    return res.json({ success: true, profile });
-
-  } catch (err) {
-    console.error("Error fetching worker profile:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching worker profile",
-      error: err.message,
-    });
-  }
-};
-
-/* ----------------------------------------------------
-   PUT /worker/profile/password - Change worker password
----------------------------------------------------- */
-export const changeWorkerPassword = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { oldPassword, newPassword } = req.body;
-
-    if (!oldPassword || !newPassword)
-      return res.status(400).json({ success: false, message: "Both passwords required" });
-
-    if (newPassword.length < 6)
-      return res.status(400).json({ success: false, message: "Password too short" });
-
-    const user = await User.findOne({ id: userId });
-    if (!user)
-      return res.status(404).json({ success: false, message: "User not found" });
-
-    const isPasswordValid = await bcrypt.compare(oldPassword, user.passwordHash);
-    if (!isPasswordValid)
-      return res.status(400).json({ success: false, message: "Incorrect current password" });
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await User.updateOne(
-      { id: userId },
-      { $set: { passwordHash: hashedPassword, updatedAt: new Date() } }
-    );
-
-    res.json({ success: true, message: "Password updated successfully" });
-  } catch (err) {
-    console.error("❌ Error changing password:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
-};
-
-/* ----------------------------------------------------
-   POST /worker/profile/photo - Upload worker photo
----------------------------------------------------- */
-export const uploadWorkerPhoto = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const companyId = req.user.companyId;
-
-    if (!req.file)
-      return res.status(400).json({ success: false, message: "No photo file uploaded" });
-
-    const photoUrl = `/uploads/workers/${req.file.filename}`;
-
-    await Employee.updateOne(
-      { userId: userId, companyId: companyId },
-      { $set: { photoUrl, updatedAt: new Date() } }
-    );
-
-    const [employee, company, user] = await Promise.all([
-      Employee.findOne({ userId: userId, companyId: companyId }),
-      Company.findOne({ id: companyId }),
-      User.findOne({ id: userId }),
-    ]);
-
-    const updatedProfile = {
-      id: userId,
-      employeeId: employee.id,
-      name: employee.fullName,
-      email: user?.email || "N/A",
-      phoneNumber: employee.phone || "N/A",
-      companyName: company?.name || "N/A",
-      role: "worker",
-      photoUrl,
-      employeeCode: employee.employeeCode || null,
-      jobTitle: employee.jobTitle || "Worker",
-    };
-
-    res.json({
-      success: true,
-      message: "Profile photo updated successfully",
-      worker: updatedProfile,
-      photoUrl,
-    });
-  } catch (err) {
-    console.error("❌ Error uploading photo:", err);
-    if (req.file) fs.unlink(req.file.path, () => {});
-    res.status(500).json({ success: false, message: "Upload failed", error: err.message });
-  }
-};
-
-/* ----------------------------------------------------
-   GET /worker/profile/certification-alerts - Get certification expiry alerts
----------------------------------------------------- */
-export const getWorkerCertificationAlerts = async (req, res) => {
-  try {
-    const { userId, companyId } = req.user || {};
-
-    if (!userId || !companyId) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid user or company information.",
-      });
-    }
-
-    const employee = await Employee.findOne({ userId: userId, companyId: companyId });
-
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee details not found",
-      });
-    }
-
-    // For now, return a placeholder structure for certifications
-    // This would be expanded when certification models are implemented
-    const alerts = {
-      expiringSoon: [], // Certifications expiring within 30 days
-      expired: [], // Already expired certifications
-      upToDate: [], // Valid certifications
-      totalCertifications: 0,
-      alertCount: 0
-    };
-
-    // TODO: Implement actual certification logic when models are available
-    // This is a placeholder response structure
-    const mockCertifications = [
-      {
-        id: 1,
-        name: "Safety Training Certificate",
-        issueDate: "2023-06-01T00:00:00.000Z",
-        expiryDate: "2024-06-01T00:00:00.000Z",
-        status: "expired",
-        daysUntilExpiry: -245
-      },
-      {
-        id: 2,
-        name: "Equipment Operation License",
-        issueDate: "2023-03-15T00:00:00.000Z",
-        expiryDate: "2025-03-15T00:00:00.000Z",
-        status: "expiring_soon",
-        daysUntilExpiry: 28
-      }
-    ];
-
-    // Categorize certifications
-    const now = new Date();
-    mockCertifications.forEach(cert => {
-      const expiryDate = new Date(cert.expiryDate);
-      const daysUntilExpiry = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
-      
-      if (daysUntilExpiry < 0) {
-        alerts.expired.push({ ...cert, daysUntilExpiry });
-      } else if (daysUntilExpiry <= 30) {
-        alerts.expiringSoon.push({ ...cert, daysUntilExpiry });
-      } else {
-        alerts.upToDate.push({ ...cert, daysUntilExpiry });
-      }
-    });
-
-    alerts.totalCertifications = mockCertifications.length;
-    alerts.alertCount = alerts.expiringSoon.length + alerts.expired.length;
-
-    return res.json({ 
-      success: true, 
-      alerts,
-      message: alerts.alertCount > 0 ? 
-        `You have ${alerts.alertCount} certification alerts` : 
-        "All certifications are up to date"
-    });
-
-  } catch (err) {
-    console.error("Error fetching certification alerts:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching certification alerts",
-      error: err.message,
-    });
-  }
-};
-
-/* ----------------------------------------------------
    GET /worker/tasks/today - Comprehensive task details
    Enhanced version with full mobile app requirements
 ---------------------------------------------------- */
@@ -425,11 +146,14 @@ export const getWorkerTasksToday = async (req, res) => {
     const today = targetDate;
 
     // Get all task assignments for today with error handling
+    // Filter only assignments with valid projectId and taskId (not null)
     let assignments;
     try {
       assignments = await WorkerTaskAssignment.find({
         employeeId: employee.id,
-        date: today
+        date: today,
+        projectId: { $ne: null },
+        taskId: { $ne: null }
       }).sort({ sequence: 1 });
     } catch (dbError) {
       console.error("❌ Database error fetching assignments:", dbError);
@@ -445,20 +169,6 @@ export const getWorkerTasksToday = async (req, res) => {
         success: false,
         message: "No tasks assigned for today",
         error: "NO_TASKS_ASSIGNED"
-      });
-    }
-
-    // Validate assignments data integrity
-    const invalidAssignments = assignments.filter(a => 
-      !a.projectId || !a.taskId || !Number.isInteger(a.projectId) || !Number.isInteger(a.taskId)
-    );
-    
-    if (invalidAssignments.length > 0) {
-      console.error("❌ Invalid assignment data found:", invalidAssignments.map(a => a.id));
-      return res.status(500).json({
-        success: false,
-        message: "Invalid task assignment data detected",
-        error: "INVALID_ASSIGNMENT_DATA"
       });
     }
 
@@ -1534,9 +1244,9 @@ export const validateWorkerGeofence = async (req, res) => {
 };
 
 /* ----------------------------------------------------
-   GET /worker/tasks/{taskId} - Get individual task details
+   POST /worker/task/start - Start a task with geofence validation
 ---------------------------------------------------- */
-export const getWorkerTaskDetails = async (req, res) => {
+export const startWorkerTask = async (req, res) => {
   try {
     // Input validation using validation utilities
     const authValidation = validateAuthData(req);
@@ -1554,259 +1264,21 @@ export const getWorkerTaskDetails = async (req, res) => {
         success: false, 
         message: "Employee not found or unauthorized",
         error: "EMPLOYEE_UNAUTHORIZED"
-      });
-    }
-
-    // Validate task ID from URL parameter
-    const taskId = parseInt(req.params.taskId);
-    const taskIdValidation = validateId(taskId, "task assignment");
-    if (!taskIdValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: taskIdValidation.message,
-        error: taskIdValidation.error
-      });
-    }
-
-    // Find the task assignment
-    const assignment = await WorkerTaskAssignment.findOne({
-      id: taskIdValidation.id,
-      employeeId: employee.id
-    });
-
-    if (!assignment) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Task assignment not found or unauthorized",
-        error: "ASSIGNMENT_NOT_FOUND"
-      });
-    }
-
-    // Get task details
-    const task = await Task.findOne({ id: assignment.taskId });
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: "Task details not found",
-        error: "TASK_NOT_FOUND"
-      });
-    }
-
-    // Get project information
-    const project = await Project.findOne({ id: assignment.projectId });
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-        error: "PROJECT_NOT_FOUND"
-      });
-    }
-
-    // Get supervisor information
-    let supervisor = null;
-    if (assignment.supervisorId) {
-      supervisor = await Employee.findOne({ id: assignment.supervisorId });
-    }
-
-    // Get latest progress
-    const latestProgress = await WorkerTaskProgress.findOne({
-      workerTaskAssignmentId: assignment.id
-    }).sort({ submittedAt: -1 });
-
-    // Get task photos
-    const photos = await WorkerTaskPhoto.find({
-      workerTaskAssignmentId: assignment.id
-    }).sort({ uploadedAt: -1 });
-
-    // Calculate progress metrics
-    const progressValidation = validateProgressPercentage(assignment.progressPercent);
-    const progressPercent = progressValidation.percentage;
-
-    const dailyTarget = assignment.dailyTarget || {};
-    const targetQuantity = validateNumericValue(
-      dailyTarget.quantity, 
-      { min: 0, max: 10000, default: 0, fieldName: "target quantity" }
-    ).value;
-    
-    const completed = targetQuantity > 0 
-      ? Math.floor((progressPercent / 100) * targetQuantity) 
-      : 0;
-    const remaining = Math.max(0, targetQuantity - completed);
-
-    // Calculate time estimates
-    const timeEstimate = assignment.timeEstimate || {};
-    const estimatedMinutes = validateNumericValue(
-      timeEstimate.estimated, 
-      { min: 0, max: 1440, default: 0, fieldName: "estimated time" }
-    ).value;
-    const elapsedMinutes = validateNumericValue(
-      timeEstimate.elapsed, 
-      { min: 0, max: estimatedMinutes, default: 0, fieldName: "elapsed time" }
-    ).value;
-    const remainingMinutes = Math.max(0, estimatedMinutes - elapsedMinutes);
-
-    // Calculate estimated end time
-    let estimatedEndTime = null;
-    if (assignment.startTime && remainingMinutes > 0) {
-      const startTime = new Date(assignment.startTime);
-      if (!isNaN(startTime.getTime())) {
-        estimatedEndTime = new Date(startTime.getTime() + remainingMinutes * 60000);
-      }
-    } else if (remainingMinutes > 0) {
-      const now = new Date();
-      estimatedEndTime = new Date(now.getTime() + remainingMinutes * 60000);
-    }
-
-    // Check if task can be started
-    let canStart = true;
-    let validationMessage = null;
-    
-    if (assignment.dependencies && assignment.dependencies.length > 0) {
-      const dependencyResult = await checkDependencies(assignment.dependencies);
-      canStart = dependencyResult.canStart;
-      if (!canStart) {
-        validationMessage = dependencyResult.message;
-      }
-    }
-    
-    if (canStart) {
-      const sequenceResult = await validateTaskSequence(assignment, assignment.employeeId, assignment.date);
-      canStart = sequenceResult.canStart;
-      if (!canStart) {
-        validationMessage = sequenceResult.message;
-      }
-    }
-
-    const response = {
-      success: true,
-      data: {
-        assignmentId: assignment.id,
-        taskId: assignment.taskId,
-        taskName: task.taskName || "N/A",
-        taskType: task.taskType || "WORK",
-        description: task.description || "",
-        workArea: assignment.workArea || "",
-        floor: assignment.floor || "",
-        zone: assignment.zone || "",
-        status: assignment.status || "queued",
-        priority: assignment.priority || "medium",
-        sequence: assignment.sequence || 0,
-        project: {
-          id: project.id,
-          name: project.projectName || "N/A",
-          location: project.address || "N/A"
-        },
-        supervisor: {
-          id: supervisor?.id || 0,
-          name: supervisor?.fullName || "N/A",
-          phone: supervisor?.phone || "N/A"
-        },
-        dailyTarget: {
-          description: validateStringField(
-            dailyTarget.description, 
-            { maxLength: 500, default: "", fieldName: "daily target description" }
-          ).value,
-          quantity: targetQuantity,
-          unit: validateStringField(
-            dailyTarget.unit, 
-            { maxLength: 50, default: "", fieldName: "target unit" }
-          ).value,
-          targetCompletion: validateNumericValue(
-            dailyTarget.targetCompletion, 
-            { min: 0, max: 100, default: 100, fieldName: "target completion" }
-          ).value
-        },
-        progress: {
-          percentage: progressPercent,
-          completed: completed,
-          remaining: remaining,
-          lastUpdated: latestProgress?.submittedAt || null
-        },
-        timeEstimate: {
-          estimated: estimatedMinutes,
-          elapsed: elapsedMinutes,
-          remaining: remainingMinutes
-        },
-        startTime: assignment.startTime,
-        estimatedEndTime: estimatedEndTime,
-        canStart: canStart,
-        canStartMessage: validationMessage,
-        dependencies: assignment.dependencies || [],
-        photos: photos.map(photo => ({
-          id: photo.id,
-          photoUrl: photo.photoUrl,
-          caption: photo.caption || "",
-          uploadedAt: photo.uploadedAt
-        }))
-      }
-    };
-
-    return res.json(response);
-
-  } catch (err) {
-    console.error("❌ getWorkerTaskDetails:", err);
-    
-    if (err.name === 'ValidationError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Data validation error",
-        error: "VALIDATION_ERROR"
-      });
-    }
-    
-    if (err.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid data format",
-        error: "INVALID_DATA_FORMAT"
-      });
-    }
-    
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal server error",
-      error: "INTERNAL_SERVER_ERROR"
-    });
-  }
-};
-
-/* ----------------------------------------------------
-   POST /worker/tasks/{taskId}/start - Start a task with geofence validation
----------------------------------------------------- */
-export const startWorkerTaskById = async (req, res) => {
-  try {
-    // Input validation using validation utilities
-    const authValidation = validateAuthData(req);
-    if (!authValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: authValidation.message,
-        error: authValidation.error
-      });
-    }
-
-    const employee = await resolveEmployee(req);
-    if (!employee) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Employee not found or unauthorized",
-        error: "EMPLOYEE_UNAUTHORIZED"
-      });
-    }
-
-    // Validate task ID from URL parameter
-    const taskId = parseInt(req.params.taskId);
-    const taskIdValidation = validateId(taskId, "task assignment");
-    if (!taskIdValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: taskIdValidation.message,
-        error: taskIdValidation.error
       });
     }
 
     // Validate request body
-    const { location } = req.body;
+    const { assignmentId, location } = req.body;
+
+    // Validate assignment ID
+    const assignmentIdValidation = validateId(assignmentId, "assignment");
+    if (!assignmentIdValidation.isValid) {
+      return res.status(400).json({ 
+        success: false, 
+        message: assignmentIdValidation.message,
+        error: assignmentIdValidation.error
+      });
+    }
 
     // Validate location data
     if (!location) {
@@ -1840,7 +1312,7 @@ export const startWorkerTaskById = async (req, res) => {
 
     // Find the task assignment
     const assignment = await WorkerTaskAssignment.findOne({
-      id: taskIdValidation.id,
+      id: assignmentIdValidation.id,
       employeeId: employee.id
     });
 
@@ -1945,7 +1417,6 @@ export const startWorkerTaskById = async (req, res) => {
 
     // Update task assignment status
     const startTime = new Date();
-    const previousStatus = assignment.status;
     assignment.status = 'in_progress';
     assignment.startTime = startTime;
     
@@ -1961,26 +1432,9 @@ export const startWorkerTaskById = async (req, res) => {
 
     await assignment.save();
 
-    // Send task status change notification to supervisor
-    try {
-      if (assignment.supervisorId) {
-        await TaskNotificationService.notifyTaskStatusChange(
-          assignment, 
-          previousStatus, 
-          'in_progress', 
-          assignment.supervisorId
-        );
-        console.log(`✅ Task start notification sent to supervisor ${assignment.supervisorId}`);
-      }
-    } catch (notificationError) {
-      console.error("❌ Error sending task start notification:", notificationError);
-      // Don't fail the request if notifications fail
-    }
-
     // Log location for audit trail
     try {
-      const lastLocationLog = await LocationLog.findOne().sort({ id: -1 }).select("id");
-      const nextLocationId = lastLocationLog ? lastLocationLog.id + 1 : 1;
+      const nextLocationId = await getNextId(LocationLog);
 
       await LocationLog.create({
         id: nextLocationId,
@@ -2022,7 +1476,7 @@ export const startWorkerTaskById = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ startWorkerTaskById:", err);
+    console.error("❌ startWorkerTask:", err);
     
     // Determine error type and provide appropriate response
     if (err.name === 'ValidationError') {
@@ -2045,906 +1499,6 @@ export const startWorkerTaskById = async (req, res) => {
       success: false, 
       message: "Internal server error",
       error: "INTERNAL_SERVER_ERROR"
-    });
-  }
-};
-
-/* ----------------------------------------------------
-   PUT /worker/tasks/{taskId}/progress - Update task progress
----------------------------------------------------- */
-export const updateWorkerTaskProgress = async (req, res) => {
-  try {
-    // Input validation using validation utilities
-    const authValidation = validateAuthData(req);
-    if (!authValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: authValidation.message,
-        error: authValidation.error
-      });
-    }
-
-    const employee = await resolveEmployee(req);
-    if (!employee) {  
-      return res.status(403).json({ 
-        success: false, 
-        message: "Employee not found or unauthorized",
-        error: "EMPLOYEE_UNAUTHORIZED"
-      });
-    }
-
-    // Validate task ID from URL parameter
-    const taskId = parseInt(req.params.taskId);
-    const taskIdValidation = validateId(taskId, "task assignment");
-    if (!taskIdValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: taskIdValidation.message,
-        error: taskIdValidation.error
-      });
-    }
-
-    // Validate request body - enhanced to match design specification
-    const { 
-      progressPercent, 
-      description, 
-      notes, 
-      location,
-      completedQuantity,
-      issuesEncountered 
-    } = req.body;
-
-    // Validate progress percentage
-    const progressValidation = validateProgressPercentage(progressPercent);
-    if (!progressValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: progressValidation.message,
-        error: progressValidation.error
-      });
-    }
-
-    // Validate description (required field)
-    const descriptionValidation = validateStringField(description, { 
-      maxLength: 1000, 
-      required: true,
-      fieldName: "description"
-    });
-    
-    if (!descriptionValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: descriptionValidation.message,
-        error: descriptionValidation.error
-      });
-    }
-    
-    const notesValidation = validateStringField(notes, { 
-      maxLength: 500, 
-      default: "", 
-      fieldName: "notes" 
-    });
-
-    // Validate location if provided
-    let validatedLocation = null;
-    if (location) {
-      const coordValidation = validateCoordinates(location.latitude, location.longitude);
-      if (coordValidation.isValid) {
-        validatedLocation = {
-          latitude: coordValidation.latitude,
-          longitude: coordValidation.longitude,
-          timestamp: location.timestamp ? new Date(location.timestamp) : new Date()
-        };
-      } else {
-        console.warn("⚠️ Invalid location coordinates provided:", coordValidation.message);
-      }
-    }
-
-    // Validate completed quantity if provided
-    let validatedCompletedQuantity = null;
-    if (completedQuantity !== undefined) {
-      const quantityValidation = validateNumericValue(completedQuantity, {
-        min: 0,
-        max: 100000,
-        default: null,
-        fieldName: "completed quantity"
-      });
-      validatedCompletedQuantity = quantityValidation.value;
-    }
-
-    // Validate issues encountered if provided
-    let validatedIssues = [];
-    if (issuesEncountered && Array.isArray(issuesEncountered)) {
-      validatedIssues = issuesEncountered.slice(0, 10).map(issue => {
-        if (typeof issue === 'string') {
-          return validateStringField(issue, { 
-            maxLength: 200, 
-            default: "", 
-            fieldName: "issue" 
-          }).value;
-        }
-        return "";
-      }).filter(issue => issue.length > 0);
-    }
-
-    // Find the task assignment
-    const assignment = await WorkerTaskAssignment.findOne({
-      id: taskIdValidation.id,
-      employeeId: employee.id
-    });
-
-    if (!assignment) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Task assignment not found or unauthorized",
-        error: "ASSIGNMENT_UNAUTHORIZED"
-      });
-    }
-
-    // Check if task is in a valid state for progress updates
-    if (assignment.status === 'completed') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Cannot update progress for completed task",
-        error: "TASK_ALREADY_COMPLETED"
-      });
-    }
-
-    if (assignment.status === 'queued') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Task must be started before progress can be updated",
-        error: "TASK_NOT_STARTED"
-      });
-    }
-
-    // Validate progress logic - cannot decrease progress
-    const currentProgress = assignment.progressPercent || 0;
-    if (progressValidation.percentage < currentProgress) {
-      return res.status(400).json({ 
-        success: false, 
-        message: `Progress percentage cannot be decreased from ${currentProgress}% to ${progressValidation.percentage}%`,
-        error: "INVALID_PROGRESS_DECREASE",
-        data: {
-          currentProgress: currentProgress,
-          attemptedProgress: progressValidation.percentage
-        }
-      });
-    }
-
-    // Create WorkerTaskProgress record
-    const last = await WorkerTaskProgress.findOne().sort({ id: -1 }).select("id");
-    const nextId = last ? last.id + 1 : 1;
-
-    const submittedAt = new Date();
-    const progressRecord = await WorkerTaskProgress.create({
-      id: nextId,
-      workerTaskAssignmentId: taskIdValidation.id,
-      employeeId: employee.id,
-      progressPercent: progressValidation.percentage,
-      description: descriptionValidation.value,
-      notes: notesValidation.value,
-      location: validatedLocation,
-      completedQuantity: validatedCompletedQuantity,
-      issuesEncountered: validatedIssues,
-      submittedAt: submittedAt,
-      status: "SUBMITTED"
-    });
-
-    // Update assignment progress and status
-    const previousProgress = assignment.progressPercent || 0;
-    const previousStatus = assignment.status;
-    assignment.progressPercent = progressValidation.percentage;
-    
-    // Update status based on progress
-    if (progressValidation.percentage >= 100) {
-      assignment.status = "completed";
-      assignment.completedAt = submittedAt;
-    } else if (assignment.status === 'queued') {
-      assignment.status = "in_progress";
-      if (!assignment.startTime) {
-        assignment.startTime = submittedAt;
-      }
-    }
-
-    // Update time estimates if available
-    if (assignment.timeEstimate) {
-      const progressDelta = progressValidation.percentage - previousProgress;
-      if (progressDelta > 0 && assignment.timeEstimate.estimated > 0) {
-        const estimatedElapsed = (progressValidation.percentage / 100) * assignment.timeEstimate.estimated;
-        assignment.timeEstimate.elapsed = Math.min(estimatedElapsed, assignment.timeEstimate.estimated);
-        assignment.timeEstimate.remaining = Math.max(0, assignment.timeEstimate.estimated - assignment.timeEstimate.elapsed);
-      }
-    }
-
-    await assignment.save();
-
-    // Send task status change notification to supervisor if status changed
-    try {
-      if (assignment.supervisorId && previousStatus !== assignment.status) {
-        await TaskNotificationService.notifyTaskStatusChange(
-          assignment, 
-          previousStatus, 
-          assignment.status, 
-          assignment.supervisorId
-        );
-        console.log(`✅ Task status change notification sent to supervisor ${assignment.supervisorId}`);
-      }
-    } catch (notificationError) {
-      console.error("❌ Error sending task status change notification:", notificationError);
-      // Don't fail the request if notifications fail
-    }
-
-    // Log location for audit trail if provided
-    if (validatedLocation) {
-      try {
-        const lastLocationLog = await LocationLog.findOne().sort({ id: -1 }).select("id");
-        const nextLocationId = lastLocationLog ? lastLocationLog.id + 1 : 1;
-
-        await LocationLog.create({
-          id: nextLocationId,
-          employeeId: employee.id,
-          projectId: assignment.projectId,
-          latitude: validatedLocation.latitude,
-          longitude: validatedLocation.longitude,
-          logType: 'PROGRESS_UPDATE',
-          taskAssignmentId: assignment.id,
-          progressPercent: progressValidation.percentage
-        });
-      } catch (locationLogError) {
-        console.error("❌ Error logging location for progress update:", locationLogError);
-        // Don't fail the request if location logging fails
-      }
-    }
-
-    // Determine next action based on progress and status
-    let nextAction = "continue_work";
-    if (progressValidation.percentage >= 100) {
-      nextAction = "task_completed";
-    } else if (validatedIssues.length > 0) {
-      nextAction = "resolve_issues";
-    }
-
-    // Return response matching design specification
-    return res.json({ 
-      success: true, 
-      message: "Progress updated successfully",
-      data: {
-        progressId: progressRecord.id,
-        assignmentId: assignment.id,
-        progressPercent: progressValidation.percentage,
-        submittedAt: submittedAt,
-        status: "SUBMITTED",
-        nextAction: nextAction,
-        taskStatus: assignment.status,
-        previousProgress: previousProgress,
-        progressDelta: progressValidation.percentage - previousProgress
-      }
-    });
-
-  } catch (err) {
-    console.error("❌ updateWorkerTaskProgress:", err);
-    
-    // Determine error type and provide appropriate response
-    if (err.name === 'ValidationError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Data validation error",
-        error: "VALIDATION_ERROR"
-      });
-    }
-    
-    if (err.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid data format",
-        error: "INVALID_DATA_FORMAT"
-      });
-    }
-    
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal server error",
-      error: "INTERNAL_SERVER_ERROR"
-    });
-  }
-};
-
-/* ----------------------------------------------------
-   POST /worker/tasks/{taskId}/complete - Complete task
----------------------------------------------------- */
-export const completeWorkerTask = async (req, res) => {
-  try {
-    // Input validation using validation utilities
-    const authValidation = validateAuthData(req);
-    if (!authValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: authValidation.message,
-        error: authValidation.error
-      });
-    }
-
-    const employee = await resolveEmployee(req);
-    if (!employee) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Employee not found or unauthorized",
-        error: "EMPLOYEE_UNAUTHORIZED"
-      });
-    }
-
-    // Validate task ID from URL parameter
-    const taskId = parseInt(req.params.taskId);
-    const taskIdValidation = validateId(taskId, "task assignment");
-    if (!taskIdValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: taskIdValidation.message,
-        error: taskIdValidation.error
-      });
-    }
-
-    // Validate request body
-    const { 
-      completionNotes, 
-      finalPhotos, 
-      location,
-      actualQuantityCompleted,
-      qualityCheck 
-    } = req.body;
-
-    // Validate completion notes (required)
-    const notesValidation = validateStringField(completionNotes, { 
-      maxLength: 1000, 
-      required: true,
-      fieldName: "completion notes"
-    });
-    
-    if (!notesValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: notesValidation.message,
-        error: notesValidation.error
-      });
-    }
-
-    // Validate location if provided
-    let validatedLocation = null;
-    if (location) {
-      const coordValidation = validateCoordinates(location.latitude, location.longitude);
-      if (coordValidation.isValid) {
-        validatedLocation = {
-          latitude: coordValidation.latitude,
-          longitude: coordValidation.longitude,
-          timestamp: location.timestamp ? new Date(location.timestamp) : new Date()
-        };
-      } else {
-        console.warn("⚠️ Invalid location coordinates provided:", coordValidation.message);
-      }
-    }
-
-    // Validate actual quantity completed if provided
-    let validatedQuantity = null;
-    if (actualQuantityCompleted !== undefined) {
-      const quantityValidation = validateNumericValue(actualQuantityCompleted, {
-        min: 0,
-        max: 100000,
-        default: null,
-        fieldName: "actual quantity completed"
-      });
-      validatedQuantity = quantityValidation.value;
-    }
-
-    // Find the task assignment
-    const assignment = await WorkerTaskAssignment.findOne({
-      id: taskIdValidation.id,
-      employeeId: employee.id
-    });
-
-    if (!assignment) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Task assignment not found or unauthorized",
-        error: "ASSIGNMENT_UNAUTHORIZED"
-      });
-    }
-
-    // Check if task is already completed
-    if (assignment.status === 'completed') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Task is already completed",
-        error: "TASK_ALREADY_COMPLETED"
-      });
-    }
-
-    // Check if task is in progress (must be started to complete)
-    if (assignment.status === 'queued') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Task must be started before it can be completed",
-        error: "TASK_NOT_STARTED"
-      });
-    }
-
-    // Update assignment to completed status
-    const completedAt = new Date();
-    const previousStatus = assignment.status;
-    assignment.status = 'completed';
-    assignment.completedAt = completedAt;
-    assignment.progressPercent = 100;
-
-    // Update completion details
-    assignment.completionNotes = notesValidation.value;
-    if (validatedQuantity !== null) {
-      assignment.actualQuantityCompleted = validatedQuantity;
-    }
-    if (qualityCheck) {
-      assignment.qualityCheck = {
-        passed: Boolean(qualityCheck.passed),
-        notes: validateStringField(qualityCheck.notes, { 
-          maxLength: 500, 
-          default: "", 
-          fieldName: "quality check notes" 
-        }).value
-      };
-    }
-
-    // Calculate total time spent
-    let totalTimeSpent = 0;
-    if (assignment.startTime) {
-      totalTimeSpent = Math.round((completedAt - new Date(assignment.startTime)) / (1000 * 60)); // in minutes
-    }
-
-    // Update time estimates
-    if (assignment.timeEstimate) {
-      assignment.timeEstimate.elapsed = totalTimeSpent;
-      assignment.timeEstimate.remaining = 0;
-    }
-
-    await assignment.save();
-
-    // Create final progress record
-    try {
-      const last = await WorkerTaskProgress.findOne().sort({ id: -1 }).select("id");
-      const nextId = last ? last.id + 1 : 1;
-
-      await WorkerTaskProgress.create({
-        id: nextId,
-        workerTaskAssignmentId: taskIdValidation.id,
-        employeeId: employee.id,
-        progressPercent: 100,
-        description: "Task completed",
-        notes: notesValidation.value,
-        location: validatedLocation,
-        completedQuantity: validatedQuantity,
-        submittedAt: completedAt,
-        status: "COMPLETED"
-      });
-    } catch (progressError) {
-      console.error("❌ Error creating completion progress record:", progressError);
-      // Don't fail the request if progress logging fails
-    }
-
-    // Send task completion notification to supervisor
-    try {
-      if (assignment.supervisorId) {
-        await TaskNotificationService.notifyTaskStatusChange(
-          assignment, 
-          previousStatus, 
-          'completed', 
-          assignment.supervisorId
-        );
-        console.log(`✅ Task completion notification sent to supervisor ${assignment.supervisorId}`);
-      }
-    } catch (notificationError) {
-      console.error("❌ Error sending task completion notification:", notificationError);
-      // Don't fail the request if notifications fail
-    }
-
-    // Log location for audit trail if provided
-    if (validatedLocation) {
-      try {
-        const lastLocationLog = await LocationLog.findOne().sort({ id: -1 }).select("id");
-        const nextLocationId = lastLocationLog ? lastLocationLog.id + 1 : 1;
-
-        await LocationLog.create({
-          id: nextLocationId,
-          employeeId: employee.id,
-          projectId: assignment.projectId,
-          latitude: validatedLocation.latitude,
-          longitude: validatedLocation.longitude,
-          logType: 'TASK_COMPLETION',
-          taskAssignmentId: assignment.id,
-          progressPercent: 100
-        });
-      } catch (locationLogError) {
-        console.error("❌ Error logging location for task completion:", locationLogError);
-        // Don't fail the request if location logging fails
-      }
-    }
-
-    // Find next task in sequence if any
-    let nextTask = null;
-    try {
-      const nextAssignment = await WorkerTaskAssignment.findOne({
-        employeeId: employee.id,
-        date: assignment.date,
-        projectId: assignment.projectId,
-        sequence: assignment.sequence + 1,
-        status: 'queued'
-      });
-
-      if (nextAssignment) {
-        const nextTaskDetails = await Task.findOne({ id: nextAssignment.taskId });
-        
-        // Check if next task can be started
-        let canStart = true;
-        if (nextAssignment.dependencies && nextAssignment.dependencies.length > 0) {
-          const dependencyResult = await checkDependencies(nextAssignment.dependencies);
-          canStart = dependencyResult.canStart;
-        }
-        
-        if (canStart) {
-          const sequenceResult = await validateTaskSequence(nextAssignment, employee.id, nextAssignment.date);
-          canStart = sequenceResult.canStart;
-        }
-
-        nextTask = {
-          assignmentId: nextAssignment.id,
-          taskName: nextTaskDetails?.taskName || "Next Task",
-          canStart: canStart
-        };
-      }
-    } catch (nextTaskError) {
-      console.error("❌ Error finding next task:", nextTaskError);
-      // Don't fail the request if next task lookup fails
-    }
-
-    return res.json({
-      success: true,
-      message: "Task completed successfully",
-      data: {
-        assignmentId: assignment.id,
-        status: "completed",
-        completedAt: completedAt,
-        totalTimeSpent: totalTimeSpent,
-        finalProgress: 100,
-        nextTask: nextTask
-      }
-    });
-
-  } catch (err) {
-    console.error("❌ completeWorkerTask:", err);
-    
-    // Determine error type and provide appropriate response
-    if (err.name === 'ValidationError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Data validation error",
-        error: "VALIDATION_ERROR"
-      });
-    }
-    
-    if (err.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid data format",
-        error: "INVALID_DATA_FORMAT"
-      });
-    }
-    
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal server error",
-      error: "INTERNAL_SERVER_ERROR"
-    });
-  }
-};
-
-/* ----------------------------------------------------
-   GET /worker/tasks/history - Get worker's task history
----------------------------------------------------- */
-export const getWorkerTaskHistory = async (req, res) => {
-  try {
-    // Input validation using validation utilities
-    const authValidation = validateAuthData(req);
-    if (!authValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: authValidation.message,
-        error: authValidation.error
-      });
-    }
-
-    const employee = await resolveEmployee(req);
-    if (!employee) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Employee not found or unauthorized",
-        error: "EMPLOYEE_UNAUTHORIZED"
-      });
-    }
-
-    // Parse and validate query parameters
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100); // Max 100 items per page
-    const startDate = req.query.startDate;
-    const endDate = req.query.endDate;
-    const status = req.query.status;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId) : null;
-
-    // Validate pagination parameters
-    if (page < 1) {
-      return res.status(400).json({
-        success: false,
-        message: "Page number must be greater than 0",
-        error: "INVALID_PAGE_NUMBER"
-      });
-    }
-
-    if (limit < 1) {
-      return res.status(400).json({
-        success: false,
-        message: "Limit must be greater than 0",
-        error: "INVALID_LIMIT"
-      });
-    }
-
-    // Build query filter
-    const filter = {
-      employeeId: employee.id
-    };
-
-    // Add date range filter if provided
-    if (startDate || endDate) {
-      filter.date = {};
-      if (startDate) {
-        const startDateValidation = validateDateString(startDate, true);
-        if (!startDateValidation.isValid) {
-          return res.status(400).json({
-            success: false,
-            message: startDateValidation.message,
-            error: startDateValidation.error
-          });
-        }
-        filter.date.$gte = startDateValidation.date;
-      }
-      if (endDate) {
-        const endDateValidation = validateDateString(endDate, true);
-        if (!endDateValidation.isValid) {
-          return res.status(400).json({
-            success: false,
-            message: endDateValidation.message,
-            error: endDateValidation.error
-          });
-        }
-        filter.date.$lte = endDateValidation.date;
-      }
-    }
-
-    // Add status filter if provided
-    if (status) {
-      const validStatuses = ['queued', 'in_progress', 'completed', 'blocked', 'cancelled'];
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
-          error: "INVALID_STATUS"
-        });
-      }
-      filter.status = status;
-    }
-
-    // Add project filter if provided
-    if (projectId) {
-      const projectIdValidation = validateId(projectId, "project");
-      if (!projectIdValidation.isValid) {
-        return res.status(400).json({
-          success: false,
-          message: projectIdValidation.message,
-          error: projectIdValidation.error
-        });
-      }
-      filter.projectId = projectIdValidation.id;
-    }
-
-    // Calculate skip for pagination
-    const skip = (page - 1) * limit;
-
-    // Get total count for pagination
-    const totalTasks = await WorkerTaskAssignment.countDocuments(filter);
-
-    // Get task assignments with pagination
-    const assignments = await WorkerTaskAssignment.find(filter)
-      .sort({ date: -1, sequence: 1 }) // Most recent first, then by sequence
-      .skip(skip)
-      .limit(limit);
-
-    if (assignments.length === 0) {
-      return res.json({
-        success: true,
-        data: {
-          tasks: [],
-          pagination: {
-            currentPage: page,
-            totalPages: 0,
-            totalTasks: 0,
-            hasNext: false,
-            hasPrevious: false
-          },
-          summary: {
-            totalCompleted: 0,
-            totalInProgress: 0,
-            totalHoursWorked: 0,
-            averageTaskTime: 0
-          }
-        }
-      });
-    }
-
-    // Get task and project details for each assignment
-    const taskDetails = await Promise.all(assignments.map(async (assignment) => {
-      try {
-        const [task, project] = await Promise.all([
-          Task.findOne({ id: assignment.taskId }).select('taskName taskType'),
-          Project.findOne({ id: assignment.projectId }).select('projectName')
-        ]);
-
-        // Calculate time spent
-        let timeSpent = 0;
-        if (assignment.startTime && assignment.completedAt) {
-          timeSpent = Math.round((new Date(assignment.completedAt) - new Date(assignment.startTime)) / (1000 * 60)); // in minutes
-        } else if (assignment.startTime && assignment.status === 'in_progress') {
-          timeSpent = Math.round((new Date() - new Date(assignment.startTime)) / (1000 * 60)); // in minutes
-        }
-
-        return {
-          assignmentId: assignment.id,
-          taskId: assignment.taskId,
-          taskName: task?.taskName || "N/A",
-          taskType: task?.taskType || "WORK",
-          projectName: project?.projectName || "N/A",
-          status: assignment.status,
-          startTime: assignment.startTime,
-          completedAt: assignment.completedAt,
-          progressPercent: assignment.progressPercent || 0,
-          timeSpent: timeSpent,
-          workArea: assignment.workArea || "",
-          date: assignment.date
-        };
-      } catch (error) {
-        console.error("❌ Error processing task assignment:", assignment.id, error);
-        return {
-          assignmentId: assignment.id,
-          taskId: assignment.taskId,
-          taskName: "Error Loading Task",
-          taskType: "WORK",
-          projectName: "N/A",
-          status: assignment.status,
-          startTime: assignment.startTime,
-          completedAt: assignment.completedAt,
-          progressPercent: assignment.progressPercent || 0,
-          timeSpent: 0,
-          workArea: assignment.workArea || "",
-          date: assignment.date
-        };
-      }
-    }));
-
-    // Calculate pagination info
-    const totalPages = Math.ceil(totalTasks / limit);
-    const hasNext = page < totalPages;
-    const hasPrevious = page > 1;
-
-    // Calculate summary statistics
-    const allAssignments = await WorkerTaskAssignment.find({
-      employeeId: employee.id
-    });
-
-    const totalCompleted = allAssignments.filter(a => a.status === 'completed').length;
-    const totalInProgress = allAssignments.filter(a => a.status === 'in_progress').length;
-    
-    // Calculate total hours worked
-    const totalMinutesWorked = allAssignments.reduce((total, assignment) => {
-      if (assignment.startTime && assignment.completedAt) {
-        return total + Math.round((new Date(assignment.completedAt) - new Date(assignment.startTime)) / (1000 * 60));
-      }
-      return total;
-    }, 0);
-    
-    const totalHoursWorked = Math.round((totalMinutesWorked / 60) * 100) / 100; // Round to 2 decimal places
-    const averageTaskTime = totalCompleted > 0 ? Math.round((totalHoursWorked / totalCompleted) * 100) / 100 : 0;
-
-    return res.json({
-      success: true,
-      data: {
-        tasks: taskDetails,
-        pagination: {
-          currentPage: page,
-          totalPages: totalPages,
-          totalTasks: totalTasks,
-          hasNext: hasNext,
-          hasPrevious: hasPrevious
-        },
-        summary: {
-          totalCompleted: totalCompleted,
-          totalInProgress: totalInProgress,
-          totalHoursWorked: totalHoursWorked,
-          averageTaskTime: averageTaskTime
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error("❌ getWorkerTaskHistory:", err);
-    
-    // Determine error type and provide appropriate response
-    if (err.name === 'ValidationError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Data validation error",
-        error: "VALIDATION_ERROR"
-      });
-    }
-    
-    if (err.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid data format",
-        error: "INVALID_DATA_FORMAT"
-      });
-    }
-    
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal server error",
-      error: "INTERNAL_SERVER_ERROR"
-    });
-  }
-};
-
-/* ----------------------------------------------------
-   Legacy endpoint - keeping for backward compatibility
-   POST /worker/task/start - Start a task with geofence validation
----------------------------------------------------- */
-export const startWorkerTask = async (req, res) => {
-  try {
-    // Input validation using validation utilities
-    const authValidation = validateAuthData(req);
-    if (!authValidation.isValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: authValidation.message,
-        error: authValidation.error
-      });
-    }
-
-    const employee = await resolveEmployee(req);
-    if (!employee) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Employee not found or unauthorized",
-        error: "EMPLOYEE_UNAUTHORIZED"
-      });
-    }
-
-    // Validate request body
-    const { assignmentId, location } = req.body;
-
-    // TODO: Complete the startWorkerTask function implementation
-    return res.status(501).json({
-      success: false,
-      message: "Function implementation incomplete"
-    });
-
-  } catch (err) {
-    console.error("Error in startWorkerTask:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: err.message
     });
   }
 };
@@ -3114,8 +1668,7 @@ export const submitWorkerTaskProgress = async (req, res) => {
     }
 
     // Create WorkerTaskProgress record
-    const last = await WorkerTaskProgress.findOne().sort({ id: -1 }).select("id");
-    const nextId = last ? last.id + 1 : 1;
+    const nextId = await getNextId(WorkerTaskProgress);
 
     const submittedAt = new Date();
     const progressRecord = await WorkerTaskProgress.create({
@@ -3134,7 +1687,6 @@ export const submitWorkerTaskProgress = async (req, res) => {
 
     // Update assignment progress and status
     const previousProgress = assignment.progressPercent || 0;
-    const previousStatus = assignment.status;
     assignment.progressPercent = progressValidation.percentage;
     
     // Update status based on progress
@@ -3160,27 +1712,10 @@ export const submitWorkerTaskProgress = async (req, res) => {
 
     await assignment.save();
 
-    // Send task status change notification to supervisor if status changed
-    try {
-      if (assignment.supervisorId && previousStatus !== assignment.status) {
-        await TaskNotificationService.notifyTaskStatusChange(
-          assignment, 
-          previousStatus, 
-          assignment.status, 
-          assignment.supervisorId
-        );
-        console.log(`✅ Task status change notification sent to supervisor ${assignment.supervisorId}`);
-      }
-    } catch (notificationError) {
-      console.error("❌ Error sending task status change notification:", notificationError);
-      // Don't fail the request if notifications fail
-    }
-
     // Log location for audit trail if provided
     if (validatedLocation) {
       try {
-        const lastLocationLog = await LocationLog.findOne().sort({ id: -1 }).select("id");
-        const nextLocationId = lastLocationLog ? lastLocationLog.id + 1 : 1;
+        const nextLocationId = await getNextId(LocationLog);
 
         await LocationLog.create({
           id: nextLocationId,
@@ -3393,8 +1928,7 @@ export const uploadWorkerTaskPhotos = async (req, res) => {
       }
     }
 
-    const last = await WorkerTaskPhoto.findOne().sort({ id: -1 }).select("id");
-    let nextId = last ? last.id + 1 : 1;
+    let nextId = await getNextId(WorkerTaskPhoto);
 
     // Create photo records with enhanced naming convention
     const uploadTimestamp = Date.now();
@@ -3607,8 +2141,7 @@ export const reportWorkerTaskIssue = async (req, res) => {
     const { default: TaskIssue } = await import('./models/TaskIssue.js');
 
     // Get next ID for TaskIssue
-    const lastIssue = await TaskIssue.findOne().sort({ id: -1 }).select("id");
-    const nextId = lastIssue ? lastIssue.id + 1 : 1;
+    const nextId = await getNextId(TaskIssue);
 
     // Generate ticket number
     const ticketNumber = `ISSUE_${Date.now()}_${nextId}`;
@@ -3631,26 +2164,9 @@ export const reportWorkerTaskIssue = async (req, res) => {
     await issue.save();
 
     // Update assignment status if needed (optional)
-    const previousStatus = assignment.status;
     if (issuePriority === 'critical' || issuePriority === 'high') {
       assignment.status = 'blocked';
       await assignment.save();
-
-      // Send task status change notification to supervisor
-      try {
-        if (assignment.supervisorId) {
-          await TaskNotificationService.notifyTaskStatusChange(
-            assignment, 
-            previousStatus, 
-            'blocked', 
-            assignment.supervisorId
-          );
-          console.log(`✅ Task blocked notification sent to supervisor ${assignment.supervisorId}`);
-        }
-      } catch (notificationError) {
-        console.error("❌ Error sending task blocked notification:", notificationError);
-        // Don't fail the request if notifications fail
-      }
     }
 
     // Enhanced response format

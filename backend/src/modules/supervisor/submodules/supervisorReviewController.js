@@ -53,7 +53,7 @@ const endOfDayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(
      const attendance = await Attendance.findOne({
   employeeId: Number(assignment.employeeId),
   projectId: Number(projectId),
-  date: { $gte: startOfDayUTC, $lte: endOfDayUTC },
+  //date: { $gte: startOfDayUTC, $lte: endOfDayUTC },
   checkIn: { $ne: null }
 });
 

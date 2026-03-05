@@ -7,7 +7,6 @@ import Employee from "../employee/Employee.js";
 import WorkerTaskAssignment from "../worker/models/WorkerTaskAssignment.js";
 import nodemailer from "nodemailer";
 import { validateGeofence, calculateDistance } from "../../../utils/geofenceUtil.js";
-import AttendanceNotificationService from "../notification/services/AttendanceNotificationService.js";
 
 /* ---------------------------------------
    UTILS
@@ -117,7 +116,7 @@ export const submitAttendance = async (req, res) => {
     const employee = await Employee.findOne({
       userId,
       companyId,
-      status: { $in: ["active", "ACTIVE"] }
+      status: "active"
     });
     if (!employee) return res.status(403).json({ message: "Unauthorized employee" });
 
@@ -244,43 +243,11 @@ export const logLocation = async (req, res) => {
 
     /* 🚨 Alert if outside geofence */
     if (!insideGeofence) {
-      // Send email alert (existing functionality)
       await sendEmailAlert({
         to: ["admin@company.com"],
         subject: `🚨 Worker Outside Geofence`,
         html: `<p>${employee.fullName} is outside ${project.projectName}</p>`
       });
-
-      // Send mobile notification for geofence violation (Requirement 3.5)
-      try {
-        // Get supervisor ID from today's task assignment
-        const today = getTodayString();
-        const assignment = await WorkerTaskAssignment.findOne({
-          employeeId: employee.id,
-          projectId,
-          date: today
-        });
-
-        const supervisorId = assignment?.supervisorId || 1;
-
-        await AttendanceNotificationService.notifyGeofenceViolation(
-          employee.id,
-          {
-            currentLatitude: latitude,
-            currentLongitude: longitude,
-            projectLatitude: project.latitude,
-            projectLongitude: project.longitude,
-            geofenceRadius: project.geofenceRadius,
-            distance: distance,
-            projectId: projectId,
-            accuracy: req.body.accuracy
-          },
-          supervisorId
-        );
-      } catch (notificationError) {
-        console.error('❌ Error sending geofence violation notification:', notificationError);
-        // Don't fail the main request if notification fails
-      }
     }
 
     return res.json({ insideGeofence });
@@ -313,101 +280,6 @@ export const getAttendanceHistory = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to fetch attendance history" });
-  }
-};
-
-/* ---------------------------------------
-   CHECK ATTENDANCE ALERTS
---------------------------------------- */
-export const checkAttendanceAlerts = async (req, res) => {
-  try {
-    const currentTime = new Date();
-    
-    // Use the attendance notification service to check and send alerts
-    const results = await AttendanceNotificationService.checkAndNotifyAttendanceAlerts(currentTime);
-    
-    res.json({
-      success: true,
-      message: 'Attendance alerts checked and processed',
-      results: results
-    });
-  } catch (err) {
-    console.error('❌ Error checking attendance alerts:', err);
-    res.status(500).json({ message: "Failed to check attendance alerts" });
-  }
-};
-
-/* ---------------------------------------
-   SEND LUNCH BREAK REMINDER
---------------------------------------- */
-export const sendLunchBreakReminder = async (req, res) => {
-  try {
-    const { workerId, projectId } = req.body;
-    const { userId, companyId } = req.user;
-
-    // Verify the requesting user has permission (supervisor or admin)
-    const requestingEmployee = await Employee.findOne({ userId, companyId });
-    if (!requestingEmployee) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    // Send lunch break reminder
-    const result = await AttendanceNotificationService.notifyLunchBreakReminder(
-      workerId,
-      {
-        lunchBreakTime: '12:00 PM',
-        breakDuration: '1 hour',
-        projectId: projectId
-      },
-      requestingEmployee.id
-    );
-
-    res.json({
-      success: true,
-      message: 'Lunch break reminder sent',
-      result: result
-    });
-  } catch (err) {
-    console.error('❌ Error sending lunch break reminder:', err);
-    res.status(500).json({ message: "Failed to send lunch break reminder" });
-  }
-};
-
-/* ---------------------------------------
-   SEND OVERTIME ALERT
---------------------------------------- */
-export const sendOvertimeAlert = async (req, res) => {
-  try {
-    const { workerId, overtimeInfo, overtimeType } = req.body;
-    const { userId, companyId } = req.user;
-
-    // Verify the requesting user has permission (supervisor or admin)
-    const requestingEmployee = await Employee.findOne({ userId, companyId });
-    if (!requestingEmployee) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    // Validate overtime type
-    if (!['START', 'END'].includes(overtimeType)) {
-      return res.status(400).json({ message: "Invalid overtime type. Must be 'START' or 'END'" });
-    }
-
-    // Send overtime alert
-    const result = await AttendanceNotificationService.notifyOvertimeAlert(
-      workerId,
-      overtimeInfo,
-      overtimeType,
-      requestingEmployee.id
-    );
-
-    res.json({
-      success: true,
-      message: `Overtime ${overtimeType.toLowerCase()} alert sent`,
-      result: result
-    });
-  } catch (err) {
-    console.error('❌ Error sending overtime alert:', err);
-    res.status(500).json({ message: "Failed to send overtime alert" });
   }
 };
 

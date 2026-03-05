@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
-const BASE_URL = 'http://localhost:5002/api';
+const BASE_URL = 'http://localhost:5001/api';
 
 const testTripAPI = async () => {
   try {

@@ -8,14 +8,14 @@ import {
 } from './leaveRequestController.js';
 
 import { uploadLeaveDocuments } from '../../middleware/leaveUploadMiddleware.js';
-import { verifyToken } from '../../middleware/authMiddleware.js';
+import authMiddleware from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 /* Worker */
 router.post(
   '/',
-  verifyToken,uploadLeaveDocuments,
+  authMiddleware,uploadLeaveDocuments,
   raiseLeaveRequest
 );
 
@@ -31,12 +31,12 @@ router.get(
 );
 
 router.post(
-  '/:id/approve',verifyToken,
+  '/:id/approve',authMiddleware,
   approveLeaveRequest
 );
 
 router.post(
-  '/:id/reject',verifyToken,
+  '/:id/reject',authMiddleware,
   rejectLeaveRequest
 );
 

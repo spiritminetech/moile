@@ -85,7 +85,11 @@ export const authorizeRoles = (...allowedRoles) => (req, res, next) => {
     return res.status(401).json({ success: false, message: "Authentication required" });
   }
 
-  if (!allowedRoles.includes(req.user.role)) {
+  // Convert both user role and allowed roles to lowercase for case-insensitive comparison
+  const userRole = req.user.role?.toLowerCase();
+  const normalizedAllowedRoles = allowedRoles.map(role => role.toLowerCase());
+
+  if (!normalizedAllowedRoles.includes(userRole)) {
     return res.status(403).json({ 
       success: false, 
       message: `Access denied. Required roles: ${allowedRoles.join(", ")}` 

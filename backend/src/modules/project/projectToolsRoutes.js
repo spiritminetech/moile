@@ -4,12 +4,12 @@ import {
   getProjectTools, 
   getProjectMaterials 
 } from './projectToolsController.js';
-import { verifyToken } from '../../middleware/authMiddleware.js';
+import authMiddleware from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // Apply authentication middleware to all routes
-router.use(verifyToken);
+router.use(authMiddleware);
 
 // GET /api/project/tools-materials - Get tools and materials for worker's current project
 router.get('/tools-materials', getProjectToolsAndMaterials);

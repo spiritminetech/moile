@@ -1,11 +1,79 @@
 import express from 'express';
-import { getAssignedWorkers,removeQueuedTask, exportReport, refreshAttendance, getSupervisorProjects,getCheckedInWorkers,getProjectTasks,getWorkerTasks ,assignTask,completeTask,getWorkerTasksForDay ,getActiveTasks, updateTaskAssignment, sendOvertimeInstructions, updateDailyTargets, getLateAbsentWorkers, sendAttendanceAlert, getGeofenceViolations, getManualAttendanceWorkers, submitManualAttendanceOverride, getAttendanceMonitoring} from './supervisorController.js';
+import { getAssignedWorkers,removeQueuedTask, exportReport, refreshAttendance, getSupervisorProjects,getCheckedInWorkers,getProjectTasks,getWorkerTasks ,assignTask,completeTask,getWorkerTasksForDay ,getActiveTasks, getWorkforceCount, getAttendanceSummary, getPendingApprovals, processApproval, getAlerts, acknowledgeAlert, getEscalationStats} from './supervisorController.js';
+import { getSupervisorDashboard } from './supervisorDashboardController.js';
+import supervisorDashboardService from './supervisorDashboardService.js';
+import WorkerTaskAssignment from '../worker/models/WorkerTaskAssignment.js';
 import {getTodayWorkerSubmissions,reviewWorkerProgress} from "../supervisor/submodules/supervisorReviewController.js";
 const router = express.Router();
-import { verifyToken } from '../../middleware/authMiddleware.js';
+import authMiddleware, { verifyToken, authorizeRoles } from "../../middleware/authMiddleware.js";
 
 
 
+
+// Supervisor Dashboard - Complete dashboard data endpoint
+router.get('/:id/dashboard', verifyToken, authorizeRoles('supervisor'), getSupervisorDashboard);
+
+// Get assigned projects for supervisor
+router.get('/:id/projects', verifyToken, authorizeRoles('supervisor'), async (req, res) => {
+  try {
+    const { id: supervisorId } = req.params;
+    
+    // Get projects
+    const projects = await supervisorDashboardService.getAssignedProjects(Number(supervisorId));
+    const projectIds = projects.map(p => p.id);
+    
+    // Get current date
+    const todayDateString = new Date().toISOString().split('T')[0];
+    
+    // Get worker assignment counts for each project
+    const projectsWithWorkerCounts = await Promise.all(
+      projects.map(async (project) => {
+        const workerCount = await WorkerTaskAssignment.countDocuments({
+          projectId: project.id,
+          date: todayDateString
+        });
+        
+        return {
+          ...project.toObject(),
+          workerCount
+        };
+      })
+    );
+    
+    return res.status(200).json({
+      success: true,
+      data: projectsWithWorkerCounts
+    });
+  } catch (error) {
+    console.error('Get assigned projects error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching assigned projects',
+      error: error.message
+    });
+  }
+});
+
+// Get workforce count for supervisor
+router.get('/:id/workforce-count', verifyToken, authorizeRoles('supervisor'), getWorkforceCount);
+
+// Get attendance summary for supervisor
+router.get('/:id/attendance', verifyToken, authorizeRoles('supervisor'), getAttendanceSummary);
+
+// Get pending approvals for supervisor
+router.get('/:id/approvals', verifyToken, authorizeRoles('supervisor'), getPendingApprovals);
+
+// Process approval decision (approve/reject)
+router.post('/approval/:id/process', verifyToken, authorizeRoles('supervisor'), processApproval);
+
+// Get alerts for supervisor
+router.get('/:id/alerts', verifyToken, authorizeRoles('supervisor'), getAlerts);
+
+// Acknowledge alert
+router.post('/alert/:id/acknowledge', verifyToken, authorizeRoles('supervisor'), acknowledgeAlert);
+
+// Get escalation statistics (optional monitoring endpoint)
+router.get('/:id/escalation-stats', verifyToken, authorizeRoles('supervisor'), getEscalationStats);
 
 // Get checked-in workers for a project
 router.get('/checked-in-workers/:projectId', getCheckedInWorkers);
@@ -25,16 +93,7 @@ router.delete("/remove-queued-task", removeQueuedTask);
 
 
 // Assign task to worker
-router.post('/assign-task',verifyToken, assignTask);
-
-// Update task assignment (modification/reassignment)
-router.put('/update-assignment', verifyToken, updateTaskAssignment);
-
-// Send overtime instructions to workers
-router.post('/overtime-instructions', verifyToken, sendOvertimeInstructions);
-
-// Update daily targets for multiple assignments
-router.put('/daily-targets', verifyToken, updateDailyTargets);
+router.post('/assign-task',authMiddleware, assignTask);
 
 router.post("/complete",  completeTask);
 router.get("/worker/daily",  getWorkerTasksForDay);
@@ -44,42 +103,6 @@ router.get("/worker/daily",  getWorkerTasksForDay);
  * GET /api/supervisor/workers-assigned
  */
 router.get('/workers-assigned', getAssignedWorkers);
-
-/**
- * Route to fetch late and absent workers for a project
- * GET /api/supervisor/late-absent-workers
- */
-router.get('/late-absent-workers', getLateAbsentWorkers);
-
-/**
- * Route to send attendance alert to workers
- * POST /api/supervisor/send-attendance-alert
- */
-router.post('/send-attendance-alert', verifyToken, sendAttendanceAlert);
-
-/**
- * Route to get real-time geofence violations
- * GET /api/supervisor/geofence-violations
- */
-router.get('/geofence-violations', getGeofenceViolations);
-
-/**
- * Route to get workers for manual attendance override
- * GET /api/supervisor/manual-attendance-workers
- */
-router.get('/manual-attendance-workers', getManualAttendanceWorkers);
-
-/**
- * Route to submit manual attendance override
- * POST /api/supervisor/manual-attendance-override
- */
-router.post('/manual-attendance-override', verifyToken, submitManualAttendanceOverride);
-
-/**
- * Route to get comprehensive attendance monitoring data
- * GET /api/supervisor/attendance-monitoring
- */
-router.get('/attendance-monitoring', getAttendanceMonitoring);
 
 /**
  * Route to export the daily attendance report (CSV/PDF)

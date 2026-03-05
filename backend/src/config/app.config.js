@@ -28,7 +28,7 @@ class AppConfig {
   // Server Configuration
   get server() {
     return {
-      port: parseInt(process.env.PORT) || 5002,
+      port: parseInt(process.env.PORT) || 5001,
       environment: process.env.NODE_ENV || 'development',
       isDevelopment: process.env.NODE_ENV === 'development',
       isProduction: process.env.NODE_ENV === 'production'
@@ -37,11 +37,11 @@ class AppConfig {
 
   // CORS Configuration
   get cors() {
-    const frontendUrls = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',');
-    const driverUrls = (process.env.DRIVER_APP_URL || 'http://localhost:3000').split(',');
-    
     return {
-      origin: [...frontendUrls, ...driverUrls],
+      origin: [
+        process.env.FRONTEND_URL || 'http://localhost:3000',
+        process.env.DRIVER_APP_URL || 'http://localhost:3000'
+      ],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization']
@@ -103,69 +103,6 @@ class AppConfig {
     };
   }
 
-  // Firebase Configuration
-  get firebase() {
-    return {
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      privateKeyId: process.env.FIREBASE_PRIVATE_KEY_ID,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      clientId: process.env.FIREBASE_CLIENT_ID,
-      authUri: process.env.FIREBASE_AUTH_URI || 'https://accounts.google.com/o/oauth2/auth',
-      tokenUri: process.env.FIREBASE_TOKEN_URI || 'https://oauth2.googleapis.com/token',
-      authProviderX509CertUrl: process.env.FIREBASE_AUTH_PROVIDER_X509_CERT_URL || 'https://www.googleapis.com/oauth2/v1/certs',
-      clientX509CertUrl: process.env.FIREBASE_CLIENT_X509_CERT_URL,
-      databaseURL: process.env.FIREBASE_DATABASE_URL
-    };
-  }
-
-  // Notification Configuration
-  get notification() {
-    return {
-      dailyLimit: parseInt(process.env.NOTIFICATION_DAILY_LIMIT) || 10,
-      escalationTimeoutHours: parseInt(process.env.NOTIFICATION_ESCALATION_TIMEOUT_HOURS) || 2,
-      offlineQueueExpiryHours: parseInt(process.env.NOTIFICATION_OFFLINE_QUEUE_EXPIRY_HOURS) || 48,
-      retryAttempts: {
-        high: parseInt(process.env.NOTIFICATION_HIGH_PRIORITY_RETRIES) || 3,
-        normal: parseInt(process.env.NOTIFICATION_NORMAL_PRIORITY_RETRIES) || 1,
-        low: parseInt(process.env.NOTIFICATION_LOW_PRIORITY_RETRIES) || 1
-      },
-      deliveryTimeouts: {
-        critical: parseInt(process.env.NOTIFICATION_CRITICAL_TIMEOUT_SECONDS) || 30,
-        high: parseInt(process.env.NOTIFICATION_HIGH_TIMEOUT_SECONDS) || 120,
-        normal: parseInt(process.env.NOTIFICATION_NORMAL_TIMEOUT_SECONDS) || 300,
-        low: parseInt(process.env.NOTIFICATION_LOW_TIMEOUT_SECONDS) || 600
-      },
-      sms: {
-        enabled: process.env.SMS_FALLBACK_ENABLED === 'true',
-        provider: process.env.SMS_PROVIDER || 'twilio',
-        accountSid: process.env.SMS_ACCOUNT_SID,
-        authToken: process.env.SMS_AUTH_TOKEN,
-        fromNumber: process.env.SMS_FROM_NUMBER
-      },
-      // Error Handling Configuration
-      errorHandling: {
-        circuitBreaker: {
-          failureThreshold: parseInt(process.env.ERROR_CIRCUIT_BREAKER_FAILURE_THRESHOLD) || 5,
-          recoveryTimeout: parseInt(process.env.ERROR_CIRCUIT_BREAKER_RECOVERY_TIMEOUT) || 60000, // 1 minute
-          halfOpenMaxCalls: parseInt(process.env.ERROR_CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS) || 3
-        },
-        retry: {
-          maxAttempts: parseInt(process.env.ERROR_RETRY_MAX_ATTEMPTS) || 3,
-          baseDelay: parseInt(process.env.ERROR_RETRY_BASE_DELAY) || 1000,
-          maxDelay: parseInt(process.env.ERROR_RETRY_MAX_DELAY) || 30000,
-          backoffMultiplier: parseFloat(process.env.ERROR_RETRY_BACKOFF_MULTIPLIER) || 2,
-          jitterFactor: parseFloat(process.env.ERROR_RETRY_JITTER_FACTOR) || 0.1
-        },
-        alerting: {
-          adminAlertThreshold: parseInt(process.env.ERROR_ADMIN_ALERT_THRESHOLD) || 10,
-          criticalErrorThreshold: parseInt(process.env.ERROR_CRITICAL_ERROR_THRESHOLD) || 5,
-          alertCooldown: parseInt(process.env.ERROR_ALERT_COOLDOWN) || 300000 // 5 minutes
-        }
-      }
-    };
-  }
-
   // Logging Configuration
   get logging() {
     return {
@@ -194,10 +131,7 @@ class AppConfig {
     // Warnings for optional but recommended variables
     const recommended = [
       'SMTP_USER',
-      'SMTP_PASS',
-      'FIREBASE_PROJECT_ID',
-      'FIREBASE_PRIVATE_KEY',
-      'FIREBASE_CLIENT_EMAIL'
+      'SMTP_PASS'
     ];
 
     const missingRecommended = recommended.filter(key => !process.env[key]);
